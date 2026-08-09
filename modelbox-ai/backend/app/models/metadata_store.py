@@ -24,10 +24,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -45,12 +45,14 @@ class Base(DeclarativeBase):
 
 
 def _uuid_pk() -> Mapped[uuid.UUID]:
-    """Return a server-generated UUID primary-key column."""
-    return mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("gen_random_uuid()"),
-    )
+    """Return a UUID primary-key column.
+
+    Uses the dialect-portable :class:`~sqlalchemy.Uuid` type (native UUID on
+    PostgreSQL, CHAR on SQLite) with a Python-side default so PKs populate on
+    every backend. The Postgres migration additionally sets a
+    ``gen_random_uuid()`` server default for externally-issued INSERTs.
+    """
+    return mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
 
 
 class Workspace(Base):
@@ -86,7 +88,7 @@ class DataModel(Base):
 
     model_id: Mapped[uuid.UUID] = _uuid_pk()
     workspace_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -134,7 +136,7 @@ class ModelEntity(Base):
 
     entity_id: Mapped[uuid.UUID] = _uuid_pk()
     model_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("data_models.model_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -166,7 +168,7 @@ class EntityColumn(Base):
 
     column_id: Mapped[uuid.UUID] = _uuid_pk()
     entity_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("model_entities.entity_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -202,28 +204,28 @@ class EntityRelationship(Base):
 
     relationship_id: Mapped[uuid.UUID] = _uuid_pk()
     model_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("data_models.model_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     from_entity_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("model_entities.entity_id", ondelete="CASCADE"),
         nullable=False,
     )
     from_column_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("entity_columns.column_id"),
         nullable=True,
     )
     to_entity_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("model_entities.entity_id", ondelete="CASCADE"),
         nullable=False,
     )
     to_column_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("entity_columns.column_id"),
         nullable=True,
     )

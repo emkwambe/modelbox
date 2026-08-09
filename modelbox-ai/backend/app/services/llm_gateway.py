@@ -20,9 +20,7 @@ import os
 from pathlib import Path
 from typing import Any, TypeVar
 
-import instructor
 import yaml
-from litellm import acompletion
 from pydantic import BaseModel
 
 from app.core.config import Settings, get_settings
@@ -59,8 +57,20 @@ class LLMGateway:
         self._config: dict[str, Any] = self._load_config(
             self._settings.model_router_config_path
         )
-        # Instructor-patched async completion — enforces response_model schemas.
-        self._client = instructor.from_litellm(acompletion)
+        # Instructor client is built lazily on first use so importing this
+        # module (and the app) does not require litellm/instructor to be
+        # installed when the gateway is mocked out (e.g. under test).
+        self._client: Any = None
+
+    @property
+    def client(self) -> Any:
+        """Lazily construct the Instructor-patched async completion client."""
+        if self._client is None:
+            import instructor
+            from litellm import acompletion
+
+            self._client = instructor.from_litellm(acompletion)
+        return self._client
 
     # -- configuration ------------------------------------------------------
     @staticmethod
@@ -172,7 +182,7 @@ class LLMGateway:
             try:
                 call_kwargs = self._litellm_kwargs(provider_name)
                 logger.info("Routing task '%s' -> provider '%s'", task, provider_name)
-                result: TModel = await self._client.chat.completions.create(
+                result: TModel = await self.client.chat.completions.create(
                     response_model=response_model,
                     messages=messages,
                     temperature=temp,
