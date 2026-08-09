@@ -1,0 +1,58 @@
+# =============================================================================
+# ModelBox AI — Backend Engine & Modeling Service
+# Python 3.11+  |  FastAPI  |  Pydantic v2  |  Async-first
+# Pinned per Dependencies & Tech Stack Specification (Section 2.2)
+# =============================================================================
+
+# --- Web & API Framework ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+
+# --- Graph Processing & AST Parsing ---
+sqlglot>=23.0.0
+networkx>=3.2.1
+sqlfluff>=3.0.0
+
+# --- AI & LLM Orchestration ---
+litellm>=1.35.0
+instructor>=1.2.0
+openai>=1.14.0
+anthropic>=0.19.0
+google-genai>=0.1.0
+mistralai>=0.1.0
+
+# --- Task Queue & Async Workers ---
+celery>=5.3.6
+redis>=5.0.3
+rq>=1.16.0
+
+# --- Database Access & Drivers ---
+sqlalchemy[asyncio]>=2.0.28
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+duckdb>=0.10.0
+alembic>=1.13.0
+
+# --- Reverse Engineering Data Warehouse Connectors ---
+snowflake-connector-python>=3.7.1
+databricks-sql-connector>=3.1.0
+google-cloud-bigquery>=3.19.0
+pymysql>=1.1.0
+
+# --- Code & Schema Generation ---
+jinja2>=3.1.3
+pyyaml>=6.0.1
+
+# --- Security & Utils ---
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+httpx>=0.27.0
+
+# --- Development, Security & QA (Section 2.5) ---
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+black>=24.0.0
+ruff>=0.3.0
+mypy>=1.9.0

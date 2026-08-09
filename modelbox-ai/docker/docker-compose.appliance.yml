@@ -1,0 +1,120 @@
+# =============================================================================
+# ModelBox AI — "The Box" Appliance
+# Single-node, ready-to-run container environment.
+#   modelbox-ui        Next.js web UI
+#   modelbox-backend   FastAPI modeling engine
+#   litellm-proxy      Unified LLM routing gateway
+#   postgres-db        PostgreSQL 16 metadata store
+#   redis-cache        Redis 7 cache / task broker
+#   ollama-engine      Optional local inference (air-gapped / offline)
+#
+# Usage (from the modelbox-ai/ project root):
+#   docker compose -f docker/docker-compose.appliance.yml up --build
+# =============================================================================
+
+name: modelbox-ai
+
+services:
+  modelbox-ui:
+    build:
+      context: ../frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    image: modelbox/web-ui:v1.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      modelbox-backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  modelbox-backend:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.backend
+    image: modelbox/core-engine:v1.2.0
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:-secret}@postgres-db:5432/modelbox_metadata
+      - REDIS_URL=redis://redis-cache:6379/0
+      - LLM_GATEWAY_URL=http://litellm-proxy:4000
+      - MODEL_ROUTER_CONFIG_PATH=/app/config/model_router.yaml
+      - AIRGAPPED=${AIRGAPPED:-false}
+      - MASK_METADATA_IN_PROMPTS=${MASK_METADATA_IN_PROMPTS:-false}
+    volumes:
+      # Give the backend read access to the same router config as the gateway.
+      - ../config/model_router.yaml:/app/config/model_router.yaml:ro
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      litellm-proxy:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  litellm-proxy:
+    image: ghcr.io/berriai/litellm:main-v1.45.0
+    ports:
+      - "4000:4000"
+    volumes:
+      - ../config/model_router.yaml:/app/config.yaml:ro
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - INTERNAL_VLLM_KEY=${INTERNAL_VLLM_KEY:-}
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    restart: unless-stopped
+
+  postgres-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: modelbox
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_DB: modelbox_metadata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U modelbox -d modelbox_metadata"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis-cache:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Optional local inference engine for offline / air-gapped setups.
+  # Enable with:  docker compose --profile airgap up
+  ollama-engine:
+    image: ollama/ollama:latest
+    profiles: ["airgap"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_storage:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redis_data:
+  ollama_storage:

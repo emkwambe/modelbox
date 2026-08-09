@@ -1,0 +1,114 @@
+# =============================================================================
+# ModelBox AI — Task-Based LLM Model Router
+# Consumed by the LiteLLM gateway (berriai/litellm) and the backend
+# services.llm_gateway orchestrator. See Blueprint §3 and PRD/TRD FR-5.
+#
+# Providers cover the full FR-5.2 matrix: OpenAI, Anthropic, Google Gemini,
+# Mistral (EU sovereign), and local/air-gapped runtimes (Ollama, vLLM).
+# Task routes bind modeling tasks to a primary provider with ordered
+# failover (FR-5.3). Set AIRGAPPED=true to force local-only routing.
+# =============================================================================
+version: "1.0"
+
+settings:
+  default_fallback_enabled: true
+  # performance | balanced | cost_optimized | air_gapped
+  cost_optimization_mode: "balanced"
+  # When true (AIRGAPPED=true), the gateway rejects any route that resolves
+  # to a cloud provider and pins all tasks to local_ollama / airgapped_vllm.
+  airgapped_mode_env: "AIRGAPPED"
+  # Strip/obfuscate sensitive schema + column names before egress (FR-6, TRD 2.2).
+  mask_metadata_in_prompts_env: "MASK_METADATA_IN_PROMPTS"
+  # Enforce zero-retention vendor parameters where supported (NFR-3.3 / GDPR).
+  enforce_zero_retention: true
+  request_timeout_seconds: 60
+  num_retries: 3
+
+# -----------------------------------------------------------------------------
+# Provider definitions
+# -----------------------------------------------------------------------------
+providers:
+  anthropic_cloud:
+    type: "anthropic"
+    api_key_env: "ANTHROPIC_API_KEY"
+    default_model: "claude-3-5-sonnet-20241022"
+    egress: "cloud"
+
+  openai_cloud:
+    type: "openai"
+    api_key_env: "OPENAI_API_KEY"
+    default_model: "gpt-4o"
+    egress: "cloud"
+
+  gemini_cloud:
+    type: "gemini"
+    api_key_env: "GEMINI_API_KEY"
+    default_model: "gemini-1.5-pro"
+    egress: "cloud"
+
+  mistral_cloud:
+    type: "mistral"
+    api_key_env: "MISTRAL_API_KEY"
+    # EU-sovereign endpoint for GDPR-constrained workloads.
+    base_url: "https://api.mistral.ai/v1"
+    default_model: "mistral-large-latest"
+    egress: "cloud_eu"
+
+  local_ollama:
+    type: "ollama"
+    base_url: "http://ollama-engine:11434"
+    default_model: "qwen2.5-coder:32b"
+    egress: "local"
+
+  airgapped_vllm:
+    type: "openai_compatible"
+    base_url: "http://vllm-server.internal:8000/v1"
+    api_key_env: "INTERNAL_VLLM_KEY"
+    default_model: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
+    egress: "local"
+
+# -----------------------------------------------------------------------------
+# Task routing — bind modeling tasks to providers with ordered failover.
+# -----------------------------------------------------------------------------
+task_routing:
+  # Unstructured PRD/BRD parsing -> high-reasoning, large-context model.
+  unstructured_doc_parsing:
+    primary: "anthropic_cloud"
+    fallback: ["openai_cloud", "airgapped_vllm"]
+    temperature: 0.1
+
+  # Schema normalization, ERD synthesis & constraint checking -> reasoning-heavy.
+  schema_reasoning_and_erd:
+    primary: "airgapped_vllm"
+    fallback: ["anthropic_cloud", "openai_cloud"]
+    temperature: 0.0
+
+  # High-volume SQL DDL generation & dialect transpilation -> fast code model.
+  ddl_code_generation:
+    primary: "local_ollama"
+    fallback: ["openai_cloud", "mistral_cloud"]
+    temperature: 0.0
+
+  # Business description & data-dictionary enrichment -> cost-effective LLM.
+  data_dictionary_enrichment:
+    primary: "local_ollama"
+    fallback: ["gemini_cloud", "openai_cloud"]
+    temperature: 0.3
+
+# -----------------------------------------------------------------------------
+# Air-gapped override — applied when AIRGAPPED=true. Every task collapses to
+# local providers only; cloud fallbacks are dropped at resolution time.
+# -----------------------------------------------------------------------------
+airgapped_overrides:
+  unstructured_doc_parsing:
+    primary: "airgapped_vllm"
+    fallback: ["local_ollama"]
+  schema_reasoning_and_erd:
+    primary: "airgapped_vllm"
+    fallback: ["local_ollama"]
+  ddl_code_generation:
+    primary: "local_ollama"
+    fallback: ["airgapped_vllm"]
+  data_dictionary_enrichment:
+    primary: "local_ollama"
+    fallback: ["airgapped_vllm"]
