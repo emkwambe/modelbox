@@ -53,6 +53,7 @@ httpx>=0.27.0
 # --- Development, Security & QA (Section 2.5) ---
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
+aiosqlite>=0.19.0  # in-memory async DB for the test suite
 black>=24.0.0
 ruff>=0.3.0
 mypy>=1.9.0

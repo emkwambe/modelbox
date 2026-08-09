@@ -1,0 +1,63 @@
+name: ModelBox AI CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-test:
+    name: Backend Pytest & Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: modelbox-ai/backend/requirements.txt
+
+      - name: Install Backend Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r modelbox-ai/backend/requirements.txt
+
+      - name: Run Pytest Suite
+        run: |
+          cd modelbox-ai/backend
+          pytest -v
+
+  frontend-build:
+    name: Frontend Strict Type Check & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: modelbox-ai/frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd modelbox-ai/frontend
+          npm ci
+
+      - name: Run TypeScript Strict Check
+        run: |
+          cd modelbox-ai/frontend
+          npx tsc --noEmit
+
+      - name: Run Next.js Production Standalone Build
+        run: |
+          cd modelbox-ai/frontend
+          npm run build
