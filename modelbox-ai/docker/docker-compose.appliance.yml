@@ -21,7 +21,7 @@ services:
       dockerfile: ../docker/Dockerfile.frontend
     image: modelbox/web-ui:v1.2.0
     ports:
-      - "3000:3000"
+      - "${UI_PORT:-3000}:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
@@ -66,7 +66,8 @@ services:
     ports:
       - "4000:4000"
     volumes:
-      - ../config/model_router.yaml:/app/config.yaml:ro
+      # LiteLLM proxy reads its own model_list config (not model_router.yaml).
+      - ../config/litellm_config.yaml:/app/config.yaml:ro
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
