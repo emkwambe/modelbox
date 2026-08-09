@@ -29,6 +29,12 @@ class GraphEngine:
     """Builds and validates entity-relationship graphs with NetworkX."""
 
     @staticmethod
+    def _split_ref(ref: str) -> tuple[str, str]:
+        """Split an 'entity.column' reference into its parts."""
+        parts = ref.split(".", 1)
+        return (parts[0], parts[1] if len(parts) > 1 else "")
+
+    @staticmethod
     def build_graph(
         entities: list[EntitySchema],
         relationships: list[RelationshipSchema],
@@ -122,20 +128,41 @@ class GraphEngine:
 
         # 3. Relationships pointing at unknown entities.
         for rel in relationships:
-            for ref, side in ((rel.from_ref, "from"), (rel.to_ref, "to")):
-                name = ref.split(".", 1)[0]
-                if name not in entity_names:
-                    issues.append(
-                        ValidationIssue(
-                            severity="error",
-                            code="DANGLING_REF",
-                            message=(
-                                f"Relationship '{side}' references unknown "
-                                f"entity '{name}'."
-                            ),
-                            entities=[name],
-                        )
+            from_entity, from_col = self._split_ref(rel.from_ref)
+            to_entity, to_col = self._split_ref(rel.to_ref)
+
+            # A foreign key on an existing entity pointing at a missing target.
+            if to_entity not in entity_names:
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="DANGLING_REF",
+                        message=(
+                            f"Foreign key '{from_entity}.{from_col}' references "
+                            f"unknown entity '{to_entity}'."
+                        ),
+                        # Include the source entity so its node highlights.
+                        entities=[e for e in (from_entity, to_entity) if e],
+                        entity_name=from_entity or None,
+                        column_name=from_col or None,
                     )
+                )
+
+            # The relationship originates from an entity that does not exist.
+            if from_entity not in entity_names:
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="DANGLING_REF",
+                        message=(
+                            f"Relationship source references unknown entity "
+                            f"'{from_entity}'."
+                        ),
+                        entities=[from_entity] if from_entity else [],
+                        entity_name=from_entity or None,
+                        column_name=from_col or None,
+                    )
+                )
 
         is_valid = not any(issue.severity == "error" for issue in issues)
         return ValidationReport(is_valid=is_valid, issues=issues)

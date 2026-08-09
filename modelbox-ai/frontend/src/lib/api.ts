@@ -74,3 +74,26 @@ export async function validateModel(
   );
   return data;
 }
+
+/** Fetch a zipped artifact bundle and trigger a browser download. */
+export async function downloadExportZip(
+  modelId: string,
+  format: ExportFormat,
+  dialect = 'snowflake',
+): Promise<void> {
+  const response = await apiClient.get(`/model/${modelId}/export/zip`, {
+    params: { format, dialect },
+    responseType: 'blob',
+  });
+  const blob = new Blob([response.data as BlobPart], {
+    type: 'application/zip',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `modelbox_${format}_${modelId}.zip`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}

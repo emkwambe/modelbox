@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import uuid
+import zipfile
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.api.v1.dependencies import ExporterServiceDep, SynthesisEngineDep
 from app.schemas.data_model import (
@@ -107,4 +109,50 @@ async def export_model(
         format=export_format,
         dialect=dialect if export_format == ExportFormat.DDL else None,
         files=files,
+    )
+
+
+@router.get(
+    "/{model_id}/export/zip",
+    summary="Download a multi-file artifact bundle as a .zip",
+    response_class=Response,
+)
+async def export_model_zip(
+    model_id: uuid.UUID,
+    engine: SynthesisEngineDep,
+    exporter: ExporterServiceDep,
+    export_format: ExportFormat = Query(ExportFormat.DBT, alias="format"),
+    dialect: str = "snowflake",
+) -> Response:
+    """Pack a model's export artifacts into an in-memory zip archive (FR-4)."""
+    model = await engine.get_model(model_id)
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model {model_id} not found.",
+        )
+
+    synthesized = SynthesizedModel(
+        paradigm=model.paradigm,
+        entities=model.entities,
+        relationships=model.relationships,
+        suggested_metrics=model.suggested_metrics,
+    )
+    try:
+        files = exporter.export(synthesized, export_format.value, dialect)
+    except ExporterError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path, content in files.items():
+            archive.writestr(path, content)
+
+    filename = f"modelbox_{export_format.value}_{model_id}.zip"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

@@ -38,6 +38,17 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
   const hasError = issues.some((i) => i.severity === 'error');
   const hasWarning = issues.some((i) => i.severity === 'warning');
   const missingPk = issues.some((i) => i.code === 'MISSING_PK');
+  // Columns holding a dangling foreign-key reference (precise source metadata).
+  const danglingColumns = new Set(
+    issues
+      .filter(
+        (i) =>
+          i.code === 'DANGLING_REF' &&
+          i.entity_name === data.entity_name &&
+          i.column_name,
+      )
+      .map((i) => i.column_name as string),
+  );
   const statusColor = hasError
     ? ERROR_COLOR
     : hasWarning
@@ -123,32 +134,53 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
         </div>
       )}
       <ul style={{ listStyle: 'none', margin: 0, padding: '4px 0' }}>
-        {data.columns.map((col) => (
-          <li
-            key={col.name}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              gap: 12,
-              padding: '2px 10px',
-            }}
-          >
-            <span>
-              {col.is_primary_key && <strong title="Primary key">🔑 </strong>}
-              {col.is_foreign_key && <span title="Foreign key">🔗 </span>}
-              {col.name}
-              {col.is_pii && (
-                <span title={col.pii_type ?? 'PII'} style={{ color: '#dc2626' }}>
-                  {' '}
-                  ⚠
-                </span>
-              )}
-            </span>
-            <span style={{ color: '#94a3b8' }}>{col.data_type}</span>
-          </li>
-        ))}
+        {data.columns.map((col) => {
+          const isDangling = danglingColumns.has(col.name);
+          return (
+            <li
+              key={col.name}
+              title={
+                isDangling ? 'Foreign key references a missing entity.' : undefined
+              }
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '2px 10px',
+                background: isDangling ? '#fef2f2' : undefined,
+                color: isDangling ? ERROR_COLOR : undefined,
+                fontWeight: isDangling ? 600 : undefined,
+              }}
+            >
+              <span>
+                {col.is_primary_key && <strong title="Primary key">🔑 </strong>}
+                {col.is_foreign_key && <span title="Foreign key">🔗 </span>}
+                {col.name}
+                {isDangling && <span title="Dangling reference"> ⛔</span>}
+                {col.is_pii && (
+                  <span
+                    title={col.pii_type ?? 'PII'}
+                    style={{ color: '#dc2626' }}
+                  >
+                    {' '}
+                    ⚠
+                  </span>
+                )}
+              </span>
+              <span style={{ color: '#94a3b8' }}>{col.data_type}</span>
+            </li>
+          );
+        })}
       </ul>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        style={
+          danglingColumns.size > 0
+            ? { background: ERROR_COLOR, width: 10, height: 10 }
+            : undefined
+        }
+      />
     </div>
   );
 }

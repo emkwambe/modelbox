@@ -8,7 +8,7 @@
 import { useState } from 'react';
 
 import CodeEditor from '@/components/editor/CodeEditor';
-import { exportArtifact } from '@/lib/api';
+import { downloadExportZip, exportArtifact } from '@/lib/api';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { ExportFormat } from '@/types/schema';
 
@@ -37,6 +37,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState<Record<string, string>>({});
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleGenerate() {
@@ -56,8 +57,22 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
     }
   }
 
+  async function handleDownloadZip() {
+    if (!modelId) return;
+    setDownloading(true);
+    setError(null);
+    try {
+      await downloadExportZip(modelId, format, dialect);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed.');
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   const fileNames = Object.keys(files);
   const activeContent = activeFile ? (files[activeFile] ?? '') : '';
+  const zipEligible = format === 'dbt' || format === 'cube';
 
   const selectStyle: React.CSSProperties = {
     padding: '4px 8px',
@@ -128,6 +143,26 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
         >
           {loading ? 'Generating…' : 'Generate'}
         </button>
+        {zipEligible && (
+          <button
+            type="button"
+            onClick={handleDownloadZip}
+            disabled={downloading || !modelId}
+            title="Download the full project as a .zip"
+            style={{
+              padding: '4px 12px',
+              borderRadius: 6,
+              border: '1px solid #334155',
+              background: '#0f172a',
+              color: '#e2e8f0',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: downloading || !modelId ? 'default' : 'pointer',
+            }}
+          >
+            {downloading ? 'Zipping…' : 'Download .ZIP'}
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}

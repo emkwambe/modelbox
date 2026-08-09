@@ -125,6 +125,9 @@ def test_lint_diagnostics(engine: GraphEngine) -> None:
 
     dangling = next(i for i in report.issues if i.code == "DANGLING_REF")
     assert dangling.severity == "error"
+    # Source metadata pinpoints the offending FK column for canvas marking.
+    assert dangling.entity_name == "orders"
+    assert dangling.column_name == "customer_id"
 
     # A dangling reference is an error, so the overall model is invalid.
     assert report.is_valid is False

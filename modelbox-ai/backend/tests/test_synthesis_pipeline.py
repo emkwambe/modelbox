@@ -11,7 +11,9 @@ Runs against an in-memory SQLite database (portable ORM types) with a mocked
 
 from __future__ import annotations
 
+import io
 import uuid
+import zipfile
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -368,6 +370,31 @@ async def test_export_invalid_format_returns_422(api_client: AsyncClient) -> Non
         f"/api/v1/model/{model_id}/export", params={"format": "avro"}
     )
     assert response.status_code == 422
+
+
+async def test_export_zip_dbt_bundle(api_client: AsyncClient) -> None:
+    model_id = await _create_model(api_client)
+    response = await api_client.get(
+        f"/api/v1/model/{model_id}/export/zip", params={"format": "dbt"}
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert (
+        f'filename="modelbox_dbt_{model_id}.zip"'
+        in response.headers["content-disposition"]
+    )
+    # The body is a valid zip containing the dbt artifacts.
+    archive = zipfile.ZipFile(io.BytesIO(response.content))
+    names = archive.namelist()
+    assert "models/staging/schema.yml" in names
+    assert any(n.startswith("models/staging/stg_") for n in names)
+
+
+async def test_export_zip_missing_model_returns_404(api_client: AsyncClient) -> None:
+    response = await api_client.get(
+        f"/api/v1/model/{uuid.uuid4()}/export/zip", params={"format": "cube"}
+    )
+    assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------

@@ -141,6 +141,8 @@ export interface ValidationIssue {
   code: string;
   message: string;
   entities: string[];
+  entity_name?: string | null;
+  column_name?: string | null;
 }
 
 export interface ValidationReport {

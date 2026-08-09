@@ -213,6 +213,10 @@ class ValidationIssue(BaseModel):
     code: str = Field(..., description="Machine code, e.g. 'CYCLIC_FK'.")
     message: str
     entities: list[str] = Field(default_factory=list)
+    # Precise source location (populated for DANGLING_REF): the existing entity
+    # and column that hold the invalid reference, so the canvas can mark the row.
+    entity_name: str | None = None
+    column_name: str | None = None
 
 
 class ValidationReport(BaseModel):
