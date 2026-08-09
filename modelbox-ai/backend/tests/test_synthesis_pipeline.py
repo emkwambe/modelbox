@@ -23,13 +23,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.core.security import hash_password
 from app.models.metadata_store import (
     Base,
     DataModel,
     EntityColumn,
     EntityRelationship,
     ModelEntity,
+    User,
     Workspace,
+    WorkspaceMember,
 )
 from app.schemas.data_model import (
     ColumnSchema,
@@ -149,22 +152,60 @@ async def session() -> AsyncIterator[AsyncSession]:
     await engine.dispose()
 
 
-@pytest_asyncio.fixture
-async def api_client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+async def _seed_user(session: AsyncSession, email: str) -> User:
+    user = User(email=email, hashed_password=hash_password("pw"))
+    session.add(user)
+    await session.flush()
+    return user
+
+
+async def _seed_user_workspace(
+    session: AsyncSession, email: str
+) -> tuple[User, uuid.UUID]:
+    user = await _seed_user(session, email)
+    workspace = Workspace(name=f"{email} workspace")
+    session.add(workspace)
+    await session.flush()
+    session.add(
+        WorkspaceMember(
+            workspace_id=workspace.workspace_id,
+            user_id=user.user_id,
+            role="OWNER",
+        )
+    )
+    await session.flush()
+    return user, workspace.workspace_id
+
+
+def _apply_overrides(app, session: AsyncSession, user: User, gateway) -> None:
+    """Wire an app to the shared test session + an authenticated user."""
     from app.api.v1.dependencies import (
+        get_current_user,
         get_paradigm_translator,
         get_synthesis_engine,
     )
-    from app.main import create_app
+    from app.core.database import get_db_session
 
-    app = create_app()
-    gateway = StubGateway(kimball_model())
+    async def _session_override() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    app.dependency_overrides[get_db_session] = _session_override
+    app.dependency_overrides[get_current_user] = lambda: user
     app.dependency_overrides[get_synthesis_engine] = lambda: SynthesisEngine(
         session, gateway
     )
     app.dependency_overrides[get_paradigm_translator] = lambda: ParadigmTranslator(
         session, gateway
     )
+
+
+@pytest_asyncio.fixture
+async def api_client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    from app.main import create_app
+
+    user = await _seed_user(session, "owner@example.com")
+    app = create_app()
+    _apply_overrides(app, session, user, StubGateway(kimball_model()))
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -420,23 +461,23 @@ async def test_synthesize_response_includes_validation(
 async def test_validate_endpoint_flags_cycles_and_missing_pk(
     session: AsyncSession,
 ) -> None:
-    # Persist a broken model (mutual FK cycle + a PK-less entity).
-    from app.api.v1.dependencies import get_synthesis_engine
     from app.main import create_app
 
+    # Persist a broken model (mutual FK cycle + a PK-less entity) in a
+    # workspace the caller owns.
+    user, workspace_id = await _seed_user_workspace(session, "cyc@example.com")
     seed = await SynthesisEngine(session, StubGateway(cyclic_model())).synthesize(
         SynthesizeRequest(
             source_type="natural_language",  # type: ignore[arg-type]
             content="broken",
             target_paradigm="3NF",  # type: ignore[arg-type]
             dialect="postgres",
+            workspace_id=workspace_id,
         )
     )
 
     app = create_app()
-    app.dependency_overrides[get_synthesis_engine] = lambda: SynthesisEngine(
-        session, StubGateway(cyclic_model())
-    )
+    _apply_overrides(app, session, user, StubGateway(cyclic_model()))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
@@ -450,6 +491,64 @@ async def test_validate_endpoint_flags_cycles_and_missing_pk(
     codes = {issue["code"] for issue in report["issues"]}
     assert "CYCLIC_FK" in codes
     assert "MISSING_PK" in codes
+
+
+# ---------------------------------------------------------------------------
+# Authentication & workspace scoping (Slice 3A)
+# ---------------------------------------------------------------------------
+async def test_unauthenticated_request_returns_401(
+    session: AsyncSession,
+) -> None:
+    from app.core.database import get_db_session
+    from app.main import create_app
+
+    app = create_app()
+
+    async def _session_override() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    # Only the DB is wired; no user override -> real auth path runs.
+    app.dependency_overrides[get_db_session] = _session_override
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/model/synthesize",
+            json={
+                "source_type": "natural_language",
+                "content": "no token",
+                "target_paradigm": "KIMBALL",
+                "dialect": "snowflake",
+            },
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 401
+
+
+async def test_cross_workspace_access_forbidden(session: AsyncSession) -> None:
+    from app.main import create_app
+
+    # User A owns a workspace and a model within it.
+    user_a, workspace_a = await _seed_user_workspace(session, "a@example.com")
+    seed = await SynthesisEngine(session, StubGateway(kimball_model())).synthesize(
+        SynthesizeRequest(
+            source_type="natural_language",  # type: ignore[arg-type]
+            content="A's model",
+            target_paradigm="KIMBALL",  # type: ignore[arg-type]
+            dialect="snowflake",
+            workspace_id=workspace_a,
+        )
+    )
+
+    # User B has no membership in workspace A.
+    user_b = await _seed_user(session, "b@example.com")
+    app = create_app()
+    _apply_overrides(app, session, user_b, StubGateway(kimball_model()))
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(f"/api/v1/model/{seed.model_id}")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 403
 
 
 async def test_validate_missing_model_returns_404(api_client: AsyncClient) -> None:

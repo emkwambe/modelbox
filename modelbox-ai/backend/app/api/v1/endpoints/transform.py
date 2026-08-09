@@ -1,12 +1,10 @@
-"""Paradigm transformation endpoint."""
+"""Paradigm transformation endpoint (workspace-scoped, Slice 3A)."""
 
 from __future__ import annotations
 
-import uuid
-
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.v1.dependencies import ParadigmTranslatorDep
+from app.api.v1.dependencies import AuthorizedModelDep, ParadigmTranslatorDep
 from app.schemas.data_model import (
     TransformParadigmRequest,
     TransformParadigmResponse,
@@ -21,15 +19,14 @@ router = APIRouter(prefix="/model", tags=["transform"])
     summary="Transform a model into another modeling paradigm",
 )
 async def transform_paradigm(
-    model_id: uuid.UUID,
     payload: TransformParadigmRequest,
     translator: ParadigmTranslatorDep,
+    model: AuthorizedModelDep,
 ) -> TransformParadigmResponse:
     """Transform an existing model graph into a new paradigm (FR-3, TRD §2.4)."""
-    result = await translator.transform(model_id, payload)
-    if result is None:
+    result = await translator.transform(model.model_id, payload)
+    if result is None:  # pragma: no cover - AuthorizedModelDep already checked
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Model {model_id} not found.",
+            status_code=status.HTTP_404_NOT_FOUND, detail="Model not found."
         )
     return result

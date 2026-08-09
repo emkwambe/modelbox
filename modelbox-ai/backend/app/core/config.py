@@ -77,6 +77,19 @@ class Settings(BaseSettings):
     )
     cost_optimization_mode: CostOptimizationMode = "balanced"
 
+    # --- Authentication (Slice 3A) -------------------------------------------
+    jwt_secret: str = Field(
+        default="dev-secret-change-me",
+        description="HS256 signing/verification secret for local & test tokens.",
+    )
+    jwt_algorithm: str = Field(
+        default="HS256",
+        description="JWT algorithm: HS256 (local/test) or RS256 (OIDC).",
+    )
+    # PEM public key for RS256/OIDC verification (enterprise identity).
+    jwt_public_key: str | None = None
+    access_token_expire_minutes: int = 60
+
     # --- Networking -----------------------------------------------------------
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000"],

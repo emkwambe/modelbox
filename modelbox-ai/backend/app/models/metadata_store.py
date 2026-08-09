@@ -38,6 +38,7 @@ from sqlalchemy.orm import (
 # Valid enumerations enforced at the database layer (CHECK constraints).
 PARADIGMS = ("3NF", "KIMBALL", "DATA_VAULT", "OBT")
 CARDINALITIES = ("1:1", "1:N", "N:M")
+WORKSPACE_ROLES = ("OWNER", "ADMIN", "MEMBER")
 
 
 class Base(DeclarativeBase):
@@ -53,6 +54,34 @@ def _uuid_pk() -> Mapped[uuid.UUID]:
     ``gen_random_uuid()`` server default for externally-issued INSERTs.
     """
     return mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+
+
+class User(Base):
+    """An authenticated user (identity from local creds or an OIDC provider)."""
+
+    __tablename__ = "users"
+
+    user_id: Mapped[uuid.UUID] = _uuid_pk()
+    email: Mapped[str] = mapped_column(
+        String(255), nullable=False, unique=True, index=True
+    )
+    # Nullable: OIDC-provisioned users have no local password.
+    hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        default=True, server_default=text("true")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+    memberships: Mapped[list["WorkspaceMember"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class Workspace(Base):
@@ -73,6 +102,46 @@ class Workspace(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    members: Mapped[list["WorkspaceMember"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class WorkspaceMember(Base):
+    """Membership linking a user to a workspace with a role (multi-tenancy)."""
+
+    __tablename__ = "workspace_members"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "user_id", name="uq_workspace_member"
+        ),
+        CheckConstraint(
+            "role IN ('OWNER', 'ADMIN', 'MEMBER')",
+            name="ck_workspace_members_role",
+        ),
+    )
+
+    membership_id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'MEMBER'")
+    )
+
+    workspace: Mapped["Workspace"] = relationship(back_populates="members")
+    user: Mapped["User"] = relationship(back_populates="memberships")
 
 
 class DataModel(Base):
@@ -236,11 +305,14 @@ class EntityRelationship(Base):
 
 __all__ = [
     "Base",
+    "User",
     "Workspace",
+    "WorkspaceMember",
     "DataModel",
     "ModelEntity",
     "EntityColumn",
     "EntityRelationship",
     "PARADIGMS",
     "CARDINALITIES",
+    "WORKSPACE_ROLES",
 ]
