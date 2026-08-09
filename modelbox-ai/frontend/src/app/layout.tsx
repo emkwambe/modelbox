@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 
+import AuthBadge from '@/components/auth/AuthBadge';
+
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -14,7 +16,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AuthBadge />
+        {children}
+      </body>
     </html>
   );
 }

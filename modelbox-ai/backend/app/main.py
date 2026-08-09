@@ -22,12 +22,57 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+async def _seed_dev_user() -> None:
+    """Create the default dev account + workspace if it does not exist.
+
+    Best-effort: logged and swallowed on failure (e.g. auth tables not yet
+    migrated) so startup never blocks on seeding.
+    """
+    from sqlalchemy import select
+
+    from app.core.database import get_sessionmaker
+    from app.core.security import hash_password
+    from app.models.metadata_store import User, Workspace, WorkspaceMember
+
+    try:
+        async with get_sessionmaker()() as session:
+            existing = (
+                await session.execute(
+                    select(User).where(User.email == "dev@modelbox.ai")
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return
+            user = User(
+                email="dev@modelbox.ai",
+                hashed_password=hash_password("password123"),
+                full_name="Dev User",
+            )
+            session.add(user)
+            await session.flush()
+            workspace = Workspace(name="Dev Workspace")
+            session.add(workspace)
+            await session.flush()
+            session.add(
+                WorkspaceMember(
+                    workspace_id=workspace.workspace_id,
+                    user_id=user.user_id,
+                    role="OWNER",
+                )
+            )
+            await session.commit()
+            logger.info("Seeded default dev user dev@modelbox.ai")
+    except Exception as exc:  # noqa: BLE001 - seeding must never block startup
+        logger.warning("Dev-user seeding skipped: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifecycle: warm singletons on startup, clean up on shutdown."""
     logger.info("Starting %s (airgapped=%s)", settings.app_name, settings.is_airgapped)
     # Eagerly construct the LLM gateway so router-config errors surface at boot.
     get_llm_gateway()
+    await _seed_dev_user()
     try:
         yield
     finally:

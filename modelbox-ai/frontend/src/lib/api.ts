@@ -7,6 +7,7 @@
 
 import axios from 'axios';
 
+import { useAuthStore } from '@/store/authStore';
 import type {
   ExportFormat,
   ExportResponse,
@@ -25,6 +26,44 @@ export const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
   timeout: 120_000,
 });
+
+// Attach the bearer token to every request when authenticated.
+apiClient.interceptors.request.use((config) => {
+  const { token } = useAuthStore.getState();
+  if (token) {
+    config.headers.set('Authorization', `Bearer ${token}`);
+  }
+  return config;
+});
+
+// On 401, clear the session so the UI can prompt for sign-in again.
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      useAuthStore.getState().logout();
+    }
+    return Promise.reject(error);
+  },
+);
+
+// --- Auth ---
+export async function login(email: string, password: string): Promise<string> {
+  const form = new URLSearchParams();
+  form.set('username', email);
+  form.set('password', password);
+  const { data } = await apiClient.post<{ access_token: string }>(
+    '/auth/token',
+    form,
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+  );
+  return data.access_token;
+}
+
+export async function fetchMe(): Promise<{ email: string }> {
+  const { data } = await apiClient.get<{ email: string }>('/auth/me');
+  return data;
+}
 
 export async function synthesizeModel(
   request: SynthesizeRequest,

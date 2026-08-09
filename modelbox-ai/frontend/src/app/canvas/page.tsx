@@ -33,6 +33,8 @@ export default function CanvasPage() {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '10px 16px',
+          // Reserve space on the right for the fixed AuthBadge overlay.
+          paddingRight: 160,
           borderBottom: '1px solid #e2e8f0',
           background: '#ffffff',
         }}

@@ -48,6 +48,7 @@ pyyaml>=6.0.1
 # --- Security & Utils ---
 python-jose[cryptography]>=3.3.0
 bcrypt>=4.1.0
+python-multipart>=0.0.9  # OAuth2 password form parsing
 httpx>=0.27.0
 
 # --- Development, Security & QA (Section 2.5) ---

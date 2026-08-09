@@ -524,6 +524,80 @@ async def test_unauthenticated_request_returns_401(
     assert response.status_code == 401
 
 
+def _unauth_client(session: AsyncSession) -> tuple[AsyncClient, object]:
+    """Build a client with only the DB wired (real auth path)."""
+    from app.core.database import get_db_session
+    from app.main import create_app
+
+    app = create_app()
+
+    async def _session_override() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    app.dependency_overrides[get_db_session] = _session_override
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), app
+
+
+async def test_token_endpoint_issues_and_authorizes(
+    session: AsyncSession,
+) -> None:
+    await _seed_user(session, "login@example.com")
+    client, app = _unauth_client(session)
+    async with client:
+        # OAuth2 password grant (form-encoded).
+        token_resp = await client.post(
+            "/api/v1/auth/token",
+            data={"username": "login@example.com", "password": "pw"},
+        )
+        assert token_resp.status_code == 200
+        body = token_resp.json()
+        assert body["token_type"] == "bearer"
+        token = body["access_token"]
+
+        # The issued token authorizes /auth/me.
+        me = await client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert me.status_code == 200
+        assert me.json()["email"] == "login@example.com"
+    app.dependency_overrides.clear()
+
+
+async def test_token_endpoint_rejects_bad_password(
+    session: AsyncSession,
+) -> None:
+    await _seed_user(session, "wrongpw@example.com")
+    client, app = _unauth_client(session)
+    async with client:
+        resp = await client.post(
+            "/api/v1/auth/token",
+            data={"username": "wrongpw@example.com", "password": "nope"},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 401
+
+
+async def test_register_creates_user_and_workspace(
+    session: AsyncSession,
+) -> None:
+    client, app = _unauth_client(session)
+    async with client:
+        resp = await client.post(
+            "/api/v1/auth/register",
+            json={"email": "new@example.com", "password": "secret1"},
+        )
+        assert resp.status_code == 201
+        token = resp.json()["access_token"]
+        # The issued token authorizes model routes: a missing model returns 404
+        # (authorization passed) rather than 401/403.
+        probe = await client.get(
+            f"/api/v1/model/{uuid.uuid4()}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert probe.status_code == 404
+    app.dependency_overrides.clear()
+
+
 async def test_cross_workspace_access_forbidden(session: AsyncSession) -> None:
     from app.main import create_app
 
