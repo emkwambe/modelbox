@@ -14,6 +14,7 @@ import type {
   SynthesizeResponse,
   TransformParadigmRequest,
   TransformParadigmResponse,
+  ValidationReport,
 } from '@/types/schema';
 
 const baseURL =
@@ -61,6 +62,15 @@ export async function exportArtifact(
   const { data } = await apiClient.get<ExportResponse>(
     `/model/${modelId}/export`,
     { params: { format, dialect } },
+  );
+  return data;
+}
+
+export async function validateModel(
+  modelId: string,
+): Promise<ValidationReport> {
+  const { data } = await apiClient.post<ValidationReport>(
+    `/model/${modelId}/validate`,
   );
   return data;
 }

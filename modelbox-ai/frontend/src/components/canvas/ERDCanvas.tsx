@@ -8,7 +8,7 @@
  * control panel for layout + undo/redo.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   Background,
   Controls,
@@ -21,15 +21,18 @@ import '@xyflow/react/dist/style.css';
 
 import ControlPanel from '@/components/canvas/ControlPanel';
 import EntityNode from '@/components/canvas/EntityNode';
+import ValidationPanel from '@/components/canvas/ValidationPanel';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { EntityNode as EntityNodeType } from '@/types/schema';
 
 const nodeTypes: NodeTypes = { entity: EntityNode };
+const CYCLE_EDGE_STYLE = { stroke: '#dc2626', strokeWidth: 2 };
 
 /** Inner canvas — must live within a ReactFlowProvider. */
 function ERDCanvasInner() {
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
+  const validation = useCanvasStore((s) => s.validation);
   const onNodesChange = useCanvasStore((s) => s.onNodesChange);
   const onEdgesChange = useCanvasStore((s) => s.onEdgesChange);
   const onConnect = useCanvasStore((s) => s.onConnect);
@@ -40,10 +43,25 @@ function ERDCanvasInner() {
     [selectNode],
   );
 
+  // Highlight edges whose endpoints both sit inside a CYCLIC_FK cycle.
+  const styledEdges = useMemo(() => {
+    const cycleEntities = new Set(
+      (validation?.issues ?? [])
+        .filter((i) => i.code === 'CYCLIC_FK')
+        .flatMap((i) => i.entities),
+    );
+    if (cycleEntities.size === 0) return edges;
+    return edges.map((edge) =>
+      cycleEntities.has(edge.source) && cycleEntities.has(edge.target)
+        ? { ...edge, animated: true, style: CYCLE_EDGE_STYLE }
+        : edge,
+    );
+  }, [edges, validation]);
+
   return (
     <ReactFlow
       nodes={nodes}
-      edges={edges}
+      edges={styledEdges}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
@@ -57,6 +75,7 @@ function ERDCanvasInner() {
       <Controls />
       <MiniMap pannable zoomable />
       <ControlPanel />
+      <ValidationPanel />
     </ReactFlow>
   );
 }

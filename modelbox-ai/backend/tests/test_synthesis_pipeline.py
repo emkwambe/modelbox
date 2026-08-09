@@ -114,6 +114,21 @@ def threenf_model() -> SynthesizedModel:
     )
 
 
+def cyclic_model() -> SynthesizedModel:
+    """A model with a mutual FK cycle and one entity missing a PK."""
+    return SynthesizedModel(
+        paradigm="3NF",  # type: ignore[arg-type]
+        entities=[
+            _entity("a", [_col("id", pk=True), _col("b_id", fk=True)]),
+            _entity("b", [_col("b_id_only")]),  # no primary key
+        ],
+        relationships=[
+            _rel("a.b_id", "b.b_id_only"),
+            _rel("b.b_id_only", "a.id"),
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fixtures — in-memory SQLite session + ASGI client
 # ---------------------------------------------------------------------------
@@ -353,3 +368,63 @@ async def test_export_invalid_format_returns_422(api_client: AsyncClient) -> Non
         f"/api/v1/model/{model_id}/export", params={"format": "avro"}
     )
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+async def test_synthesize_response_includes_validation(
+    session: AsyncSession,
+) -> None:
+    engine = SynthesisEngine(session, StubGateway(kimball_model()))
+    resp = await engine.synthesize(
+        SynthesizeRequest(
+            source_type="natural_language",  # type: ignore[arg-type]
+            content="Track customers and orders.",
+            target_paradigm="KIMBALL",  # type: ignore[arg-type]
+            dialect="snowflake",
+        )
+    )
+    assert resp.validation is not None
+    # A clean Kimball model has no errors.
+    assert resp.validation.is_valid is True
+
+
+async def test_validate_endpoint_flags_cycles_and_missing_pk(
+    session: AsyncSession,
+) -> None:
+    # Persist a broken model (mutual FK cycle + a PK-less entity).
+    from app.api.v1.dependencies import get_synthesis_engine
+    from app.main import create_app
+
+    seed = await SynthesisEngine(session, StubGateway(cyclic_model())).synthesize(
+        SynthesizeRequest(
+            source_type="natural_language",  # type: ignore[arg-type]
+            content="broken",
+            target_paradigm="3NF",  # type: ignore[arg-type]
+            dialect="postgres",
+        )
+    )
+
+    app = create_app()
+    app.dependency_overrides[get_synthesis_engine] = lambda: SynthesisEngine(
+        session, StubGateway(cyclic_model())
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            f"/api/v1/model/{seed.model_id}/validate"
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    report = response.json()
+    assert report["is_valid"] is False
+    codes = {issue["code"] for issue in report["issues"]}
+    assert "CYCLIC_FK" in codes
+    assert "MISSING_PK" in codes
+
+
+async def test_validate_missing_model_returns_404(api_client: AsyncClient) -> None:
+    response = await api_client.post(f"/api/v1/model/{uuid.uuid4()}/validate")
+    assert response.status_code == 404

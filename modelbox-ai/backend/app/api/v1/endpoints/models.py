@@ -13,6 +13,7 @@ from app.schemas.data_model import (
     SynthesizedModel,
     SynthesizeRequest,
     SynthesizeResponse,
+    ValidationReport,
 )
 from app.services.exporter_service import ExporterError
 
@@ -48,6 +49,24 @@ async def get_model(
             detail=f"Model {model_id} not found.",
         )
     return model
+
+
+@router.post(
+    "/{model_id}/validate",
+    response_model=ValidationReport,
+    summary="Re-run topological/structural validation on a model",
+)
+async def validate_model(
+    model_id: uuid.UUID, engine: SynthesisEngineDep
+) -> ValidationReport:
+    """Re-check a persisted model's graph for lint issues (FR-2.3)."""
+    report = await engine.validate_model(model_id)
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model {model_id} not found.",
+        )
+    return report
 
 
 @router.get(

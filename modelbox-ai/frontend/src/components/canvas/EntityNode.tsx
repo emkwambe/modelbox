@@ -9,6 +9,7 @@
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
+import { useCanvasStore } from '@/store/canvasStore';
 import type { EntityNode as EntityNodeType, EntityType } from '@/types/schema';
 
 /** Accent colour per entity type for quick visual scanning. */
@@ -21,16 +22,41 @@ export const ENTITY_ACCENT: Record<EntityType, string> = {
   SATELLITE: '#0891b2',
 };
 
+const ERROR_COLOR = '#dc2626';
+const WARNING_COLOR = '#f59e0b';
+
 export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
   const accent = ENTITY_ACCENT[data.entity_type] ?? '#64748b';
+
+  // Pull this entity's lint issues from the validation report (FR-2.3).
+  const issues = useCanvasStore(
+    (s) =>
+      s.validation?.issues.filter((i) =>
+        i.entities.includes(data.entity_name),
+      ) ?? [],
+  );
+  const hasError = issues.some((i) => i.severity === 'error');
+  const hasWarning = issues.some((i) => i.severity === 'warning');
+  const missingPk = issues.some((i) => i.code === 'MISSING_PK');
+  const statusColor = hasError
+    ? ERROR_COLOR
+    : hasWarning
+      ? WARNING_COLOR
+      : null;
+  const borderColor = statusColor ?? (selected ? accent : '#e2e8f0');
+  const tooltip = issues.map((i) => `[${i.code}] ${i.message}`).join('\n');
 
   return (
     <div
       style={{
         minWidth: 220,
         borderRadius: 8,
-        border: `1px solid ${selected ? accent : '#e2e8f0'}`,
-        boxShadow: selected ? `0 0 0 2px ${accent}33` : '0 1px 3px #0000001a',
+        border: `${statusColor ? 2 : 1}px solid ${borderColor}`,
+        boxShadow: statusColor
+          ? `0 0 0 3px ${statusColor}33`
+          : selected
+            ? `0 0 0 2px ${accent}33`
+            : '0 1px 3px #0000001a',
         background: '#ffffff',
         fontSize: 12,
         overflow: 'hidden',
@@ -49,8 +75,41 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
         }}
       >
         <span>{data.entity_name}</span>
-        <span style={{ opacity: 0.85, fontWeight: 400 }}>{data.entity_type}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {issues.length > 0 && (
+            <span
+              title={tooltip}
+              style={{
+                background: statusColor ?? WARNING_COLOR,
+                color: '#fff',
+                borderRadius: 10,
+                padding: '0 6px',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              ⚠ {issues.length}
+            </span>
+          )}
+          <span style={{ opacity: 0.85, fontWeight: 400 }}>
+            {data.entity_type}
+          </span>
+        </span>
       </div>
+      {missingPk && (
+        <div
+          title="This entity has no primary key."
+          style={{
+            padding: '2px 10px',
+            background: '#fffbeb',
+            color: WARNING_COLOR,
+            fontWeight: 600,
+            borderBottom: `1px solid ${WARNING_COLOR}33`,
+          }}
+        >
+          ⚠ missing primary key
+        </div>
+      )}
       {data.grain && (
         <div
           style={{

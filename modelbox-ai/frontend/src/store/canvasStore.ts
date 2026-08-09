@@ -18,6 +18,8 @@ import {
 } from '@xyflow/react';
 import dagre from 'dagre';
 
+import { validateModel as apiValidateModel } from '@/lib/api';
+
 import type {
   CanvasSnapshot,
   Cardinality,
@@ -48,6 +50,7 @@ interface CanvasState {
   paradigm: Paradigm | null;
   dialect: string;
   validation: ValidationReport | null;
+  validating: boolean;
 
   // --- selection ---
   selectedNodeId: string | null;
@@ -69,6 +72,7 @@ interface CanvasState {
   loadModel: (model: SynthesizeResponse) => void;
   applyLayout: (direction?: LayoutDirection) => void;
   setValidation: (report: ValidationReport | null) => void;
+  validateModel: () => Promise<void>;
 
   // --- selection ---
   selectNode: (nodeId: string | null) => void;
@@ -160,6 +164,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     paradigm: null,
     dialect: 'snowflake',
     validation: null,
+    validating: false,
     selectedNodeId: null,
     selectedEdgeId: null,
     past: [],
@@ -226,7 +231,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         paradigm: model.paradigm,
         nodes: model.entities.map(entityToNode),
         edges: model.relationships.map(relationshipToEdge),
-        validation: null,
+        validation: model.validation ?? null,
         selectedNodeId: null,
         selectedEdgeId: null,
       });
@@ -238,6 +243,18 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     },
 
     setValidation: (report) => set({ validation: report }),
+
+    validateModel: async () => {
+      const { modelId } = get();
+      if (!modelId) return;
+      set({ validating: true });
+      try {
+        const report = await apiValidateModel(modelId);
+        set({ validation: report });
+      } finally {
+        set({ validating: false });
+      }
+    },
 
     selectNode: (nodeId) =>
       set({ selectedNodeId: nodeId, selectedEdgeId: null }),
@@ -284,6 +301,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         modelId: null,
         paradigm: null,
         validation: null,
+        validating: false,
         selectedNodeId: null,
         selectedEdgeId: null,
         past: [],

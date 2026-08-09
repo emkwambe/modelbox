@@ -34,6 +34,7 @@ from app.schemas.data_model import (
     SynthesizedModel,
     SynthesizeRequest,
     SynthesizeResponse,
+    ValidationReport,
 )
 from app.services.graph_engine import GraphEngine
 from app.services.llm_gateway import LLMGateway
@@ -97,6 +98,7 @@ class SynthesisEngine:
             entities=synthesized.entities,
             relationships=synthesized.relationships,
             suggested_metrics=synthesized.suggested_metrics,
+            validation=report,
         )
 
     async def get_model(self, model_id: uuid.UUID) -> SynthesizeResponse | None:
@@ -160,13 +162,28 @@ class SynthesisEngine:
                 )
             )
 
+        report = self._graph.validate(entity_schemas, rel_schemas)
         return SynthesizeResponse(
             model_id=model.model_id,
             paradigm=model.current_paradigm or Paradigm.THREE_NF,  # type: ignore[arg-type]
             entities=entity_schemas,
             relationships=rel_schemas,
             suggested_metrics=[],
+            validation=report,
         )
+
+    async def validate_model(
+        self, model_id: uuid.UUID
+    ) -> ValidationReport | None:
+        """Re-run graph validation on a persisted model (FR-2.3).
+
+        Returns ``None`` if the model does not exist. Used by the canvas to
+        re-check after manual edits.
+        """
+        response = await self.get_model(model_id)
+        if response is None:
+            return None
+        return response.validation
 
     # -- internals ----------------------------------------------------------
     @staticmethod

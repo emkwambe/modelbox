@@ -15,7 +15,15 @@ export default function CanvasPage() {
   const paradigm = useCanvasStore((s) => s.paradigm);
   const entityCount = useCanvasStore((s) => s.nodes.length);
   const modelId = useCanvasStore((s) => s.modelId);
+  const validation = useCanvasStore((s) => s.validation);
   const [showExport, setShowExport] = useState(false);
+
+  const issueCount = validation?.issues.length ?? 0;
+  const validStatus = validation
+    ? validation.is_valid
+      ? { label: '✓ Valid', color: '#16a34a' }
+      : { label: `⚠ ${issueCount} issue${issueCount === 1 ? '' : 's'}`, color: '#dc2626' }
+    : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -39,6 +47,20 @@ export default function CanvasPage() {
           <span style={{ color: '#64748b', fontSize: 13 }}>
             {paradigm ?? 'No model'} · {entityCount} entities
           </span>
+          {validStatus && (
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: validStatus.color,
+                border: `1px solid ${validStatus.color}33`,
+                borderRadius: 12,
+                padding: '2px 8px',
+              }}
+            >
+              {validStatus.label}
+            </span>
+          )}
         </div>
         <button
           type="button"

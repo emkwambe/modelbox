@@ -102,6 +102,7 @@ export interface SynthesizeResponse {
   entities: Entity[];
   relationships: Relationship[];
   suggested_metrics: SuggestedMetric[];
+  validation?: ValidationReport | null;
 }
 
 export interface TransformParadigmRequest {

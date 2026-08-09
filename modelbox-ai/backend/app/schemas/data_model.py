@@ -202,6 +202,29 @@ class SynthesizedModel(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Validation report (graph engine output — see services.graph_engine)
+# ---------------------------------------------------------------------------
+class ValidationIssue(BaseModel):
+    """A single topological/lint issue detected on the model graph."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    severity: str = Field(..., description="'error' | 'warning'.")
+    code: str = Field(..., description="Machine code, e.g. 'CYCLIC_FK'.")
+    message: str
+    entities: list[str] = Field(default_factory=list)
+
+
+class ValidationReport(BaseModel):
+    """Aggregated validation result for a model graph (FR-2.3)."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    is_valid: bool
+    issues: list[ValidationIssue] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # API request / response contracts
 # ---------------------------------------------------------------------------
 class SynthesizeRequest(BaseModel):
@@ -229,6 +252,8 @@ class SynthesizeResponse(BaseModel):
     entities: list[EntitySchema] = Field(default_factory=list)
     relationships: list[RelationshipSchema] = Field(default_factory=list)
     suggested_metrics: list[SuggestedMetric] = Field(default_factory=list)
+    # Topological/structural lint report for the graph (FR-2.3).
+    validation: ValidationReport | None = None
 
 
 class TransformOptions(BaseModel):
@@ -264,7 +289,7 @@ class TransformParadigmResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Validation report (graph engine output — see services.graph_engine)
+# Artifact export contract
 # ---------------------------------------------------------------------------
 class ExportResponse(BaseModel):
     """GET /api/v1/model/{model_id}/export response body (FR-4)."""
@@ -277,26 +302,6 @@ class ExportResponse(BaseModel):
     dialect: str | None = None
     # Map of artifact file path -> file contents.
     files: dict[str, str] = Field(default_factory=dict)
-
-
-class ValidationIssue(BaseModel):
-    """A single topological/lint issue detected on the model graph."""
-
-    model_config = ConfigDict(use_enum_values=True)
-
-    severity: str = Field(..., description="'error' | 'warning'.")
-    code: str = Field(..., description="Machine code, e.g. 'CYCLIC_FK'.")
-    message: str
-    entities: list[str] = Field(default_factory=list)
-
-
-class ValidationReport(BaseModel):
-    """Aggregated validation result for a model graph (FR-2.3)."""
-
-    model_config = ConfigDict(use_enum_values=True)
-
-    is_valid: bool
-    issues: list[ValidationIssue] = Field(default_factory=list)
 
 
 __all__ = [
