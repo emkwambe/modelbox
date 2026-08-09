@@ -296,3 +296,60 @@ async def test_transform_endpoint_returns_200(api_client: AsyncClient) -> None:
 async def test_get_missing_model_returns_404(api_client: AsyncClient) -> None:
     response = await api_client.get(f"/api/v1/model/{uuid.uuid4()}")
     assert response.status_code == 404
+
+
+async def _create_model(api_client: AsyncClient) -> str:
+    created = await api_client.post(
+        "/api/v1/model/synthesize",
+        json={
+            "source_type": "natural_language",
+            "content": "Track customers and their orders.",
+            "target_paradigm": "KIMBALL",
+            "dialect": "snowflake",
+        },
+    )
+    return created.json()["model_id"]
+
+
+async def test_export_ddl_endpoint(api_client: AsyncClient) -> None:
+    model_id = await _create_model(api_client)
+    response = await api_client.get(
+        f"/api/v1/model/{model_id}/export",
+        params={"format": "ddl", "dialect": "postgres"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["format"] == "ddl"
+    assert body["dialect"] == "postgres"
+    (path, content), = body["files"].items()
+    assert path.endswith(".sql")
+    assert "CREATE TABLE" in content
+
+
+async def test_export_dbt_endpoint(api_client: AsyncClient) -> None:
+    model_id = await _create_model(api_client)
+    response = await api_client.get(
+        f"/api/v1/model/{model_id}/export", params={"format": "dbt"}
+    )
+    assert response.status_code == 200
+    files = response.json()["files"]
+    assert "models/staging/schema.yml" in files
+    assert any(p.startswith("models/staging/stg_") for p in files)
+
+
+async def test_export_cube_endpoint(api_client: AsyncClient) -> None:
+    model_id = await _create_model(api_client)
+    response = await api_client.get(
+        f"/api/v1/model/{model_id}/export", params={"format": "cube"}
+    )
+    assert response.status_code == 200
+    files = response.json()["files"]
+    assert any(p.startswith("schema/") and p.endswith(".js") for p in files)
+
+
+async def test_export_invalid_format_returns_422(api_client: AsyncClient) -> None:
+    model_id = await _create_model(api_client)
+    response = await api_client.get(
+        f"/api/v1/model/{model_id}/export", params={"format": "avro"}
+    )
+    assert response.status_code == 422

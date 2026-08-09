@@ -61,6 +61,14 @@ class SourceType(str, enum.Enum):
     RAW_DDL = "raw_ddl"
 
 
+class ExportFormat(str, enum.Enum):
+    """Supported artifact export formats (FR-4)."""
+
+    DDL = "ddl"
+    DBT = "dbt"
+    CUBE = "cube"
+
+
 class PIIType(str, enum.Enum):
     """Privacy classification flags (FR-6.1)."""
 
@@ -258,6 +266,19 @@ class TransformParadigmResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Validation report (graph engine output — see services.graph_engine)
 # ---------------------------------------------------------------------------
+class ExportResponse(BaseModel):
+    """GET /api/v1/model/{model_id}/export response body (FR-4)."""
+
+    model_config = ConfigDict(use_enum_values=True, protected_namespaces=())
+
+    model_id: uuid.UUID
+    format: ExportFormat
+    # Only meaningful for SQL DDL exports; null for dbt/cube.
+    dialect: str | None = None
+    # Map of artifact file path -> file contents.
+    files: dict[str, str] = Field(default_factory=dict)
+
+
 class ValidationIssue(BaseModel):
     """A single topological/lint issue detected on the model graph."""
 
@@ -284,6 +305,8 @@ __all__ = [
     "Cardinality",
     "SourceType",
     "PIIType",
+    "ExportFormat",
+    "ExportResponse",
     "ColumnSchema",
     "EntitySchema",
     "RelationshipSchema",

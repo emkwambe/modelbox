@@ -40,6 +40,8 @@ export type PIIType =
   | 'NAME'
   | 'ADDRESS';
 
+export type ExportFormat = 'ddl' | 'dbt' | 'cube';
+
 // ---------------------------------------------------------------------------
 // Core domain shapes
 // ---------------------------------------------------------------------------
@@ -124,6 +126,13 @@ export interface TransformParadigmResponse {
 // ---------------------------------------------------------------------------
 // Validation report (graph engine output — FR-2.3)
 // ---------------------------------------------------------------------------
+export interface ExportResponse {
+  model_id: string;
+  format: ExportFormat;
+  dialect?: string | null;
+  files: Record<string, string>;
+}
+
 export type IssueSeverity = 'error' | 'warning';
 
 export interface ValidationIssue {

@@ -52,6 +52,25 @@ class ExporterService:
         )
 
     # ---------------------------------------------------------------------
+    # Dispatch
+    # ---------------------------------------------------------------------
+    def export(
+        self,
+        model: SynthesizedModel,
+        export_format: str,
+        dialect: str = "snowflake",
+    ) -> dict[str, str]:
+        """Dispatch to the requested exporter, returning a file-map artifact."""
+        fmt = export_format.lower()
+        if fmt == "ddl":
+            return {f"model_{dialect}.sql": self.generate_ddl(model, dialect)}
+        if fmt == "dbt":
+            return self.generate_dbt_project(model)
+        if fmt == "cube":
+            return self.generate_cube_schema(model)
+        raise ExporterError(f"Unsupported export format: {export_format}")
+
+    # ---------------------------------------------------------------------
     # 1. Multi-dialect SQL DDL
     # ---------------------------------------------------------------------
     def generate_ddl(self, model: SynthesizedModel, dialect: str) -> str:

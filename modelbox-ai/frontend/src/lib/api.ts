@@ -8,6 +8,8 @@
 import axios from 'axios';
 
 import type {
+  ExportFormat,
+  ExportResponse,
   SynthesizeRequest,
   SynthesizeResponse,
   TransformParadigmRequest,
@@ -47,6 +49,18 @@ export async function transformParadigm(
   const { data } = await apiClient.post<TransformParadigmResponse>(
     `/model/${modelId}/transform-paradigm`,
     request,
+  );
+  return data;
+}
+
+export async function exportArtifact(
+  modelId: string,
+  format: ExportFormat,
+  dialect = 'snowflake',
+): Promise<ExportResponse> {
+  const { data } = await apiClient.get<ExportResponse>(
+    `/model/${modelId}/export`,
+    { params: { format, dialect } },
   );
   return data;
 }

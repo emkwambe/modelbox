@@ -12,6 +12,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
+from app.services.exporter_service import ExporterService
 from app.services.llm_gateway import LLMGateway, get_llm_gateway
 from app.services.paradigm_translator import ParadigmTranslator
 from app.services.synthesis_engine import SynthesisEngine
@@ -34,7 +35,13 @@ def get_paradigm_translator(
     return ParadigmTranslator(session, gateway)
 
 
+def get_exporter_service() -> ExporterService:
+    """Provide a stateless :class:`ExporterService`."""
+    return ExporterService()
+
+
 SynthesisEngineDep = Annotated[SynthesisEngine, Depends(get_synthesis_engine)]
 ParadigmTranslatorDep = Annotated[
     ParadigmTranslator, Depends(get_paradigm_translator)
 ]
+ExporterServiceDep = Annotated[ExporterService, Depends(get_exporter_service)]
