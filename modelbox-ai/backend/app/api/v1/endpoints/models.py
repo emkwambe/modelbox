@@ -175,6 +175,18 @@ async def diff_models(
     )
 
 
+@router.post(
+    "/validate-graph",
+    response_model=ValidationReport,
+    summary="Validate an unsaved graph (Trainer labs / pre-save checks)",
+)
+async def validate_graph(
+    payload: GraphUpdateRequest, user: CurrentUserDep
+) -> ValidationReport:
+    """Run the linter on a submitted graph without persisting it."""
+    return GraphEngine().validate(payload.entities, payload.relationships)
+
+
 @router.get(
     "/{model_id}",
     response_model=SynthesizeResponse,

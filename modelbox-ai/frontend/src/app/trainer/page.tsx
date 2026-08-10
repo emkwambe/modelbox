@@ -11,11 +11,14 @@ import Link from 'next/link';
 
 import ERDCanvas from '@/components/canvas/ERDCanvas';
 import TemplateLibraryModal from '@/components/TemplateLibraryModal';
+import LabModal from '@/components/trainer/LabModal';
+import { labToGraph, type Lab } from '@/content/trainer';
 import {
   getAssignment,
   gradeSubmission,
   listAssignments,
   submitSocraticStep,
+  validateGraph,
 } from '@/lib/api';
 import type { Template } from '@/lib/templates';
 import { useAuthStore } from '@/store/authStore';
@@ -26,13 +29,51 @@ import type {
   SocraticMessage,
 } from '@/types/trainer';
 
+interface LabGrade {
+  cleared: string[];
+  remaining: string[];
+  solved: boolean;
+}
+
 export default function TrainerPage() {
   const token = useAuthStore((s) => s.token);
   const openModal = useAuthStore((s) => s.openModal);
   const loadGraph = useCanvasStore((s) => s.loadGraph);
   const getGraphPayload = useCanvasStore((s) => s.getGraphPayload);
+  const applyLayout = useCanvasStore((s) => s.applyLayout);
 
   const [mounted, setMounted] = useState(false);
+  const [showLabModal, setShowLabModal] = useState(false);
+  const [activeLab, setActiveLab] = useState<Lab | null>(null);
+  const [labGrade, setLabGrade] = useState<LabGrade | null>(null);
+  const [labBusy, setLabBusy] = useState(false);
+
+  function handleSelectLab(lab: Lab) {
+    const { entities, relationships } = labToGraph(lab);
+    loadGraph(entities, relationships, null);
+    applyLayout('TB');
+    setActiveLab(lab);
+    setLabGrade(null);
+    setShowLabModal(false);
+  }
+
+  async function handleSubmitLab() {
+    if (!activeLab) return;
+    setLabBusy(true);
+    setError(null);
+    try {
+      const report = await validateGraph(getGraphPayload());
+      const produced = new Set(report.issues.map((i) => i.code));
+      const expected = activeLab.expected_flaws.map((f) => f.code);
+      const remaining = expected.filter((c) => produced.has(c));
+      const cleared = expected.filter((c) => !produced.has(c));
+      setLabGrade({ cleared, remaining, solved: remaining.length === 0 });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Grading failed.');
+    } finally {
+      setLabBusy(false);
+    }
+  }
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [active, setActive] = useState<Assignment | null>(null);
   const [messages, setMessages] = useState<SocraticMessage[]>([]);
@@ -215,6 +256,41 @@ export default function TrainerPage() {
         </button>
         <button
           type="button"
+          onClick={() => setShowLabModal(true)}
+          style={{
+            padding: '6px 12px',
+            borderRadius: 6,
+            border: '1px solid #2563eb',
+            background: '#eff6ff',
+            color: '#2563eb',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          🧪 Select Lab
+        </button>
+        {activeLab && (
+          <button
+            type="button"
+            onClick={handleSubmitLab}
+            disabled={labBusy}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 6,
+              border: '1px solid #2563eb',
+              background: '#2563eb',
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: labBusy ? 'default' : 'pointer',
+            }}
+          >
+            {labBusy ? 'Grading…' : 'Submit Lab'}
+          </button>
+        )}
+        <button
+          type="button"
           onClick={handleGrade}
           disabled={!active || busy}
           style={{
@@ -241,6 +317,85 @@ export default function TrainerPage() {
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
           <ERDCanvas />
+          {activeLab && (
+            <div
+              style={{
+                position: 'absolute',
+                left: 12,
+                top: 12,
+                width: 340,
+                maxHeight: 'calc(100% - 24px)',
+                overflowY: 'auto',
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                boxShadow: '0 8px 24px rgba(15,23,42,0.12)',
+                padding: 12,
+                zIndex: 25,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <strong style={{ fontSize: 13 }}>🧪 {activeLab.title}</strong>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveLab(null);
+                    setLabGrade(null);
+                  }}
+                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' }}
+                  aria-label="Exit lab"
+                >
+                  ✕
+                </button>
+              </div>
+              <p style={{ fontSize: 12, color: '#475569', margin: '6px 0', lineHeight: 1.5 }}>
+                {activeLab.brief}
+              </p>
+
+              {!labGrade && (
+                <div style={{ fontSize: 12, color: '#64748b' }}>
+                  Fix the seeded flaws, then <strong>Submit Lab</strong> to grade.
+                </div>
+              )}
+
+              {labGrade && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      fontSize: 13,
+                      color: labGrade.solved ? '#16a34a' : '#b45309',
+                    }}
+                  >
+                    {labGrade.solved
+                      ? '✓ Solved — all flaws cleared!'
+                      : `${labGrade.cleared.length}/${activeLab.expected_flaws.length} flaws cleared`}
+                  </div>
+                  {activeLab.expected_flaws.map((f) => {
+                    const done = !labGrade.remaining.includes(f.code);
+                    return (
+                      <div
+                        key={f.code + f.target}
+                        style={{
+                          fontSize: 12,
+                          padding: '6px 8px',
+                          borderRadius: 6,
+                          background: done ? '#f0fdf4' : '#fffbeb',
+                          border: `1px solid ${done ? '#bbf7d0' : '#fde68a'}`,
+                          color: done ? '#166534' : '#92400e',
+                        }}
+                      >
+                        {done ? '✓' : '○'} <code>{f.code}</code> · {f.target}
+                        {!done && (
+                          <div style={{ marginTop: 2, color: '#78716c' }}>{f.hint}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           {grade && grade.violations.length > 0 && (
             <div
               style={{
@@ -421,6 +576,13 @@ export default function TrainerPage() {
         <TemplateLibraryModal
           onClose={() => setShowLibrary(false)}
           onLoadGraph={handleLoadTemplate}
+        />
+      )}
+
+      {showLabModal && (
+        <LabModal
+          onClose={() => setShowLabModal(false)}
+          onSelect={handleSelectLab}
         />
       )}
     </div>

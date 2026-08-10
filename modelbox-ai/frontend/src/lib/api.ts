@@ -251,6 +251,18 @@ export async function validateModel(
   return data;
 }
 
+/** Validate an unsaved graph (Trainer labs / pre-save checks). */
+export async function validateGraph(payload: {
+  entities: Entity[];
+  relationships: Relationship[];
+}): Promise<ValidationReport> {
+  const { data } = await apiClient.post<ValidationReport>(
+    '/model/validate-graph',
+    payload,
+  );
+  return data;
+}
+
 export async function saveGraph(
   modelId: string,
   payload: { entities: Entity[]; relationships: Relationship[] },
