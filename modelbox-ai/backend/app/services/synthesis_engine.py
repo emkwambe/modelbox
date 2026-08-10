@@ -45,7 +45,15 @@ _SYSTEM_PROMPT = (
     "You are an expert enterprise data architect. Given business requirements, "
     "produce a rigorous data model in the requested paradigm. Identify entities, "
     "columns with precise data types, primary/foreign keys, PII flags, and "
-    "relationships with cardinality. Return ONLY the structured schema."
+    "relationships with cardinality.\n"
+    "Cardinality rules (direction is from -> to, where 'from' holds the foreign "
+    "key):\n"
+    "- Kimball star schema: every Fact -> Dimension relationship MUST be "
+    "MANY_TO_ONE (N:1) — the foreign key lives on the Fact and references the "
+    "Dimension's surrogate primary key.\n"
+    "- 3NF / normalized: use 1:1 or 1:N; model many-to-many via an explicit "
+    "associative (bridge) table, not a direct N:M edge.\n"
+    "Return ONLY the structured schema."
 )
 
 
@@ -71,6 +79,12 @@ class SynthesisEngine:
             response_model=SynthesizedModel,
             system_prompt=_SYSTEM_PROMPT,
             llm_override=request.llm_override,
+        )
+
+        # Deterministically normalize Fact<->Dimension cardinality/direction so
+        # the LLM's occasional mislabeling doesn't reach the canvas or DDL.
+        synthesized.relationships = self._normalize_relationships(
+            synthesized.entities, synthesized.relationships
         )
 
         # Validate the graph; log issues but do not hard-fail synthesis so the
@@ -294,6 +308,53 @@ class SynthesisEngine:
     def _split_ref(ref: str) -> tuple[str, str]:
         parts = ref.split(".", 1)
         return (parts[0], parts[1] if len(parts) > 1 else "")
+
+    @staticmethod
+    def _normalize_relationships(
+        entities: list[EntitySchema],
+        relationships: list[RelationshipSchema],
+    ) -> list[RelationshipSchema]:
+        """Enforce Kimball Fact->Dimension relationships as N:1.
+
+        The foreign key belongs on the Fact and points at the Dimension's
+        surrogate key, so the edge direction is Fact (from) -> Dimension (to)
+        with cardinality N:1. A Dimension->Fact edge is flipped to keep the
+        FK path deterministic. Non Fact/Dimension pairs are left untouched.
+        """
+        type_by_name = {e.entity_name: str(e.entity_type) for e in entities}
+        normalized: list[RelationshipSchema] = []
+
+        for rel in relationships:
+            from_entity, _ = SynthesisEngine._split_ref(rel.from_ref)
+            to_entity, _ = SynthesisEngine._split_ref(rel.to_ref)
+            from_type = type_by_name.get(from_entity)
+            to_type = type_by_name.get(to_entity)
+
+            if from_type == "FACT" and to_type == "DIMENSION":
+                normalized.append(
+                    RelationshipSchema.model_validate(
+                        {
+                            "from": rel.from_ref,
+                            "to": rel.to_ref,
+                            "cardinality": "N:1",
+                        }
+                    )
+                )
+            elif from_type == "DIMENSION" and to_type == "FACT":
+                # Flip so the Fact (FK holder) is the source.
+                normalized.append(
+                    RelationshipSchema.model_validate(
+                        {
+                            "from": rel.to_ref,
+                            "to": rel.from_ref,
+                            "cardinality": "N:1",
+                        }
+                    )
+                )
+            else:
+                normalized.append(rel)
+
+        return normalized
 
     @staticmethod
     def _column_to_schema(col: EntityColumn) -> ColumnSchema:

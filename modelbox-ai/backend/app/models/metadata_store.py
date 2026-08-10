@@ -37,7 +37,7 @@ from sqlalchemy.orm import (
 
 # Valid enumerations enforced at the database layer (CHECK constraints).
 PARADIGMS = ("3NF", "KIMBALL", "DATA_VAULT", "OBT")
-CARDINALITIES = ("1:1", "1:N", "N:M")
+CARDINALITIES = ("1:1", "1:N", "N:1", "N:M")
 WORKSPACE_ROLES = ("OWNER", "ADMIN", "MEMBER")
 
 
@@ -266,7 +266,7 @@ class EntityRelationship(Base):
     __tablename__ = "entity_relationships"
     __table_args__ = (
         CheckConstraint(
-            "cardinality IN ('1:1', '1:N', 'N:M')",
+            "cardinality IN ('1:1', '1:N', 'N:1', 'N:M')",
             name="ck_entity_relationships_cardinality",
         ),
     )

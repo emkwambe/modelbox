@@ -45,10 +45,11 @@ class EntityType(str, enum.Enum):
 
 
 class Cardinality(str, enum.Enum):
-    """Relationship cardinalities."""
+    """Relationship cardinalities (direction is from_ref -> to_ref)."""
 
     ONE_TO_ONE = "1:1"
     ONE_TO_MANY = "1:N"
+    MANY_TO_ONE = "N:1"
     MANY_TO_MANY = "N:M"
 
 

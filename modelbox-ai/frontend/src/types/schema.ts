@@ -23,7 +23,7 @@ export type EntityType =
   | 'LINK'
   | 'SATELLITE';
 
-export type Cardinality = '1:1' | '1:N' | 'N:M';
+export type Cardinality = '1:1' | '1:N' | 'N:1' | 'N:M';
 
 export type SourceType =
   | 'natural_language'

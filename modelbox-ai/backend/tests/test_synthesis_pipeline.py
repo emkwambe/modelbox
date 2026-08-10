@@ -253,6 +253,51 @@ async def test_synthesize_persists_and_serializes(session: AsyncSession) -> None
 # ---------------------------------------------------------------------------
 # Service: paradigm transformation
 # ---------------------------------------------------------------------------
+def test_normalize_fact_dimension_cardinality() -> None:
+    entities = [
+        _entity("dim_customer", [_col("customer_hk", pk=True)], "DIMENSION"),
+        _entity(
+            "fact_orders",
+            [_col("order_id", pk=True), _col("customer_hk", fk=True)],
+            "FACT",
+        ),
+    ]
+    # Fact -> Dimension mislabeled as N:M, and the inverse Dimension -> Fact.
+    rels = [
+        _rel("fact_orders.customer_hk", "dim_customer.customer_hk", "N:M"),
+        _rel("dim_customer.customer_hk", "fact_orders.customer_hk", "1:N"),
+    ]
+    out = SynthesisEngine._normalize_relationships(entities, rels)
+
+    # Both normalize to N:1 with the Fact as the source (FK holder).
+    assert out[0].cardinality == "N:1"
+    assert out[0].from_ref.startswith("fact_orders")
+    assert out[0].to_ref.startswith("dim_customer")
+    assert out[1].cardinality == "N:1"
+    assert out[1].from_ref.startswith("fact_orders")
+    assert out[1].to_ref.startswith("dim_customer")
+
+
+async def test_synthesize_normalizes_cardinality(session: AsyncSession) -> None:
+    # kimball_model() declares fact_orders -> dim_customer as N:M.
+    engine = SynthesisEngine(session, StubGateway(kimball_model()))
+    resp = await engine.synthesize(
+        SynthesizeRequest(
+            source_type="natural_language",  # type: ignore[arg-type]
+            content="orders",
+            target_paradigm="KIMBALL",  # type: ignore[arg-type]
+            dialect="snowflake",
+        )
+    )
+    rel = next(
+        r
+        for r in resp.relationships
+        if r.from_ref.startswith("fact_orders")
+        and r.to_ref.startswith("dim_customer")
+    )
+    assert rel.cardinality == "N:1"
+
+
 async def test_paradigm_transform_replaces_and_versions(
     session: AsyncSession,
 ) -> None:
