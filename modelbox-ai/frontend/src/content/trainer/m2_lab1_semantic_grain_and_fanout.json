@@ -1,0 +1,95 @@
+{
+  "id": "m2_lab1_semantic_grain_and_fanout",
+  "module": 2,
+  "edition": "semantic",
+  "title": "Spot the Flaw: Semantic Edition",
+  "difficulty": "intermediate",
+  "brief": "This SaaS analytics model feeds MetricFlow and Cube. It is structurally valid, but three semantic-layer flaws will corrupt metrics downstream: a usage fact with no declared grain, a many-to-many join that will inflate aggregates, and an undocumented dimension. Fix all three, then re-validate.",
+  "graph": {
+    "entities": [
+      {
+        "entity_name": "fact_mrr",
+        "entity_type": "FACT",
+        "grain": "one row per subscription per month",
+        "description": "Monthly recurring revenue per subscription.",
+        "columns": [
+          { "name": "mrr_id", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the MRR row." },
+          { "name": "customer_sk", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": true, "is_pii": false, "is_metric": false, "description": "FK to the customer dimension." },
+          { "name": "plan_sk", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": true, "is_pii": false, "is_metric": false, "description": "FK to the plan dimension." },
+          { "name": "mrr", "data_type": "NUMERIC(12,2)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": true, "aggregation": "SUM", "description": "Monthly recurring revenue in USD." }
+        ]
+      },
+      {
+        "entity_name": "fact_usage",
+        "entity_type": "FACT",
+        "grain": null,
+        "description": "Product usage events.",
+        "columns": [
+          { "name": "usage_id", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the usage row." },
+          { "name": "customer_sk", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": true, "is_pii": false, "is_metric": false, "description": "FK to the customer dimension." },
+          { "name": "feature_sk", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": true, "is_pii": false, "is_metric": false, "description": "FK to the feature dimension." },
+          { "name": "events", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": true, "aggregation": "SUM", "description": "Number of feature events." }
+        ]
+      },
+      {
+        "entity_name": "dim_customer",
+        "entity_type": "DIMENSION",
+        "grain": null,
+        "description": "Customer dimension.",
+        "columns": [
+          { "name": "customer_sk", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the customer." },
+          { "name": "account_name", "data_type": "VARCHAR(200)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Account display name." },
+          { "name": "region", "data_type": "VARCHAR(64)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Account region." }
+        ]
+      },
+      {
+        "entity_name": "dim_plan",
+        "entity_type": "DIMENSION",
+        "grain": null,
+        "description": "Subscription plan dimension.",
+        "columns": [
+          { "name": "plan_sk", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the plan." },
+          { "name": "plan_name", "data_type": "VARCHAR(120)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Plan display name." },
+          { "name": "list_price", "data_type": "NUMERIC(10,2)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Plan list price." }
+        ]
+      },
+      {
+        "entity_name": "dim_feature",
+        "entity_type": "DIMENSION",
+        "grain": null,
+        "description": null,
+        "columns": [
+          { "name": "feature_sk", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": null },
+          { "name": "feature_name", "data_type": "VARCHAR(120)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": null }
+        ]
+      }
+    ],
+    "relationships": [
+      { "from": "fact_mrr.customer_sk", "to": "dim_customer.customer_sk", "cardinality": "N:1" },
+      { "from": "fact_mrr.plan_sk", "to": "dim_plan.plan_sk", "cardinality": "N:1" },
+      { "from": "fact_usage.customer_sk", "to": "dim_customer.customer_sk", "cardinality": "N:1" },
+      { "from": "fact_usage.feature_sk", "to": "dim_feature.feature_sk", "cardinality": "N:M" }
+    ]
+  },
+  "expected_flaws": [
+    {
+      "code": "MISSING_GRAIN",
+      "target": "fact_usage",
+      "hint": "A semantic model needs one grain. What does a single row of fact_usage mean?",
+      "fix": "Declare the grain, e.g. 'one row per feature usage event', on fact_usage."
+    },
+    {
+      "code": "FAN_OUT_RISK",
+      "target": "fact_usage -> dim_feature",
+      "hint": "A many-to-many join between a fact and a dimension duplicates fact rows and inflates SUM(events).",
+      "fix": "Resolve the M:N through a bridge table (or model usage at feature grain) so the join is N:1 through a conformed dimension."
+    },
+    {
+      "code": "MISSING_DESCRIPTION",
+      "target": "dim_feature",
+      "hint": "Consumers can't trust an undocumented dimension. Which entity has no description?",
+      "fix": "Describe dim_feature and its columns."
+    }
+  ],
+  "solution_notes": "The clean model declares a grain on fact_usage, replaces the fact_usage->dim_feature M:N with an N:1 join through a conformed feature dimension (or a bridge at the correct grain), and documents dim_feature. After the fixes, re-validation shows no MISSING_GRAIN, FAN_OUT_RISK, or MISSING_DESCRIPTION issues."
+}

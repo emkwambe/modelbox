@@ -13,6 +13,7 @@ import type {
 } from '@/types/schema';
 
 import m1lab1 from './m1_lab1_grain_and_fanout.json';
+import m2lab1 from './m2_lab1_semantic_grain_and_fanout.json';
 
 export interface LabFlaw {
   code: string;
@@ -58,7 +59,10 @@ export interface Lab {
   solution_notes: string;
 }
 
-export const LABS: Lab[] = [m1lab1 as unknown as Lab];
+export const LABS: Lab[] = [
+  m1lab1 as unknown as Lab,
+  m2lab1 as unknown as Lab,
+];
 
 /** Convert a lab's flawed graph into loadable canvas entities/relationships. */
 export function labToGraph(lab: Lab): {
