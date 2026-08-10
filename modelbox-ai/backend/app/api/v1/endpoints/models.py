@@ -162,7 +162,7 @@ async def diff_models(
     target_model = await engine.get_model(payload.target_model_id)
     assert source_model is not None and target_model is not None
 
-    statements, breaking = DiffEngine(payload.dialect).diff(
+    statements, breaking, semantic = DiffEngine(payload.dialect).diff(
         _to_synthesized(source_model), _to_synthesized(target_model)
     )
     return DiffResponse(
@@ -171,6 +171,7 @@ async def diff_models(
         dialect=payload.dialect,
         alter_statements=statements,
         breaking_changes=breaking,
+        semantic_breaks=semantic,
     )
 
 

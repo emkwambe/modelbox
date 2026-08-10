@@ -297,6 +297,8 @@ class DiffResponse(BaseModel):
     dialect: str
     alter_statements: list[str] = Field(default_factory=list)
     breaking_changes: list[str] = Field(default_factory=list)
+    # In-model semantic-layer impact (declared measures / metric formulas).
+    semantic_breaks: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

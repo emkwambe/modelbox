@@ -245,6 +245,7 @@ export interface DiffResponse {
   dialect: string;
   alter_statements: string[];
   breaking_changes: string[];
+  semantic_breaks: string[];
 }
 
 export interface SyntheticSeedRequest {

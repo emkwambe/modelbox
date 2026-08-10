@@ -144,6 +144,19 @@ export default function DiffPanel({ onClose }: { onClose: () => void }) {
               </span>
             )}
 
+            {result.semantic_breaks.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={labelStyle}>
+                  Σ Semantic impact ({result.semantic_breaks.length})
+                </span>
+                {result.semantic_breaks.map((s) => (
+                  <span key={s} style={semanticBadge}>
+                    {s}
+                  </span>
+                ))}
+              </div>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div
                 style={{
@@ -264,6 +277,15 @@ const breakingBadge: React.CSSProperties = {
   color: '#b91c1c',
   background: '#fef2f2',
   border: '1px solid #fecaca',
+  borderRadius: 6,
+  padding: '4px 8px',
+};
+
+const semanticBadge: React.CSSProperties = {
+  fontSize: 12,
+  color: '#6d28d9',
+  background: '#f5f3ff',
+  border: '1px solid #ddd6fe',
   borderRadius: 6,
   padding: '4px 8px',
 };

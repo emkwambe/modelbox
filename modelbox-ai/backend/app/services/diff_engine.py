@@ -7,6 +7,8 @@ deterministic — no DB or LLM dependency.
 
 from __future__ import annotations
 
+import re
+
 import sqlglot
 
 from app.schemas.data_model import EntitySchema, SynthesizedModel
@@ -30,8 +32,8 @@ class DiffEngine:
 
     def diff(
         self, source: SynthesizedModel, target: SynthesizedModel
-    ) -> tuple[list[str], list[str]]:
-        """Return ``(alter_statements, breaking_changes)``."""
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Return ``(alter_statements, breaking_changes, semantic_breaks)``."""
         src = {e.entity_name: e for e in source.entities}
         tgt = {e.entity_name: e for e in target.entities}
 
@@ -84,7 +86,74 @@ class DiffEngine:
                     )
 
         transpiled = [self._transpile(s) for s in statements]
-        return transpiled, breaking
+        semantic = self._semantic_breaks(source, target)
+        return transpiled, breaking, semantic
+
+    def _semantic_breaks(
+        self, source: SynthesizedModel, target: SynthesizedModel
+    ) -> list[str]:
+        """Flag physical changes that break an *in-model* semantic definition.
+
+        A dropped/type-changed column is a semantic break when it is a declared
+        measure (``is_metric``) or is referenced by a suggested-metric formula.
+        In-model only — no external dashboard/consumer tracking.
+        """
+        tgt = {e.entity_name: e for e in target.entities}
+        formulas = [(m.name, m.formula) for m in source.suggested_metrics]
+        breaks: list[str] = []
+
+        for entity in source.entities:
+            name = entity.entity_name
+            target_entity = tgt.get(name)
+
+            # Whole entity dropped.
+            if target_entity is None:
+                for col in entity.columns:
+                    if col.is_metric:
+                        breaks.append(
+                            f"Semantic break: dropped entity '{name}' removes "
+                            f"declared measure '{col.name}'."
+                        )
+                for metric_name, formula in formulas:
+                    if self._refs(formula, name):
+                        breaks.append(
+                            f"Semantic break: dropped entity '{name}' is "
+                            f"referenced by metric '{metric_name}'."
+                        )
+                continue
+
+            tgt_cols = {c.name: c for c in target_entity.columns}
+            for col in entity.columns:
+                dropped = col.name not in tgt_cols
+                type_changed = (
+                    not dropped
+                    and col.data_type.strip().upper()
+                    != tgt_cols[col.name].data_type.strip().upper()
+                )
+                if not (dropped or type_changed):
+                    continue
+                verb = "dropped" if dropped else "type-changed"
+                if col.is_metric:
+                    breaks.append(
+                        f"Semantic break: {verb} column '{name}.{col.name}' is a "
+                        f"declared measure (agg {col.aggregation or 'SUM'})."
+                    )
+                for metric_name, formula in formulas:
+                    if self._refs(formula, name, col.name):
+                        breaks.append(
+                            f"Semantic break: {verb} column '{name}.{col.name}' is "
+                            f"referenced by metric '{metric_name}'."
+                        )
+        return breaks
+
+    @staticmethod
+    def _refs(formula: str, entity: str, column: str | None = None) -> bool:
+        """Whether a metric formula references an entity (and optional column)."""
+        if column is None:
+            return re.search(rf"\b{re.escape(entity)}\b", formula) is not None
+        if f"{entity}.{column}" in formula:
+            return True
+        return re.search(rf"\b{re.escape(column)}\b", formula) is not None
 
     def _create_table(self, entity: EntitySchema) -> str:
         lines = [f"  {c.name} {c.data_type}" for c in entity.columns]

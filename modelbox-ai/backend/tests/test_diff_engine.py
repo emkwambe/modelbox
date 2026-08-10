@@ -21,6 +21,7 @@ from app.schemas.data_model import (
     ColumnSchema,
     EntitySchema,
     RelationshipSchema,
+    SuggestedMetric,
     SynthesizedModel,
     SynthesizeRequest,
 )
@@ -31,8 +32,21 @@ from app.services.synthesis_engine import SynthesisEngine
 # ---------------------------------------------------------------------------
 # Builders
 # ---------------------------------------------------------------------------
-def _col(name: str, dtype: str = "VARCHAR(64)", *, pk: bool = False) -> ColumnSchema:
-    return ColumnSchema(name=name, data_type=dtype, is_primary_key=pk)
+def _col(
+    name: str,
+    dtype: str = "VARCHAR(64)",
+    *,
+    pk: bool = False,
+    metric: bool = False,
+    agg: str | None = None,
+) -> ColumnSchema:
+    return ColumnSchema(
+        name=name,
+        data_type=dtype,
+        is_primary_key=pk,
+        is_metric=metric,
+        aggregation=agg,
+    )
 
 
 def _entity(name: str, cols: list[ColumnSchema], etype: str = "TABLE") -> EntitySchema:
@@ -48,11 +62,13 @@ def _rel(from_ref: str, to_ref: str, cardinality: str = "N:1") -> RelationshipSc
 def _model(
     entities: list[EntitySchema],
     rels: list[RelationshipSchema] | None = None,
+    metrics: list[SuggestedMetric] | None = None,
 ) -> SynthesizedModel:
     return SynthesizedModel(
         paradigm="3NF",  # type: ignore[arg-type]
         entities=entities,
         relationships=rels or [],
+        suggested_metrics=metrics or [],
     )
 
 
@@ -65,7 +81,7 @@ def _joined(statements: list[str]) -> str:
 # ---------------------------------------------------------------------------
 def test_no_changes_yields_empty_diff() -> None:
     model = _model([_entity("a", [_col("id", pk=True), _col("name")])])
-    statements, breaking = DiffEngine().diff(model, model)
+    statements, breaking, _ = DiffEngine().diff(model, model)
     assert statements == []
     assert breaking == []
 
@@ -73,7 +89,7 @@ def test_no_changes_yields_empty_diff() -> None:
 def test_added_column_emits_add_and_is_non_breaking() -> None:
     src = _model([_entity("a", [_col("id", pk=True), _col("name")])])
     tgt = _model([_entity("a", [_col("id", pk=True), _col("name"), _col("email")])])
-    statements, breaking = DiffEngine().diff(src, tgt)
+    statements, breaking, _ = DiffEngine().diff(src, tgt)
     joined = _joined(statements)
     assert "ADD COLUMN EMAIL" in joined
     assert breaking == []
@@ -82,7 +98,7 @@ def test_added_column_emits_add_and_is_non_breaking() -> None:
 def test_dropped_column_is_breaking() -> None:
     src = _model([_entity("a", [_col("id", pk=True), _col("email")])])
     tgt = _model([_entity("a", [_col("id", pk=True)])])
-    statements, breaking = DiffEngine().diff(src, tgt)
+    statements, breaking, _ = DiffEngine().diff(src, tgt)
     assert "DROP COLUMN EMAIL" in _joined(statements)
     assert "Dropped column: a.email" in breaking
 
@@ -92,7 +108,7 @@ def test_added_entity_creates_table_non_breaking() -> None:
     tgt = _model(
         [_entity("a", [_col("id", pk=True)]), _entity("b", [_col("id", pk=True)])]
     )
-    statements, breaking = DiffEngine().diff(src, tgt)
+    statements, breaking, _ = DiffEngine().diff(src, tgt)
     joined = _joined(statements)
     assert "CREATE TABLE B" in joined
     assert breaking == []
@@ -103,7 +119,7 @@ def test_dropped_entity_is_breaking_and_cascades() -> None:
         [_entity("a", [_col("id", pk=True)]), _entity("b", [_col("id", pk=True)])]
     )
     tgt = _model([_entity("a", [_col("id", pk=True)])])
-    statements, breaking = DiffEngine().diff(src, tgt)
+    statements, breaking, _ = DiffEngine().diff(src, tgt)
     joined = _joined(statements)
     assert "DROP TABLE B CASCADE" in joined
     assert "Dropped table: b" in breaking
@@ -112,7 +128,7 @@ def test_dropped_entity_is_breaking_and_cascades() -> None:
 def test_type_change_is_breaking() -> None:
     src = _model([_entity("a", [_col("id", "VARCHAR(64)", pk=True)])])
     tgt = _model([_entity("a", [_col("id", "INT", pk=True)])])
-    statements, breaking = DiffEngine().diff(src, tgt)
+    statements, breaking, _ = DiffEngine().diff(src, tgt)
     joined = _joined(statements)
     assert "TYPE INT" in joined
     assert any("Type change: a.id" in b for b in breaking)
@@ -121,7 +137,7 @@ def test_type_change_is_breaking() -> None:
 def test_statements_are_terminated() -> None:
     src = _model([_entity("a", [_col("id", pk=True), _col("name")])])
     tgt = _model([_entity("a", [_col("id", pk=True), _col("name"), _col("email")])])
-    statements, _ = DiffEngine().diff(src, tgt)
+    statements, _, _ = DiffEngine().diff(src, tgt)
     assert statements and all(s.strip().endswith(";") for s in statements)
 
 
@@ -129,8 +145,53 @@ def test_unknown_dialect_falls_back_to_postgres() -> None:
     src = _model([_entity("a", [_col("id", pk=True)])])
     tgt = _model([_entity("a", [_col("id", pk=True)]), _entity("b", [_col("id", pk=True)])])
     # A bogus dialect must not raise — DiffEngine defaults to postgres.
-    statements, _ = DiffEngine("klingon").diff(src, tgt)
+    statements, _, _ = DiffEngine("klingon").diff(src, tgt)
     assert "CREATE TABLE B" in _joined(statements)
+
+
+# ---------------------------------------------------------------------------
+# Semantic breaks (Sprint 3)
+# ---------------------------------------------------------------------------
+def test_semantic_break_on_dropped_measure() -> None:
+    src = _model(
+        [_entity("fact", [_col("id", pk=True), _col("amount", "NUMERIC", metric=True, agg="SUM")])]
+    )
+    tgt = _model([_entity("fact", [_col("id", pk=True)])])  # measure dropped
+    _, breaking, semantic = DiffEngine().diff(src, tgt)
+    assert any("Dropped column: fact.amount" in b for b in breaking)
+    assert any(
+        "declared measure" in s and "fact.amount" in s for s in semantic
+    )
+
+
+def test_semantic_break_on_measure_type_change() -> None:
+    src = _model(
+        [_entity("fact", [_col("id", pk=True), _col("amount", "NUMERIC(12,2)", metric=True)])]
+    )
+    tgt = _model(
+        [_entity("fact", [_col("id", pk=True), _col("amount", "INT", metric=True)])]
+    )
+    _, _, semantic = DiffEngine().diff(src, tgt)
+    assert any("type-changed" in s and "fact.amount" in s for s in semantic)
+
+
+def test_semantic_break_on_metric_formula_reference() -> None:
+    src = _model(
+        [_entity("fact_orders", [_col("id", pk=True), _col("total", "NUMERIC")])],
+        metrics=[SuggestedMetric(name="Revenue", formula="SUM(fact_orders.total)")],
+    )
+    tgt = _model([_entity("fact_orders", [_col("id", pk=True)])])  # 'total' dropped
+    _, _, semantic = DiffEngine().diff(src, tgt)
+    assert any("referenced by metric 'Revenue'" in s for s in semantic)
+
+
+def test_no_semantic_break_on_safe_change() -> None:
+    src = _model([_entity("fact", [_col("id", pk=True), _col("amount", "NUMERIC", metric=True)])])
+    tgt = _model(
+        [_entity("fact", [_col("id", pk=True), _col("amount", "NUMERIC", metric=True), _col("note")])]
+    )
+    _, _, semantic = DiffEngine().diff(src, tgt)
+    assert semantic == []  # adding a column doesn't break a measure
 
 
 # ---------------------------------------------------------------------------
