@@ -96,6 +96,10 @@ services:
       - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
     volumes:
       - ../config/model_router.yaml:/app/config/model_router.yaml:ro
+    # The worker runs Celery, not the HTTP server, so the backend image's
+    # /health healthcheck doesn't apply — disable it.
+    healthcheck:
+      disable: true
     depends_on:
       postgres-db:
         condition: service_healthy
