@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 import { enqueueSynthesis, getJob, getModel } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
@@ -86,7 +87,10 @@ export default function HomePage() {
     <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px' }}>
       <h1 style={{ fontSize: 28, fontWeight: 700 }}>ModelBox AI</h1>
       <p style={{ color: '#475569', marginTop: 4 }}>
-        Describe your business requirements and synthesize a data model.
+        Describe your business requirements and synthesize a data model.{' '}
+        <Link href="/trainer" style={{ color: '#2563eb', fontWeight: 600 }}>
+          Or open ModelBox Trainer →
+        </Link>
       </p>
 
       <textarea

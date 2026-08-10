@@ -70,6 +70,7 @@ interface CanvasState {
   updateEntity: (entityName: string, patch: Partial<EntityNodeData>) => void;
   removeEntity: (nodeId: string) => void;
   getGraphPayload: () => { entities: Entity[]; relationships: Relationship[] };
+  loadGraph: (entities: Entity[], relationships: Relationship[]) => void;
   loadModel: (model: SynthesizeResponse) => void;
   applyLayout: (direction?: LayoutDirection) => void;
   setValidation: (report: ValidationReport | null) => void;
@@ -242,6 +243,19 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         cardinality: edge.data?.cardinality ?? '1:N',
       }));
       return { entities, relationships };
+    },
+
+    loadGraph: (entities, relationships) => {
+      commit();
+      set({
+        modelId: null,
+        paradigm: null,
+        nodes: entities.map(entityToNode),
+        edges: relationships.map(relationshipToEdge),
+        validation: null,
+        selectedNodeId: null,
+        selectedEdgeId: null,
+      });
     },
 
     loadModel: (model) => {

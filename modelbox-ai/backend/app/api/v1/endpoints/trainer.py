@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
+from sqlalchemy import select
 
 from app.api.v1.dependencies import (
     CurrentUserDep,
@@ -13,7 +14,7 @@ from app.api.v1.dependencies import (
     require_membership,
     resolve_user_workspace,
 )
-from app.models.metadata_store import TrainerAssignment
+from app.models.metadata_store import TrainerAssignment, WorkspaceMember
 from app.schemas.data_model import (
     AssignmentCreateRequest,
     AssignmentInfo,
@@ -58,6 +59,28 @@ async def create_assignment(
         user, payload, workspace_id
     )
     return AssignmentInfo.model_validate(assignment)
+
+
+@router.get(
+    "/assignments",
+    response_model=list[AssignmentInfo],
+    summary="List assignments in the caller's workspaces",
+)
+async def list_assignments(
+    session: SessionDep, user: CurrentUserDep
+) -> list[AssignmentInfo]:
+    rows = (
+        await session.execute(
+            select(TrainerAssignment)
+            .join(
+                WorkspaceMember,
+                WorkspaceMember.workspace_id == TrainerAssignment.workspace_id,
+            )
+            .where(WorkspaceMember.user_id == user.user_id)
+            .order_by(TrainerAssignment.created_at.desc())
+        )
+    ).scalars().all()
+    return [AssignmentInfo.model_validate(a) for a in rows]
 
 
 @router.get(

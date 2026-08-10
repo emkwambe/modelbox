@@ -897,6 +897,20 @@ async def test_socratic_step_returns_question(session: AsyncSession) -> None:
     assert "surrogate key" in response.json()["next_question"]
 
 
+async def test_list_assignments(session: AsyncSession) -> None:
+    user, workspace = await _seed_user_workspace(session, "list-a@example.com")
+    await _seed_assignment(session, workspace)
+    await _seed_assignment(session, workspace)
+
+    client, app = _client_for(session, user)
+    async with client:
+        response = await client.get("/api/v1/trainer/assignments")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+
 async def test_trainer_workspace_isolation(session: AsyncSession) -> None:
     owner, workspace = await _seed_user_workspace(session, "t-owner@example.com")
     assignment_id = await _seed_assignment(session, workspace)

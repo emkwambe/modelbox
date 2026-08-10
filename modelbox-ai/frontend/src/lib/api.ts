@@ -9,6 +9,12 @@ import axios from 'axios';
 
 import { useAuthStore } from '@/store/authStore';
 import type {
+  Assignment,
+  GradeResult,
+  SocraticStep,
+  TrainerGraph,
+} from '@/types/trainer';
+import type {
   Entity,
   ExportFormat,
   ExportResponse,
@@ -83,6 +89,39 @@ export async function register(
     { email, password, full_name: fullName ?? null },
   );
   return data.access_token;
+}
+
+// --- ModelBox Trainer (Pillar 3) ---
+export async function listAssignments(): Promise<Assignment[]> {
+  const { data } = await apiClient.get<Assignment[]>('/trainer/assignments');
+  return data;
+}
+
+export async function getAssignment(id: string): Promise<Assignment> {
+  const { data } = await apiClient.get<Assignment>(
+    `/trainer/assignments/${id}`,
+  );
+  return data;
+}
+
+export async function submitSocraticStep(payload: {
+  assignment_id: string;
+  conversation_history: { role: string; content: string }[];
+  current_graph: TrainerGraph;
+}): Promise<SocraticStep> {
+  const { data } = await apiClient.post<SocraticStep>(
+    '/trainer/socratic/step',
+    payload,
+  );
+  return data;
+}
+
+export async function gradeSubmission(payload: {
+  assignment_id: string;
+  submitted_graph: TrainerGraph;
+}): Promise<GradeResult> {
+  const { data } = await apiClient.post<GradeResult>('/trainer/grade', payload);
+  return data;
 }
 
 // --- Workspaces & model management (RBAC) ---
