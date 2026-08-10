@@ -378,14 +378,17 @@ class ExporterService:
         record = {
             "type": "record",
             "name": self._to_pascal_case(entity.entity_name),
-            "namespace": namespace,
+            # Avro namespaces must be valid dotted identifiers (no spaces).
+            "namespace": self._safe_identifier(namespace),
             "fields": fields,
         }
         return json.dumps(record, indent=2)
 
     def _protobuf_schema(self, model: SynthesizedModel, package: str) -> str:
         """Protobuf proto3 message definitions for the whole model."""
-        lines = ['syntax = "proto3";', "", f"package {package};", ""]
+        # proto3 package names must be valid identifiers (no spaces/punctuation).
+        safe_package = self._safe_identifier(package)
+        lines = ['syntax = "proto3";', "", f"package {safe_package};", ""]
         for entity in model.entities:
             lines.append(f"message {self._to_pascal_case(entity.entity_name)} {{")
             for tag, col in enumerate(entity.columns, start=1):
@@ -592,6 +595,20 @@ class ExporterService:
         if match:
             return int(match.group(1)), int(match.group(2))
         return 38, 9
+
+    @staticmethod
+    def _safe_identifier(name: str, fallback: str = "modelbox") -> str:
+        """Coerce an arbitrary name into a valid proto/Avro identifier.
+
+        Titles like ``"Untitled Model"`` contain spaces that are illegal as
+        Protobuf package names or Avro namespaces; collapse to snake_case.
+        """
+        ident = re.sub(r"\W+", "_", name).strip("_").lower()
+        if not ident:
+            return fallback
+        if ident[0].isdigit():
+            return f"{fallback}_{ident}"
+        return ident
 
     # ---------------------------------------------------------------------
     # Helpers

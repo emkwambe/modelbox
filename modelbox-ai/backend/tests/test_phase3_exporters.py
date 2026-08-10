@@ -151,6 +151,19 @@ def test_protobuf_proto3() -> None:
     assert "double total = 3;" in proto  # NUMERIC -> double
 
 
+def test_identifiers_are_sanitized_for_spaced_titles() -> None:
+    # A human title with spaces must not leak into proto/Avro identifiers.
+    exporter = ExporterService()
+    proto = exporter.export_data_contract(_model(), "protobuf", "Untitled Model")
+    proto_text = proto["Untitled Model.proto"]
+    assert "package untitled_model;" in proto_text
+    assert "package Untitled Model;" not in proto_text
+
+    avro = exporter.export_data_contract(_model(), "avro", "Untitled Model")
+    schema = json.loads(avro["customers.avsc"])
+    assert schema["namespace"] == "untitled_model"
+
+
 def test_contract_unknown_format_raises() -> None:
     try:
         ExporterService().export_data_contract(_model(), "parquet", "sales")
