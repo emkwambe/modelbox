@@ -182,6 +182,22 @@ AuthorizedModelDep = Annotated[DataModel, Depends(get_authorized_model)]
 _ROLE_LEVEL: dict[str, int] = {"MEMBER": 1, "ADMIN": 2, "OWNER": 3}
 
 
+async def require_workspace_role(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    min_role: str,
+) -> WorkspaceMember:
+    """Assert the caller has at least ``min_role`` in ``workspace_id``."""
+    member = await require_membership(session, user_id, workspace_id)
+    if _ROLE_LEVEL.get(member.role, 0) < _ROLE_LEVEL.get(min_role, 0):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Action requires minimum role of {min_role}.",
+        )
+    return member
+
+
 def require_model_role(min_role: str):
     """Dependency factory: authorize a model route by minimum workspace role.
 

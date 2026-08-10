@@ -42,6 +42,7 @@ PARADIGMS = ("3NF", "KIMBALL", "DATA_VAULT", "OBT")
 CARDINALITIES = ("1:1", "1:N", "N:1", "N:M")
 WORKSPACE_ROLES = ("OWNER", "ADMIN", "MEMBER")
 JOB_STATUSES = ("PENDING", "PROCESSING", "COMPLETED", "FAILED")
+CONNECTION_ENGINES = ("POSTGRESQL", "SNOWFLAKE", "BIGQUERY", "DUCKDB")
 
 
 class Base(DeclarativeBase):
@@ -362,6 +363,40 @@ class SynthesisJob(Base):
     )
 
 
+class DatabaseConnection(Base):
+    """An external database connection for brownfield introspection (FR-2.1).
+
+    The connection URI is stored encrypted at rest (AES-256-GCM).
+    """
+
+    __tablename__ = "database_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "name", name="uq_database_connections_workspace_name"
+        ),
+        CheckConstraint(
+            "engine IN ('POSTGRESQL', 'SNOWFLAKE', 'BIGQUERY', 'DUCKDB')",
+            name="ck_database_connections_engine",
+        ),
+    )
+
+    connection_id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    engine: Mapped[str] = mapped_column(String(30), nullable=False)
+    connection_uri_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
 class TrainerAssignment(Base):
     """A data-modeling assignment (ModelBox Trainer — isolated tables)."""
 
@@ -425,10 +460,12 @@ __all__ = [
     "EntityColumn",
     "EntityRelationship",
     "SynthesisJob",
+    "DatabaseConnection",
     "TrainerAssignment",
     "TrainerSubmission",
     "PARADIGMS",
     "CARDINALITIES",
     "WORKSPACE_ROLES",
     "JOB_STATUSES",
+    "CONNECTION_ENGINES",
 ]

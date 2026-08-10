@@ -93,6 +93,11 @@ class Settings(BaseSettings):
     # PEM public key for RS256/OIDC verification (enterprise identity).
     jwt_public_key: str | None = None
     access_token_expire_minutes: int = 60
+    # Key material for AES-256-GCM encryption of stored secrets (connection URIs).
+    encryption_key: str = Field(
+        default="dev-encryption-key-change-me",
+        description="Secret used to derive the AES-256-GCM key for stored creds.",
+    )
 
     # --- Networking -----------------------------------------------------------
     # NoDecode: take the raw env string (don't JSON-decode it in the source) so

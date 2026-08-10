@@ -48,6 +48,7 @@ services:
       - 'CORS_ORIGINS=["http://localhost:3000","http://localhost:13000"]'
       - AIRGAPPED=${AIRGAPPED:-false}
       - MASK_METADATA_IN_PROMPTS=${MASK_METADATA_IN_PROMPTS:-false}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-dev-encryption-key-change-me}
       # Provider keys for the backend's direct LiteLLM calls (from .env).
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -88,6 +89,7 @@ services:
       - MODEL_ROUTER_CONFIG_PATH=/app/config/model_router.yaml
       - AIRGAPPED=${AIRGAPPED:-false}
       - MASK_METADATA_IN_PROMPTS=${MASK_METADATA_IN_PROMPTS:-false}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-dev-encryption-key-change-me}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}

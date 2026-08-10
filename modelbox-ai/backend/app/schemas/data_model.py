@@ -211,6 +211,37 @@ class GradeResponse(BaseModel):
     violations: list[str] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Brownfield introspection (Phase 2, FR-2.1)
+# ---------------------------------------------------------------------------
+class ConnectionCreateRequest(BaseModel):
+    """Register an external database connection."""
+
+    name: str = Field(..., min_length=1, max_length=100)
+    engine: str = Field(..., max_length=30)
+    connection_uri: str = Field(..., min_length=1)
+    workspace_id: uuid.UUID | None = None
+
+
+class ConnectionInfo(BaseModel):
+    """A stored connection (URI masked — never returned in the clear)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    connection_id: uuid.UUID
+    workspace_id: uuid.UUID
+    name: str
+    engine: str
+    uri_masked: str | None = None
+
+
+class IntrospectRequest(BaseModel):
+    """Pull a schema from a saved connection into a model."""
+
+    connection_id: uuid.UUID
+    schema_name: str = "public"
+
+
 class PIIType(str, enum.Enum):
     """Privacy classification flags (FR-6.1)."""
 
@@ -497,4 +528,7 @@ __all__ = [
     "TransformParadigmResponse",
     "ValidationIssue",
     "ValidationReport",
+    "ConnectionCreateRequest",
+    "ConnectionInfo",
+    "IntrospectRequest",
 ]

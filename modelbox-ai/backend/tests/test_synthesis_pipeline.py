@@ -935,6 +935,90 @@ async def test_trainer_workspace_isolation(session: AsyncSession) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Brownfield introspection (v2 FR-2.1)
+# ---------------------------------------------------------------------------
+def test_encrypt_decrypt_roundtrip() -> None:
+    from app.core.crypto import decrypt_secret, encrypt_secret
+
+    secret = "postgresql://user:s3cret@db:5432/app"
+    token = encrypt_secret(secret)
+    assert token != secret
+    assert "s3cret" not in token
+    assert decrypt_secret(token) == secret
+
+
+def test_introspection_build_graph() -> None:
+    from app.services.introspection import IntrospectionService
+
+    tables = ["customers", "orders"]
+    columns = [
+        {"table": "customers", "column": "id", "data_type": "integer", "ordinal": 1},
+        {"table": "customers", "column": "email",
+         "data_type": "character varying", "ordinal": 2},
+        {"table": "orders", "column": "id", "data_type": "integer", "ordinal": 1},
+        {"table": "orders", "column": "customer_id",
+         "data_type": "integer", "ordinal": 2},
+    ]
+    primary_keys = {("customers", "id"), ("orders", "id")}
+    foreign_keys = [
+        {"from_table": "orders", "from_column": "customer_id",
+         "to_table": "customers", "to_column": "id"},
+    ]
+
+    model = IntrospectionService.build_graph(
+        tables, columns, primary_keys, foreign_keys
+    )
+    by_name = {e.entity_name: e for e in model.entities}
+    assert set(by_name) == {"customers", "orders"}
+    # customers is referenced with no outgoing FK -> DIMENSION.
+    assert by_name["customers"].entity_type == "DIMENSION"
+    # Physical type mapped to a normalized type.
+    email = next(c for c in by_name["customers"].columns if c.name == "email")
+    assert email.data_type == "VARCHAR"
+    pk = next(c for c in by_name["customers"].columns if c.name == "id")
+    assert pk.is_primary_key
+    fk_col = next(c for c in by_name["orders"].columns if c.name == "customer_id")
+    assert fk_col.is_foreign_key
+    assert len(model.relationships) == 1
+    rel = model.relationships[0]
+    assert rel.from_ref == "orders.customer_id"
+    assert rel.to_ref == "customers.id"
+    assert rel.cardinality == "N:1"
+
+
+async def test_create_and_list_connection(api_client: AsyncClient) -> None:
+    response = await api_client.post(
+        "/api/v1/connectors",
+        json={
+            "name": "prod-warehouse",
+            "engine": "POSTGRESQL",
+            "connection_uri": "postgresql://u:s3cret@db:5432/app",
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["uri_masked"] == "postgresql://***"
+    # The plaintext URI/secret must never be returned.
+    assert "s3cret" not in str(body)
+    assert "connection_uri" not in body
+
+    listed = await api_client.get("/api/v1/connectors")
+    assert listed.status_code == 200
+    data = listed.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "prod-warehouse"
+    assert "s3cret" not in str(data)
+
+
+async def test_create_connection_unsupported_engine(api_client: AsyncClient) -> None:
+    response = await api_client.post(
+        "/api/v1/connectors",
+        json={"name": "x", "engine": "ORACLE", "connection_uri": "oracle://x"},
+    )
+    assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
 # Canvas edit persistence (v2 FR-1.2)
 # ---------------------------------------------------------------------------
 async def test_put_graph_replaces_and_validates(session: AsyncSession) -> None:
