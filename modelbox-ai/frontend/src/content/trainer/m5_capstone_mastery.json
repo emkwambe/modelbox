@@ -1,0 +1,96 @@
+{
+  "id": "m5_capstone_mastery",
+  "module": 5,
+  "edition": "capstone",
+  "title": "Capstone: Full-Stack Modeling Mastery",
+  "brief": "The final exam. This sales model is riddled with flaws spanning every discipline you have practiced — structural, semantic, governance, and quality. Seven issues in all, and every one is fixable with the in-app editors: rename, primary-key and PII toggles, grain, SLA, and quality-rule inputs. Clear them all and ship a model that is structurally sound, semantically governed, contract-backed, and test-enforced.",
+  "difficulty": "advanced",
+  "graph": {
+    "entities": [
+      {
+        "entity_name": "fact_sales",
+        "entity_type": "FACT",
+        "grain": null,
+        "description": "Sales transactions — the revenue-critical fact.",
+        "tier": "TIER_1_CRITICAL",
+        "freshness_sla": null,
+        "columns": [
+          { "name": "sale_id", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the sale." },
+          { "name": "customer_sk", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": true, "is_pii": false, "is_metric": false, "description": "FK to the customer dimension." },
+          { "name": "product_sk", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": true, "is_pii": false, "is_metric": false, "description": "FK to the product dimension." },
+          { "name": "quantity", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Units sold.", "min_value": 100, "max_value": 1 },
+          { "name": "amount", "data_type": "NUMERIC(12,2)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": true, "aggregation": "SUM", "description": "Line total in USD." }
+        ]
+      },
+      {
+        "entity_name": "dim_customer",
+        "entity_type": "DIMENSION",
+        "grain": null,
+        "description": "Customer dimension.",
+        "columns": [
+          { "name": "customer_sk", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the customer." },
+          { "name": "email", "data_type": "VARCHAR(320)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Customer contact email." }
+        ]
+      },
+      {
+        "entity_name": "product",
+        "entity_type": "DIMENSION",
+        "grain": null,
+        "description": "Product dimension.",
+        "columns": [
+          { "name": "product_sk", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the product." },
+          { "name": "sku", "data_type": "VARCHAR(16)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Stock-keeping unit code.", "regex_pattern": "([A-Z]{3}" }
+        ]
+      }
+    ],
+    "relationships": [
+      { "from": "fact_sales.customer_sk", "to": "dim_customer.customer_sk", "cardinality": "N:1" },
+      { "from": "fact_sales.product_sk", "to": "product.product_sk", "cardinality": "N:1" }
+    ]
+  },
+  "expected_flaws": [
+    {
+      "code": "MISSING_PK",
+      "target": "dim_customer",
+      "hint": "STRUCTURAL — every table needs a primary key. Which dimension declares none?",
+      "fix": "Select dim_customer.customer_sk and tick 'Primary key' in the column editor."
+    },
+    {
+      "code": "MISSING_GRAIN",
+      "target": "fact_sales",
+      "hint": "SEMANTIC — a fact needs one grain. What does a single row of fact_sales mean?",
+      "fix": "Open fact_sales' entity settings and declare a grain, e.g. 'one row per sale line'."
+    },
+    {
+      "code": "NAMING_CONVENTION",
+      "target": "product",
+      "hint": "GOVERNANCE — a DIMENSION should carry its type prefix. One dimension does not.",
+      "fix": "Open the 'product' entity settings and rename it 'dim_product' (the FK relationship follows)."
+    },
+    {
+      "code": "PII_EXPOSURE",
+      "target": "dim_customer.email",
+      "hint": "GOVERNANCE — personal data must be declared. One column looks like PII but isn't classified.",
+      "fix": "Select dim_customer.email and tick 'Contains PII' (EMAIL)."
+    },
+    {
+      "code": "MISSING_SLA",
+      "target": "fact_sales",
+      "hint": "GOVERNANCE — a Tier-1 asset must promise freshness. Which critical asset declares no SLA?",
+      "fix": "Open fact_sales' entity settings and set a freshness SLA, e.g. '< 1h'."
+    },
+    {
+      "code": "INVALID_RANGE",
+      "target": "fact_sales.quantity",
+      "hint": "QUALITY — a range no value can satisfy. Look at quantity's min vs max.",
+      "fix": "In the column editor's Quality rules, set a satisfiable range (e.g. min 1, max 1000)."
+    },
+    {
+      "code": "INVALID_REGEX",
+      "target": "product.sku",
+      "hint": "QUALITY — a pattern that will not compile crashes the generated test. One regex is missing a closing parenthesis.",
+      "fix": "Fix the sku regex so it compiles, e.g. '^[A-Z]{3}[0-9]+$'."
+    }
+  ],
+  "solution_notes": "The mastered model fixes all four disciplines at once: STRUCTURAL — mark dim_customer.customer_sk as a primary key; SEMANTIC — declare fact_sales' grain; GOVERNANCE — rename 'product' to 'dim_product' (the fact_sales.product_sk FK follows automatically), classify dim_customer.email as PII, and set fact_sales' freshness SLA; QUALITY — repair quantity's contradictory range and product/sku's uncompilable regex. Every fix uses an in-app editor — the primary-key / PII toggles, the Name / grain / SLA fields, and the Quality-rules inputs. After the fixes, re-validation is completely clean, and the exported dbt project + OpenDataContract carry the grain, tier, SLA, PII classification, and quality assertions."
+}

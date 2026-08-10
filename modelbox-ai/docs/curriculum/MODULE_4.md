@@ -121,10 +121,12 @@ raises no lint. Leave it alone.
 | CI/CD reasoning | 15% | Explains how `dbt test` gates a deploy on the contract |
 | Capstone integration | 15% | End-to-end model is valid, governed, and test-enforced |
 
-## Course wrap-up
+## What's next
 
-Across four modules you moved a model from **structure** (dimensional design &
-grain) → **meaning** (the semantic layer) → **promise** (data contracts &
-governance) → **guarantee** (tested quality with a CI/CD gate) — the full arc of
-modern analytics engineering, every step practiced in the same appliance that
-enforces it.
+**Module 5 — Capstone: Full-Stack Modeling Mastery:** one model broken in all
+four disciplines at once — structural, semantic, governance, and quality. Prove
+you can hold the whole stack in your head and drive it to a clean, contract-backed
+deliverable. Across the four modules you moved a model from **structure**
+(dimensional design & grain) → **meaning** (the semantic layer) → **promise**
+(data contracts & governance) → **guarantee** (tested quality with a CI/CD gate);
+the capstone is where you do all four together.

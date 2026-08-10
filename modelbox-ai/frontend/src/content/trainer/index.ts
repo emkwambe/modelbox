@@ -17,6 +17,7 @@ import m1lab1 from './m1_lab1_grain_and_fanout.json';
 import m2lab1 from './m2_lab1_semantic_grain_and_fanout.json';
 import m3lab1 from './m3_lab1_governance_and_contracts.json';
 import m4lab1 from './m4_lab1_quality_and_testing.json';
+import m5capstone from './m5_capstone_mastery.json';
 
 export interface LabFlaw {
   code: string;
@@ -72,6 +73,7 @@ export const LABS: Lab[] = [
   m2lab1 as unknown as Lab,
   m3lab1 as unknown as Lab,
   m4lab1 as unknown as Lab,
+  m5capstone as unknown as Lab,
 ];
 
 /** Convert a lab's flawed graph into loadable canvas entities/relationships. */

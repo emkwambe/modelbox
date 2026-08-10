@@ -96,6 +96,29 @@ export default function ColumnSemanticEditor() {
         />
       </label>
 
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginTop: 10,
+          fontSize: 13,
+          fontWeight: 600,
+          color: '#334155',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={Boolean(column.is_primary_key)}
+          onChange={(e) =>
+            updateColumn(selectedColumn!.entityName, selectedColumn!.columnName, {
+              is_primary_key: e.target.checked,
+            })
+          }
+        />
+        🔑 Primary key
+      </label>
+
       <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
         <button
           type="button"
