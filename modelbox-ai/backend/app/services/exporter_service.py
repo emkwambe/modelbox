@@ -14,6 +14,8 @@ and safe to run in air-gapped deployments.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import sqlglot
 import yaml
 
@@ -23,6 +25,9 @@ from app.schemas.data_model import (
     RelationshipSchema,
     SynthesizedModel,
 )
+
+if TYPE_CHECKING:
+    from app.services.seed_generator import SeedResult
 
 # Map friendly dialect names to SQLGlot dialect identifiers.
 _SQLGLOT_DIALECTS: dict[str, str] = {
@@ -206,7 +211,28 @@ class ExporterService:
         )
 
     # ---------------------------------------------------------------------
-    # 3. Cube.js semantic layer
+    # 3b. Synthetic seed data (FR-2.4)
+    # ---------------------------------------------------------------------
+    def generate_synthetic_seed(
+        self,
+        model: SynthesizedModel,
+        row_count: int = 50,
+        seed_format: str = "sql_insert",
+        dialect: str = "postgres",
+    ) -> "SeedResult":
+        """Generate FK-consistent mock rows as SQL INSERTs or a CSV bundle.
+
+        Delegates to :class:`SyntheticSeedGenerator`; returns the file-map plus
+        the topological generation order used (parents before children).
+        """
+        from app.services.seed_generator import SyntheticSeedGenerator
+
+        return SyntheticSeedGenerator(dialect=dialect).generate(
+            model, row_count, seed_format
+        )
+
+    # ---------------------------------------------------------------------
+    # 4. Cube.js semantic layer
     # ---------------------------------------------------------------------
     def generate_cube_schema(self, model: SynthesizedModel) -> dict[str, str]:
         """Return a map of Cube.js file paths -> file contents."""

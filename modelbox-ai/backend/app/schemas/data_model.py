@@ -267,6 +267,41 @@ class DiffResponse(BaseModel):
     breaking_changes: list[str] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Synthetic seed data (Phase 2, FR-2.4)
+# ---------------------------------------------------------------------------
+class SeedFormat(str, enum.Enum):
+    """Emission formats for synthetic seed data (FR-2.4)."""
+
+    SQL_INSERT = "sql_insert"
+    CSV = "csv"
+
+
+class SyntheticSeedRequest(BaseModel):
+    """POST /model/{id}/export/synthetic-data request body (FR-2.4)."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    row_count_per_entity: int = Field(default=50, ge=1, le=1000)
+    format: SeedFormat = SeedFormat.SQL_INSERT
+    dialect: str = Field(default="postgres", max_length=64)
+
+
+class SyntheticSeedResponse(BaseModel):
+    """Generated seed script / CSV bundle (FR-2.4)."""
+
+    model_config = ConfigDict(use_enum_values=True, protected_namespaces=())
+
+    model_id: uuid.UUID
+    format: SeedFormat
+    dialect: str
+    row_count_per_entity: int
+    # FK-safe order in which entities were populated (parents first).
+    generation_order: list[str] = Field(default_factory=list)
+    # Map of artifact file path -> file contents.
+    files: dict[str, str] = Field(default_factory=dict)
+
+
 class PIIType(str, enum.Enum):
     """Privacy classification flags (FR-6.1)."""
 
@@ -558,4 +593,7 @@ __all__ = [
     "IntrospectRequest",
     "DiffRequest",
     "DiffResponse",
+    "SeedFormat",
+    "SyntheticSeedRequest",
+    "SyntheticSeedResponse",
 ]

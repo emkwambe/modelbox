@@ -28,6 +28,8 @@ from app.schemas.data_model import (
     GraphUpdateRequest,
     ModelInfo,
     ModelUpdateRequest,
+    SyntheticSeedRequest,
+    SyntheticSeedResponse,
     SynthesizedModel,
     SynthesizeRequest,
     SynthesizeResponse,
@@ -239,6 +241,37 @@ async def export_model(
         format=export_format,
         dialect=dialect if export_format == ExportFormat.DDL else None,
         files=files,
+    )
+
+
+@router.post(
+    "/{model_id}/export/synthetic-data",
+    response_model=SyntheticSeedResponse,
+    summary="Generate referentially-intact synthetic seed data (FR-2.4)",
+)
+async def export_synthetic_data(
+    payload: SyntheticSeedRequest,
+    engine: SynthesisEngineDep,
+    exporter: ExporterServiceDep,
+    model: AuthorizedModelDep,
+) -> SyntheticSeedResponse:
+    """Emit FK-safe mock rows as SQL INSERTs or a CSV bundle (FR-2.4)."""
+    result = await engine.get_model(model.model_id)
+    assert result is not None  # guaranteed by AuthorizedModelDep
+
+    seed = exporter.generate_synthetic_seed(
+        _to_synthesized(result),
+        row_count=payload.row_count_per_entity,
+        seed_format=payload.format,
+        dialect=payload.dialect,
+    )
+    return SyntheticSeedResponse(
+        model_id=model.model_id,
+        format=payload.format,  # type: ignore[arg-type]
+        dialect=payload.dialect,
+        row_count_per_entity=payload.row_count_per_entity,
+        generation_order=seed.generation_order,
+        files=seed.files,
     )
 
 
