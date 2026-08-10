@@ -22,6 +22,7 @@ from app.models.metadata_store import DataModel
 from app.schemas.data_model import (
     ExportFormat,
     ExportResponse,
+    GraphUpdateRequest,
     ModelInfo,
     ModelUpdateRequest,
     SynthesizedModel,
@@ -30,6 +31,8 @@ from app.schemas.data_model import (
     ValidationReport,
 )
 from app.services.exporter_service import ExporterError
+from app.services.graph_engine import GraphEngine
+from app.services.graph_repository import GraphRepository
 
 router = APIRouter(prefix="/model", tags=["models"])
 
@@ -116,6 +119,28 @@ async def delete_model(
     await session.delete(model)
     await session.flush()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put(
+    "/{model_id}/graph",
+    response_model=ValidationReport,
+    summary="Persist canvas edits (replace the model graph)",
+)
+async def replace_model_graph(
+    payload: GraphUpdateRequest,
+    session: SessionDep,
+    model: Annotated[DataModel, Depends(require_model_role("MEMBER"))],
+) -> ValidationReport:
+    """Replace a model's graph with the canvas's current state (FR-1.2).
+
+    Requires MEMBER+. Re-validates and bumps the model version.
+    """
+    await GraphRepository(session).replace_graph(
+        model.model_id, payload.entities, payload.relationships
+    )
+    model.version_number += 1
+    await session.flush()
+    return GraphEngine().validate(payload.entities, payload.relationships)
 
 
 @router.post(

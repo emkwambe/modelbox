@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation';
 
 import ERDCanvas from '@/components/canvas/ERDCanvas';
 import ExportPanel from '@/components/editor/ExportPanel';
-import { deleteModel, updateModel } from '@/lib/api';
+import { deleteModel, saveGraph, updateModel } from '@/lib/api';
 import { useCanvasStore } from '@/store/canvasStore';
 
 export default function CanvasPage() {
@@ -20,8 +20,11 @@ export default function CanvasPage() {
   const modelId = useCanvasStore((s) => s.modelId);
   const validation = useCanvasStore((s) => s.validation);
   const reset = useCanvasStore((s) => s.reset);
+  const setValidation = useCanvasStore((s) => s.setValidation);
+  const getGraphPayload = useCanvasStore((s) => s.getGraphPayload);
   const [showExport, setShowExport] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   const issueCount = validation?.issues.length ?? 0;
   const validStatus = validation
@@ -32,6 +35,20 @@ export default function CanvasPage() {
           color: '#dc2626',
         }
     : null;
+
+  async function handleSave() {
+    if (!modelId) return;
+    setBusy(true);
+    setSaved(false);
+    try {
+      const report = await saveGraph(modelId, getGraphPayload());
+      setValidation(report);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleRename() {
     if (!modelId) return;
@@ -109,7 +126,20 @@ export default function CanvasPage() {
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {saved && (
+            <span style={{ color: '#16a34a', fontSize: 12, fontWeight: 600 }}>
+              ✓ Saved
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!modelId || busy}
+            style={actionBtn('#16a34a')}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
           <button
             type="button"
             onClick={handleRename}

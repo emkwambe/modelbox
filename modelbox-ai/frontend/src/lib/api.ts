@@ -9,11 +9,13 @@ import axios from 'axios';
 
 import { useAuthStore } from '@/store/authStore';
 import type {
+  Entity,
   ExportFormat,
   ExportResponse,
   JobCreatedResponse,
   JobStatus,
   ModelInfo,
+  Relationship,
   SynthesizeRequest,
   SynthesizeResponse,
   TransformParadigmRequest,
@@ -165,6 +167,17 @@ export async function validateModel(
 ): Promise<ValidationReport> {
   const { data } = await apiClient.post<ValidationReport>(
     `/model/${modelId}/validate`,
+  );
+  return data;
+}
+
+export async function saveGraph(
+  modelId: string,
+  payload: { entities: Entity[]; relationships: Relationship[] },
+): Promise<ValidationReport> {
+  const { data } = await apiClient.put<ValidationReport>(
+    `/model/${modelId}/graph`,
+    payload,
   );
   return data;
 }

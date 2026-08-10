@@ -69,6 +69,7 @@ interface CanvasState {
   addEntity: (entity: Entity) => void;
   updateEntity: (entityName: string, patch: Partial<EntityNodeData>) => void;
   removeEntity: (nodeId: string) => void;
+  getGraphPayload: () => { entities: Entity[]; relationships: Relationship[] };
   loadModel: (model: SynthesizeResponse) => void;
   applyLayout: (direction?: LayoutDirection) => void;
   setValidation: (report: ValidationReport | null) => void;
@@ -222,6 +223,25 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         selectedNodeId:
           get().selectedNodeId === nodeId ? null : get().selectedNodeId,
       });
+    },
+
+    getGraphPayload: () => {
+      const { nodes, edges } = get();
+      const entities: Entity[] = nodes.map((node) => ({
+        entity_name: node.data.entity_name,
+        entity_type: node.data.entity_type,
+        description: node.data.description ?? null,
+        grain: node.data.grain ?? null,
+        canvas_position_x: node.position.x,
+        canvas_position_y: node.position.y,
+        columns: node.data.columns,
+      }));
+      const relationships: Relationship[] = edges.map((edge) => ({
+        from: edge.data?.from_ref ?? edge.source,
+        to: edge.data?.to_ref ?? edge.target,
+        cardinality: edge.data?.cardinality ?? '1:N',
+      }));
+      return { entities, relationships };
     },
 
     loadModel: (model) => {

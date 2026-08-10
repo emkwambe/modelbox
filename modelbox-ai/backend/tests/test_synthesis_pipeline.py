@@ -749,6 +749,76 @@ async def test_poll_job_status(session: AsyncSession) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Canvas edit persistence (v2 FR-1.2)
+# ---------------------------------------------------------------------------
+async def test_put_graph_replaces_and_validates(session: AsyncSession) -> None:
+    from app.main import create_app
+    from app.models.metadata_store import DataModel as DM, ModelEntity
+    from sqlalchemy import select
+
+    user, workspace = await _seed_user_workspace(session, "graph@example.com")
+    model_id = await _seed_model(session, workspace)  # 2 entities from kimball
+
+    new_graph = {
+        "entities": [
+            {
+                "entity_name": "dim_product",
+                "entity_type": "DIMENSION",
+                "columns": [
+                    {"name": "product_key", "data_type": "VARCHAR(64)",
+                     "is_primary_key": True},
+                    {"name": "name", "data_type": "VARCHAR(255)"},
+                ],
+            },
+            {
+                "entity_name": "fact_sales",
+                "entity_type": "FACT",
+                "columns": [
+                    {"name": "sale_id", "data_type": "VARCHAR(32)",
+                     "is_primary_key": True},
+                    {"name": "product_key", "data_type": "VARCHAR(64)",
+                     "is_foreign_key": True},
+                ],
+            },
+        ],
+        "relationships": [
+            {"from": "fact_sales.product_key", "to": "dim_product.product_key",
+             "cardinality": "N:1"},
+        ],
+    }
+
+    app = create_app()
+    _apply_overrides(app, session, user, StubGateway(kimball_model()))
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.put(
+            f"/api/v1/model/{model_id}/graph", json=new_graph
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["is_valid"] is True
+
+    # Graph was replaced (dim_product/fact_sales, not the seeded kimball graph).
+    names = {
+        e.entity_name
+        for e in (
+            await session.execute(
+                select(ModelEntity).where(
+                    ModelEntity.model_id == uuid.UUID(model_id)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    }
+    assert names == {"dim_product", "fact_sales"}
+    model = await session.get(DM, uuid.UUID(model_id))
+    assert model is not None and model.version_number == 2
+
+
+# ---------------------------------------------------------------------------
 # RBAC & model management (Slice B2)
 # ---------------------------------------------------------------------------
 def _client_for(session: AsyncSession, user: User):

@@ -313,6 +313,18 @@ class ValidationReport(BaseModel):
 # ---------------------------------------------------------------------------
 # API request / response contracts
 # ---------------------------------------------------------------------------
+class GraphUpdateRequest(BaseModel):
+    """PUT /api/v1/model/{id}/graph — full replacement of a model's graph.
+
+    Carries the canvas's current entities + relationships (FR-1.2).
+    """
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    entities: list["EntitySchema"] = Field(default_factory=list)
+    relationships: list["RelationshipSchema"] = Field(default_factory=list)
+
+
 class SynthesizeRequest(BaseModel):
     """POST /api/v1/model/synthesize request body (Blueprint §6)."""
 
@@ -413,6 +425,7 @@ __all__ = [
     "SynthesizedModel",
     "SynthesizeRequest",
     "SynthesizeResponse",
+    "GraphUpdateRequest",
     "TransformOptions",
     "TransformParadigmRequest",
     "TransformParadigmResponse",
