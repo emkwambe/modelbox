@@ -22,7 +22,7 @@ import type { ConnectionEngine, ConnectionInfo } from '@/types/schema';
 
 const ENGINES: { value: ConnectionEngine; label: string; enabled: boolean }[] = [
   { value: 'POSTGRESQL', label: 'PostgreSQL', enabled: true },
-  { value: 'SNOWFLAKE', label: 'Snowflake (coming soon)', enabled: false },
+  { value: 'SNOWFLAKE', label: 'Snowflake', enabled: true },
   { value: 'BIGQUERY', label: 'BigQuery (coming soon)', enabled: false },
   { value: 'MYSQL', label: 'MySQL (coming soon)', enabled: false },
 ];

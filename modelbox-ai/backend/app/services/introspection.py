@@ -8,6 +8,7 @@ transformation. The metadata->graph mapping is a pure function
 
 from __future__ import annotations
 
+import urllib.parse
 from typing import Any
 
 from app.schemas.data_model import (
@@ -37,9 +38,51 @@ _PG_TYPE_MAP: dict[str, str] = {
     "json": "JSON",
 }
 
+# Snowflake INFORMATION_SCHEMA.COLUMNS.data_type -> normalized type.
+_SNOWFLAKE_TYPE_MAP: dict[str, str] = {
+    "number": "DECIMAL",
+    "decimal": "DECIMAL",
+    "numeric": "NUMERIC",
+    "int": "INT",
+    "integer": "INT",
+    "bigint": "BIGINT",
+    "smallint": "SMALLINT",
+    "tinyint": "SMALLINT",
+    "byteint": "SMALLINT",
+    "float": "DOUBLE",
+    "float4": "DOUBLE",
+    "float8": "DOUBLE",
+    "double": "DOUBLE",
+    "double precision": "DOUBLE",
+    "real": "REAL",
+    "varchar": "VARCHAR",
+    "char": "CHAR",
+    "character": "CHAR",
+    "string": "VARCHAR",
+    "text": "VARCHAR",
+    "binary": "BINARY",
+    "varbinary": "BINARY",
+    "boolean": "BOOLEAN",
+    "date": "DATE",
+    "time": "TIME",
+    "datetime": "TIMESTAMP",
+    "timestamp": "TIMESTAMP",
+    "timestamp_ntz": "TIMESTAMP",
+    "timestamp_ltz": "TIMESTAMPTZ",
+    "timestamp_tz": "TIMESTAMPTZ",
+    "variant": "VARIANT",
+    "object": "OBJECT",
+    "array": "ARRAY",
+    "geography": "GEOGRAPHY",
+}
 
-def _map_type(data_type: str) -> str:
-    return _PG_TYPE_MAP.get(data_type.lower(), data_type.upper())
+
+class IntrospectionDriverError(RuntimeError):
+    """Raised when the driver for a database engine is not installed."""
+
+
+def _map_type(data_type: str, type_map: dict[str, str] | None = None) -> str:
+    return (type_map or _PG_TYPE_MAP).get(data_type.lower(), data_type.upper())
 
 
 class IntrospectionService:
@@ -51,11 +94,13 @@ class IntrospectionService:
         columns: list[dict[str, Any]],
         primary_keys: set[tuple[str, str]],
         foreign_keys: list[dict[str, str]],
+        type_map: dict[str, str] | None = None,
     ) -> SynthesizedModel:
         """Pure mapping of DB metadata -> a 3NF ``SynthesizedModel``.
 
         Entity type is inferred from FK topology: >=2 outgoing FKs -> FACT;
-        referenced with <=1 outgoing -> DIMENSION; otherwise TABLE.
+        referenced with <=1 outgoing -> DIMENSION; otherwise TABLE. ``type_map``
+        selects the engine's data-type normalization (defaults to PostgreSQL).
         """
         cols_by_table: dict[str, list[dict[str, Any]]] = {}
         for col in columns:
@@ -78,7 +123,7 @@ class IntrospectionService:
             schema_cols = [
                 ColumnSchema(
                     name=col["column"],
-                    data_type=_map_type(col["data_type"]),
+                    data_type=_map_type(col["data_type"], type_map),
                     is_primary_key=(table, col["column"]) in primary_keys,
                     is_foreign_key=(table, col["column"]) in fk_cols,
                     ordinal_position=col.get("ordinal"),
@@ -196,4 +241,124 @@ class IntrospectionService:
 
         return IntrospectionService.build_graph(
             tables, columns, primary_keys, foreign_keys
+        )
+
+    # -----------------------------------------------------------------------
+    # Snowflake (Pick 3)
+    # -----------------------------------------------------------------------
+    @staticmethod
+    def _parse_snowflake_uri(uri: str) -> dict[str, str]:
+        """Parse a snowflake:// URI into snowflake.connector.connect kwargs.
+
+        Pure and testable — no driver required. Form:
+        ``snowflake://user:password@account/database[/schema]?warehouse=wh&role=r``
+        """
+        parts = urllib.parse.urlsplit(uri)
+        path = [p for p in parts.path.split("/") if p]
+        query = urllib.parse.parse_qs(parts.query)
+        params: dict[str, str] = {}
+        if parts.username:
+            params["user"] = urllib.parse.unquote(parts.username)
+        if parts.password:
+            params["password"] = urllib.parse.unquote(parts.password)
+        if parts.hostname:
+            params["account"] = parts.hostname
+        if path:
+            params["database"] = path[0]
+        if len(path) > 1:
+            params["schema"] = path[1]
+        for key in ("warehouse", "role"):
+            if key in query and query[key]:
+                params[key] = query[key][0]
+        return params
+
+    @staticmethod
+    async def introspect_snowflake(
+        connection_uri: str, schema_name: str = "PUBLIC"
+    ) -> SynthesizedModel:
+        """Introspect a Snowflake schema into a graph.
+
+        The driver is imported lazily so the base appliance stays lean. Tables
+        and columns come from INFORMATION_SCHEMA; keys come from SHOW PRIMARY
+        KEYS / SHOW IMPORTED KEYS (Snowflake lacks KEY_COLUMN_USAGE). Key
+        extraction is defensive — if it fails, a column-only model is still
+        returned.
+        """
+        import asyncio
+
+        try:
+            import snowflake.connector as sf  # type: ignore[import-not-found]
+        except ModuleNotFoundError as exc:
+            raise IntrospectionDriverError(
+                "snowflake-connector-python is not installed on the appliance."
+            ) from exc
+
+        params = IntrospectionService._parse_snowflake_uri(connection_uri)
+
+        def _lower_keys(row: dict[str, Any]) -> dict[str, Any]:
+            return {str(k).lower(): v for k, v in row.items()}
+
+        def _run() -> tuple[
+            list[str],
+            list[dict[str, Any]],
+            set[tuple[str, str]],
+            list[dict[str, str]],
+        ]:
+            conn = sf.connect(schema=schema_name, **params)
+            try:
+                cur = conn.cursor(sf.DictCursor)
+                tables = [
+                    _lower_keys(r)["table_name"]
+                    for r in cur.execute(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = %s AND table_type = 'BASE TABLE' "
+                        "ORDER BY table_name",
+                        (schema_name,),
+                    )
+                ]
+                columns = [
+                    {
+                        "table": lr["table_name"],
+                        "column": lr["column_name"],
+                        "data_type": lr["data_type"],
+                        "ordinal": lr["ordinal_position"],
+                    }
+                    for r in cur.execute(
+                        "SELECT table_name, column_name, data_type, "
+                        "ordinal_position FROM information_schema.columns "
+                        "WHERE table_schema = %s "
+                        "ORDER BY table_name, ordinal_position",
+                        (schema_name,),
+                    )
+                    for lr in (_lower_keys(r),)
+                ]
+
+                # Keys via SHOW commands (best-effort; Snowflake declares but
+                # does not enforce constraints).
+                primary_keys: set[tuple[str, str]] = set()
+                foreign_keys: list[dict[str, str]] = []
+                try:
+                    for r in cur.execute(f"SHOW PRIMARY KEYS IN SCHEMA {schema_name}"):
+                        lr = _lower_keys(r)
+                        primary_keys.add((lr["table_name"], lr["column_name"]))
+                    for r in cur.execute(f"SHOW IMPORTED KEYS IN SCHEMA {schema_name}"):
+                        lr = _lower_keys(r)
+                        foreign_keys.append(
+                            {
+                                "from_table": lr["fk_table_name"],
+                                "from_column": lr["fk_column_name"],
+                                "to_table": lr["pk_table_name"],
+                                "to_column": lr["pk_column_name"],
+                            }
+                        )
+                except Exception:  # noqa: BLE001 - keys are best-effort
+                    pass
+
+                return tables, columns, primary_keys, foreign_keys
+            finally:
+                conn.close()
+
+        tables, columns, primary_keys, foreign_keys = await asyncio.to_thread(_run)
+        return IntrospectionService.build_graph(
+            tables, columns, primary_keys, foreign_keys, type_map=_SNOWFLAKE_TYPE_MAP
         )

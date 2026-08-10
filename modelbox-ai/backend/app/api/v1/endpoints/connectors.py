@@ -29,7 +29,10 @@ from app.schemas.data_model import (
 )
 from app.services.graph_engine import GraphEngine
 from app.services.graph_repository import GraphRepository
-from app.services.introspection import IntrospectionService
+from app.services.introspection import (
+    IntrospectionDriverError,
+    IntrospectionService,
+)
 
 router = APIRouter(prefix="/connectors", tags=["connectors"])
 
@@ -117,17 +120,28 @@ async def introspect_connection(
         )
     await require_membership(session, user.user_id, connection.workspace_id)
 
-    if connection.engine != "POSTGRESQL":
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail=f"Introspection for {connection.engine} is not yet supported.",
-        )
-
     uri = decrypt_secret(connection.connection_uri_encrypted)
+    engine = connection.engine
     try:
-        graph = await IntrospectionService.introspect_postgresql(
-            uri, payload.schema_name
-        )
+        if engine == "POSTGRESQL":
+            graph = await IntrospectionService.introspect_postgresql(
+                uri, payload.schema_name
+            )
+        elif engine == "SNOWFLAKE":
+            graph = await IntrospectionService.introspect_snowflake(
+                uri, payload.schema_name
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail=f"Introspection for {engine} is not yet supported.",
+            )
+    except IntrospectionDriverError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)
+        ) from exc
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001 - surface connection/query failures
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -138,7 +152,7 @@ async def introspect_connection(
         workspace_id=connection.workspace_id,
         title=f"{connection.name}:{payload.schema_name}",
         current_paradigm="3NF",
-        target_dialect="postgresql",
+        target_dialect=engine.lower(),
     )
     session.add(model)
     await session.flush()
