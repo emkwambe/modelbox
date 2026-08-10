@@ -95,6 +95,20 @@ strips every cloud provider from each task's routing chain and pins execution to
 local runtimes (Ollama / vLLM). Routing is keyed off the explicit `egress:`
 classification in `config/model_router.yaml`, so the policy is deterministic.
 
+## Releases (container images)
+
+Tagging a commit with a semver tag publishes versioned images to GHCR via the
+`Release Images` workflow (`.github/workflows/release.yml`). Cut tags from a
+green `main` — CI gates every push.
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+Produces (per tag): `ghcr.io/emkwambe/modelbox-backend:{1.2.0,1.2,latest}` and
+`ghcr.io/emkwambe/modelbox-frontend:{1.2.0,1.2,latest}`.
+
 ## License
 
 Proprietary — ModelBox AI. All rights reserved.
