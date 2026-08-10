@@ -8,11 +8,12 @@ accessor so that configuration is read once and shared across the async app.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, PostgresDsn, RedisDsn, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 CostOptimizationMode = Literal[
     "performance", "balanced", "cost_optimized", "air_gapped"
@@ -91,17 +92,25 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
 
     # --- Networking -----------------------------------------------------------
-    cors_origins: list[str] = Field(
+    # NoDecode: take the raw env string (don't JSON-decode it in the source) so
+    # the validator below can accept BOTH a JSON array and a comma-separated
+    # string without the app crashing at boot on a non-JSON value.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"],
         description="Allowed CORS origins for the web UI.",
     )
 
     @field_validator("cors_origins", mode="before")
     @classmethod
-    def _split_cors_origins(cls, value: object) -> object:
-        """Accept a comma-separated string or a JSON/list for CORS origins."""
-        if isinstance(value, str) and not value.strip().startswith("["):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
+    def _parse_cors_origins(cls, value: object) -> object:
+        """Accept a JSON array, a comma-separated string, or a list."""
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                return json.loads(stripped)
+            return [origin.strip() for origin in stripped.split(",") if origin.strip()]
         return value
 
     @property

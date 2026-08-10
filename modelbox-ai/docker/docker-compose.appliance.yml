@@ -41,6 +41,9 @@ services:
       - REDIS_URL=redis://redis-cache:6379/0
       - LLM_GATEWAY_URL=http://litellm-proxy:4000
       - MODEL_ROUTER_CONFIG_PATH=/app/config/model_router.yaml
+      # Allow the web UI origin(s). JSON array form (pydantic-settings decodes
+      # list fields from env as JSON). UI may run on 3000 or remapped (13000).
+      - 'CORS_ORIGINS=["http://localhost:3000","http://localhost:13000"]'
       - AIRGAPPED=${AIRGAPPED:-false}
       - MASK_METADATA_IN_PROMPTS=${MASK_METADATA_IN_PROMPTS:-false}
       # Provider keys for the backend's direct LiteLLM calls (from .env).
