@@ -11,6 +11,8 @@ import { useAuthStore } from '@/store/authStore';
 import type {
   ExportFormat,
   ExportResponse,
+  JobCreatedResponse,
+  JobStatus,
   ModelInfo,
   SynthesizeRequest,
   SynthesizeResponse,
@@ -116,6 +118,22 @@ export async function getModel(
   modelId: string,
 ): Promise<SynthesizeResponse> {
   const { data } = await apiClient.get<SynthesizeResponse>(`/model/${modelId}`);
+  return data;
+}
+
+// --- Async synthesis jobs (FR-1.1) ---
+export async function enqueueSynthesis(
+  request: SynthesizeRequest,
+): Promise<JobCreatedResponse> {
+  const { data } = await apiClient.post<JobCreatedResponse>(
+    '/jobs/synthesize',
+    request,
+  );
+  return data;
+}
+
+export async function getJob(jobId: string): Promise<JobStatus> {
+  const { data } = await apiClient.get<JobStatus>(`/jobs/${jobId}`);
   return data;
 }
 

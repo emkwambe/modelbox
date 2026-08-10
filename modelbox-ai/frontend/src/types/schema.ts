@@ -149,6 +149,21 @@ export interface ModelInfo {
   version_number: number;
 }
 
+export type JobStatusValue = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+export interface JobCreatedResponse {
+  job_id: string;
+  status: JobStatusValue;
+  poll_url: string;
+}
+
+export interface JobStatus {
+  job_id: string;
+  status: JobStatusValue;
+  result_model_id?: string | null;
+  error?: string | null;
+}
+
 export type IssueSeverity = 'error' | 'warning';
 
 export interface ValidationIssue {

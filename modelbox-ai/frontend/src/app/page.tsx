@@ -8,12 +8,17 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { synthesizeModel } from '@/lib/api';
+import { enqueueSynthesis, getJob, getModel } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
-import type { Paradigm } from '@/types/schema';
+import type { Paradigm, SynthesizeResponse } from '@/types/schema';
 
 const PARADIGMS: Paradigm[] = ['3NF', 'KIMBALL', 'DATA_VAULT', 'OBT'];
+
+const POLL_INTERVAL_MS = 2000;
+const POLL_MAX_ATTEMPTS = 150; // ~5 minutes
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default function HomePage() {
   const router = useRouter();
@@ -25,6 +30,7 @@ export default function HomePage() {
   const [paradigm, setParadigm] = useState<Paradigm>('KIMBALL');
   const [dialect, setDialect] = useState('snowflake');
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -33,6 +39,22 @@ export default function HomePage() {
   useEffect(() => setMounted(true), []);
   const signedIn = mounted && Boolean(token);
 
+  /** Poll a job to completion and return the finished model. */
+  async function pollJob(jobId: string): Promise<SynthesizeResponse> {
+    for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
+      const job = await getJob(jobId);
+      if (job.status === 'COMPLETED' && job.result_model_id) {
+        return getModel(job.result_model_id);
+      }
+      if (job.status === 'FAILED') {
+        throw new Error(job.error ?? 'Synthesis failed.');
+      }
+      setProgress(job.status === 'PROCESSING' ? 'Synthesizing…' : 'Queued…');
+      await sleep(POLL_INTERVAL_MS);
+    }
+    throw new Error('Timed out waiting for synthesis.');
+  }
+
   async function handleSynthesize() {
     if (!token) {
       openModal();
@@ -40,20 +62,23 @@ export default function HomePage() {
     }
     setLoading(true);
     setError(null);
+    setProgress('Queued…');
     try {
-      const model = await synthesizeModel({
+      const { job_id } = await enqueueSynthesis({
         source_type: 'natural_language',
         content,
         target_paradigm: paradigm,
         dialect,
         workspace_id: activeWorkspaceId,
       });
+      const model = await pollJob(job_id);
       loadModel(model);
       router.push('/canvas');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Synthesis failed.');
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   }
 
@@ -122,7 +147,7 @@ export default function HomePage() {
           }}
         >
           {loading
-            ? 'Synthesizing…'
+            ? (progress ?? 'Synthesizing…')
             : signedIn
               ? 'Synthesize model'
               : 'Sign in to synthesize'}
@@ -154,7 +179,8 @@ export default function HomePage() {
 
       {loading && (
         <p style={{ color: '#64748b', marginTop: 8, fontSize: 13 }}>
-          Contacting the model… this can take up to a minute or two.
+          {progress ?? 'Working…'} — runs as a background job, so it won't time
+          out (up to a couple of minutes).
         </p>
       )}
 
