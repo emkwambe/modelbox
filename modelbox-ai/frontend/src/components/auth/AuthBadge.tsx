@@ -1,12 +1,14 @@
 'use client';
 
 /**
- * AuthBadge — fixed top-right session indicator + sign-in trigger.
+ * AuthBadge — fixed top-right session indicator, workspace switcher, and
+ * sign-in trigger.
  */
 
 import { useEffect, useState } from 'react';
 
 import AuthModal from '@/components/auth/AuthModal';
+import { listWorkspaces } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 
 export default function AuthBadge() {
@@ -16,11 +18,34 @@ export default function AuthBadge() {
   const modalOpen = useAuthStore((s) => s.modalOpen);
   const openModal = useAuthStore((s) => s.openModal);
   const closeModal = useAuthStore((s) => s.closeModal);
+  const workspaces = useAuthStore((s) => s.workspaces);
+  const activeWorkspaceId = useAuthStore((s) => s.activeWorkspaceId);
+  const setWorkspaces = useAuthStore((s) => s.setWorkspaces);
+  const setActiveWorkspace = useAuthStore((s) => s.setActiveWorkspace);
   const [mounted, setMounted] = useState(false);
 
-  // Avoid SSR/CSR hydration mismatch: render only after the client mounts
-  // (persisted auth state is not known during server render).
   useEffect(() => setMounted(true), []);
+
+  // Load the caller's workspaces whenever authenticated.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    listWorkspaces()
+      .then((list) => {
+        if (cancelled) return;
+        setWorkspaces(list);
+        const current = useAuthStore.getState().activeWorkspaceId;
+        const stillValid = list.some((w) => w.workspace_id === current);
+        if (!stillValid && list.length > 0) {
+          setActiveWorkspace(list[0]!.workspace_id);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [token, setWorkspaces, setActiveWorkspace]);
+
   if (!mounted) return null;
 
   const pill: React.CSSProperties = {
@@ -42,11 +67,33 @@ export default function AuthBadge() {
     cursor: 'pointer',
   };
 
+  const activeRole = workspaces.find(
+    (w) => w.workspace_id === activeWorkspaceId,
+  )?.role;
+
   return (
     <>
       <div style={pill}>
         {token ? (
           <>
+            {workspaces.length > 0 && (
+              <select
+                value={activeWorkspaceId ?? ''}
+                onChange={(e) => setActiveWorkspace(e.target.value)}
+                title={activeRole ? `Role: ${activeRole}` : undefined}
+                style={{
+                  ...btn,
+                  maxWidth: 200,
+                  fontWeight: 600,
+                }}
+              >
+                {workspaces.map((w) => (
+                  <option key={w.workspace_id} value={w.workspace_id}>
+                    {w.name} · {w.role}
+                  </option>
+                ))}
+              </select>
+            )}
             <span
               style={{
                 background: '#ecfdf5',

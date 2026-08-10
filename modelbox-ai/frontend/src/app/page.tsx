@@ -20,6 +20,7 @@ export default function HomePage() {
   const loadModel = useCanvasStore((s) => s.loadModel);
   const token = useAuthStore((s) => s.token);
   const openModal = useAuthStore((s) => s.openModal);
+  const activeWorkspaceId = useAuthStore((s) => s.activeWorkspaceId);
   const [content, setContent] = useState('');
   const [paradigm, setParadigm] = useState<Paradigm>('KIMBALL');
   const [dialect, setDialect] = useState('snowflake');
@@ -45,6 +46,7 @@ export default function HomePage() {
         content,
         target_paradigm: paradigm,
         dialect,
+        workspace_id: activeWorkspaceId,
       });
       loadModel(model);
       router.push('/canvas');

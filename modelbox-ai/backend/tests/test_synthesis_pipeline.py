@@ -177,6 +177,33 @@ async def _seed_user_workspace(
     return user, workspace.workspace_id
 
 
+async def _add_member(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user: User,
+    role: str,
+) -> None:
+    session.add(
+        WorkspaceMember(
+            workspace_id=workspace_id, user_id=user.user_id, role=role
+        )
+    )
+    await session.flush()
+
+
+async def _seed_model(session: AsyncSession, workspace_id: uuid.UUID) -> str:
+    seed = await SynthesisEngine(session, StubGateway(kimball_model())).synthesize(
+        SynthesizeRequest(
+            source_type="natural_language",  # type: ignore[arg-type]
+            content="model",
+            target_paradigm="KIMBALL",  # type: ignore[arg-type]
+            dialect="snowflake",
+            workspace_id=workspace_id,
+        )
+    )
+    return str(seed.model_id)
+
+
 def _apply_overrides(app, session: AsyncSession, user: User, gateway) -> None:
     """Wire an app to the shared test session + an authenticated user."""
     from app.api.v1.dependencies import (
@@ -641,6 +668,83 @@ async def test_register_creates_user_and_workspace(
         )
         assert probe.status_code == 404
     app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# RBAC & model management (Slice B2)
+# ---------------------------------------------------------------------------
+def _client_for(session: AsyncSession, user: User):
+    from app.main import create_app
+
+    app = create_app()
+    _apply_overrides(app, session, user, StubGateway(kimball_model()))
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), app
+
+
+async def test_delete_model_as_owner_succeeds(session: AsyncSession) -> None:
+    owner, workspace = await _seed_user_workspace(session, "owner-del@example.com")
+    model_id = await _seed_model(session, workspace)
+
+    client, app = _client_for(session, owner)
+    async with client:
+        response = await client.delete(f"/api/v1/model/{model_id}")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 204
+    assert await session.get(DataModel, uuid.UUID(model_id)) is None
+
+
+async def test_delete_model_as_member_returns_403(session: AsyncSession) -> None:
+    owner, workspace = await _seed_user_workspace(session, "owner-x@example.com")
+    model_id = await _seed_model(session, workspace)
+    member = await _seed_user(session, "member-x@example.com")
+    await _add_member(session, workspace, member, "MEMBER")
+
+    client, app = _client_for(session, member)
+    async with client:
+        response = await client.delete(f"/api/v1/model/{model_id}")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    # Model still exists.
+    assert await session.get(DataModel, uuid.UUID(model_id)) is not None
+
+
+async def test_patch_model_as_member_succeeds(session: AsyncSession) -> None:
+    owner, workspace = await _seed_user_workspace(session, "owner-p@example.com")
+    model_id = await _seed_model(session, workspace)
+    member = await _seed_user(session, "member-p@example.com")
+    await _add_member(session, workspace, member, "MEMBER")
+
+    client, app = _client_for(session, member)
+    async with client:
+        response = await client.patch(
+            f"/api/v1/model/{model_id}", json={"title": "Renamed Model"}
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "Renamed Model"
+
+
+async def test_list_user_workspaces(session: AsyncSession) -> None:
+    user, workspace_a = await _seed_user_workspace(session, "multi-ws@example.com")
+    workspace_b = Workspace(name="AAA Second Workspace")
+    session.add(workspace_b)
+    await session.flush()
+    await _add_member(session, workspace_b.workspace_id, user, "ADMIN")
+
+    client, app = _client_for(session, user)
+    async with client:
+        response = await client.get("/api/v1/workspaces")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    roles = {w["name"]: w["role"] for w in data}
+    assert roles["AAA Second Workspace"] == "ADMIN"
+    assert roles["multi-ws@example.com workspace"] == "OWNER"
 
 
 async def test_cross_workspace_access_forbidden(session: AsyncSession) -> None:

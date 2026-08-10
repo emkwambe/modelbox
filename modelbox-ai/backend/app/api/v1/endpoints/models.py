@@ -5,7 +5,9 @@ from __future__ import annotations
 import io
 import zipfile
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.api.v1.dependencies import (
     AuthorizedModelDep,
@@ -13,11 +15,15 @@ from app.api.v1.dependencies import (
     ExporterServiceDep,
     SessionDep,
     SynthesisEngineDep,
+    require_model_role,
     resolve_user_workspace,
 )
+from app.models.metadata_store import DataModel
 from app.schemas.data_model import (
     ExportFormat,
     ExportResponse,
+    ModelInfo,
+    ModelUpdateRequest,
     SynthesizedModel,
     SynthesizeRequest,
     SynthesizeResponse,
@@ -76,6 +82,40 @@ async def get_model(
             status_code=status.HTTP_404_NOT_FOUND, detail="Model not found."
         )
     return result
+
+
+@router.patch(
+    "/{model_id}",
+    response_model=ModelInfo,
+    summary="Update model metadata (title / dialect)",
+)
+async def update_model(
+    payload: ModelUpdateRequest,
+    session: SessionDep,
+    model: Annotated[DataModel, Depends(require_model_role("MEMBER"))],
+) -> ModelInfo:
+    """Patch model metadata. Requires MEMBER or higher (FR-6, Slice B2)."""
+    if payload.title is not None:
+        model.title = payload.title
+    if payload.target_dialect is not None:
+        model.target_dialect = payload.target_dialect
+    await session.flush()
+    return ModelInfo.model_validate(model)
+
+
+@router.delete(
+    "/{model_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a model (ADMIN or OWNER only)",
+)
+async def delete_model(
+    session: SessionDep,
+    model: Annotated[DataModel, Depends(require_model_role("ADMIN"))],
+) -> Response:
+    """Delete a model and its graph (cascade). Requires ADMIN or higher."""
+    await session.delete(model)
+    await session.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

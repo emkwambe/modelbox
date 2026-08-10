@@ -134,6 +134,21 @@ export interface ExportResponse {
   files: Record<string, string>;
 }
 
+export interface WorkspaceInfo {
+  workspace_id: string;
+  name: string;
+  role: string;
+}
+
+export interface ModelInfo {
+  model_id: string;
+  workspace_id: string;
+  title: string;
+  current_paradigm?: string | null;
+  target_dialect: string;
+  version_number: number;
+}
+
 export type IssueSeverity = 'error' | 'warning';
 
 export interface ValidationIssue {

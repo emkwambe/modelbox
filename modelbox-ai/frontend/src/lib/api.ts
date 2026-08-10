@@ -11,11 +11,13 @@ import { useAuthStore } from '@/store/authStore';
 import type {
   ExportFormat,
   ExportResponse,
+  ModelInfo,
   SynthesizeRequest,
   SynthesizeResponse,
   TransformParadigmRequest,
   TransformParadigmResponse,
   ValidationReport,
+  WorkspaceInfo,
 } from '@/types/schema';
 
 const baseURL =
@@ -77,6 +79,27 @@ export async function register(
     { email, password, full_name: fullName ?? null },
   );
   return data.access_token;
+}
+
+// --- Workspaces & model management (RBAC) ---
+export async function listWorkspaces(): Promise<WorkspaceInfo[]> {
+  const { data } = await apiClient.get<WorkspaceInfo[]>('/workspaces');
+  return data;
+}
+
+export async function deleteModel(modelId: string): Promise<void> {
+  await apiClient.delete(`/model/${modelId}`);
+}
+
+export async function updateModel(
+  modelId: string,
+  payload: { title?: string; target_dialect?: string },
+): Promise<ModelInfo> {
+  const { data } = await apiClient.patch<ModelInfo>(
+    `/model/${modelId}`,
+    payload,
+  );
+  return data;
 }
 
 export async function synthesizeModel(

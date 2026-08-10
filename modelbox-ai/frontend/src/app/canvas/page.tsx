@@ -1,29 +1,74 @@
 'use client';
 
 /**
- * Canvas page — full-viewport ERD workspace with a collapsible export panel.
+ * Canvas page — full-viewport ERD workspace with export panel + model actions.
  */
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 import ERDCanvas from '@/components/canvas/ERDCanvas';
 import ExportPanel from '@/components/editor/ExportPanel';
+import { deleteModel, updateModel } from '@/lib/api';
 import { useCanvasStore } from '@/store/canvasStore';
 
 export default function CanvasPage() {
+  const router = useRouter();
   const paradigm = useCanvasStore((s) => s.paradigm);
   const entityCount = useCanvasStore((s) => s.nodes.length);
   const modelId = useCanvasStore((s) => s.modelId);
   const validation = useCanvasStore((s) => s.validation);
+  const reset = useCanvasStore((s) => s.reset);
   const [showExport, setShowExport] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const issueCount = validation?.issues.length ?? 0;
   const validStatus = validation
     ? validation.is_valid
       ? { label: '✓ Valid', color: '#16a34a' }
-      : { label: `⚠ ${issueCount} issue${issueCount === 1 ? '' : 's'}`, color: '#dc2626' }
+      : {
+          label: `⚠ ${issueCount} issue${issueCount === 1 ? '' : 's'}`,
+          color: '#dc2626',
+        }
     : null;
+
+  async function handleRename() {
+    if (!modelId) return;
+    const title = window.prompt('New model title:');
+    if (!title) return;
+    setBusy(true);
+    try {
+      await updateModel(modelId, { title });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!modelId) return;
+    if (!window.confirm('Delete this model? This cannot be undone.')) return;
+    setBusy(true);
+    try {
+      await deleteModel(modelId);
+      reset();
+      router.push('/');
+    } catch {
+      setBusy(false);
+    }
+  }
+
+  const actionBtn = (color: string): React.CSSProperties => ({
+    padding: '6px 12px',
+    borderRadius: 6,
+    border: `1px solid ${color}`,
+    background: '#ffffff',
+    color,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: modelId && !busy ? 'pointer' : 'default',
+    opacity: modelId && !busy ? 1 : 0.5,
+  });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -34,7 +79,7 @@ export default function CanvasPage() {
           justifyContent: 'space-between',
           padding: '10px 16px',
           // Reserve space on the right for the fixed AuthBadge overlay.
-          paddingRight: 160,
+          paddingRight: 320,
           borderBottom: '1px solid #e2e8f0',
           background: '#ffffff',
         }}
@@ -64,24 +109,42 @@ export default function CanvasPage() {
             </span>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => setShowExport((v) => !v)}
-          disabled={!modelId}
-          style={{
-            padding: '6px 14px',
-            borderRadius: 6,
-            border: '1px solid #2563eb',
-            background: showExport ? '#2563eb' : '#ffffff',
-            color: showExport ? '#ffffff' : '#2563eb',
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: modelId ? 'pointer' : 'default',
-            opacity: modelId ? 1 : 0.5,
-          }}
-        >
-          {showExport ? 'Hide export' : 'Export artifacts'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            onClick={handleRename}
+            disabled={!modelId || busy}
+            style={actionBtn('#334155')}
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={!modelId || busy}
+            style={actionBtn('#dc2626')}
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowExport((v) => !v)}
+            disabled={!modelId}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 6,
+              border: '1px solid #2563eb',
+              background: showExport ? '#2563eb' : '#ffffff',
+              color: showExport ? '#ffffff' : '#2563eb',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: modelId ? 'pointer' : 'default',
+              opacity: modelId ? 1 : 0.5,
+            }}
+          >
+            {showExport ? 'Hide export' : 'Export artifacts'}
+          </button>
+        </div>
       </header>
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>

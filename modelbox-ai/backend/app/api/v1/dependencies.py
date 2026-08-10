@@ -177,3 +177,27 @@ async def get_authorized_model(
 
 
 AuthorizedModelDep = Annotated[DataModel, Depends(get_authorized_model)]
+
+# Role hierarchy for RBAC: OWNER > ADMIN > MEMBER (Slice B2).
+_ROLE_LEVEL: dict[str, int] = {"MEMBER": 1, "ADMIN": 2, "OWNER": 3}
+
+
+def require_model_role(min_role: str):
+    """Dependency factory: authorize a model route by minimum workspace role.
+
+    Builds on :func:`get_authorized_model` (404/membership) and additionally
+    enforces the caller's role meets ``min_role`` (403 otherwise).
+    """
+
+    async def _checker(
+        model: AuthorizedModelDep, session: SessionDep, user: CurrentUserDep
+    ) -> DataModel:
+        member = await require_membership(session, user.user_id, model.workspace_id)
+        if _ROLE_LEVEL.get(member.role, 0) < _ROLE_LEVEL.get(min_role, 0):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Action requires minimum role of {min_role}.",
+            )
+        return model
+
+    return _checker

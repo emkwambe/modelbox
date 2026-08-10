@@ -98,6 +98,38 @@ class UserOut(BaseModel):
     full_name: str | None = None
 
 
+class ModelUpdateRequest(BaseModel):
+    """PATCH body for model metadata (RBAC — Slice B2)."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    target_dialect: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class ModelInfo(BaseModel):
+    """Lightweight model metadata (no entity graph)."""
+
+    model_config = ConfigDict(
+        from_attributes=True, use_enum_values=True, protected_namespaces=()
+    )
+
+    model_id: uuid.UUID
+    workspace_id: uuid.UUID
+    title: str
+    current_paradigm: str | None = None
+    target_dialect: str
+    version_number: int
+
+
+class WorkspaceInfo(BaseModel):
+    """A workspace the caller belongs to, with their role."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    workspace_id: uuid.UUID
+    name: str
+    role: str
+
+
 class PIIType(str, enum.Enum):
     """Privacy classification flags (FR-6.1)."""
 
@@ -348,6 +380,9 @@ __all__ = [
     "Token",
     "RegisterRequest",
     "UserOut",
+    "ModelUpdateRequest",
+    "ModelInfo",
+    "WorkspaceInfo",
     "ColumnSchema",
     "EntitySchema",
     "RelationshipSchema",
