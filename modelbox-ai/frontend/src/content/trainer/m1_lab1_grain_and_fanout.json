@@ -1,0 +1,84 @@
+{
+  "id": "m1_lab1_grain_and_fanout",
+  "module": 1,
+  "edition": "dimensional",
+  "title": "Spot the Flaw: Dimensional Edition",
+  "difficulty": "beginner",
+  "brief": "This e-commerce star was handed off for review before it ships to the BI team. It is structurally valid, but it has three dimensional-design flaws that will bite in production: a mis-typed fact name, an undeclared grain, and a fan-out trap between two facts. Find and fix all three, then re-validate until the model is clean.",
+  "graph": {
+    "entities": [
+      {
+        "entity_name": "sales",
+        "entity_type": "FACT",
+        "grain": null,
+        "description": "Sales transactions, one line per product sold.",
+        "columns": [
+          { "name": "sale_id", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the sale line." },
+          { "name": "customer_sk", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": true, "is_pii": false, "is_metric": false, "description": "FK to the customer dimension." },
+          { "name": "product_sk", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": true, "is_pii": false, "is_metric": false, "description": "FK to the product dimension." },
+          { "name": "amount", "data_type": "NUMERIC(12,2)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Line revenue in USD." },
+          { "name": "quantity", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Units sold on the line." }
+        ]
+      },
+      {
+        "entity_name": "dim_customer",
+        "entity_type": "DIMENSION",
+        "grain": null,
+        "description": "Customer dimension.",
+        "columns": [
+          { "name": "customer_sk", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the customer." },
+          { "name": "customer_name", "data_type": "VARCHAR(200)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Customer display name." },
+          { "name": "region", "data_type": "VARCHAR(64)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Sales region." }
+        ]
+      },
+      {
+        "entity_name": "dim_product",
+        "entity_type": "DIMENSION",
+        "grain": null,
+        "description": "Product dimension.",
+        "columns": [
+          { "name": "product_sk", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the product." },
+          { "name": "product_name", "data_type": "VARCHAR(200)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Product display name." },
+          { "name": "category", "data_type": "VARCHAR(64)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Product category." }
+        ]
+      },
+      {
+        "entity_name": "fact_returns",
+        "entity_type": "FACT",
+        "grain": "one row per product return",
+        "description": "Product returns, one row per returned line.",
+        "columns": [
+          { "name": "return_id", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the return." },
+          { "name": "sale_id", "data_type": "INTEGER", "is_primary_key": false, "is_foreign_key": true, "is_pii": false, "is_metric": false, "description": "FK to the originating sale line." },
+          { "name": "refund_amount", "data_type": "NUMERIC(12,2)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Refunded amount in USD." }
+        ]
+      }
+    ],
+    "relationships": [
+      { "from": "sales.customer_sk", "to": "dim_customer.customer_sk", "cardinality": "N:1" },
+      { "from": "sales.product_sk", "to": "dim_product.product_sk", "cardinality": "N:1" },
+      { "from": "fact_returns.sale_id", "to": "sales.sale_id", "cardinality": "N:1" }
+    ]
+  },
+  "expected_flaws": [
+    {
+      "code": "NAMING_CONVENTION",
+      "target": "sales",
+      "hint": "One entity is a FACT but isn't named like one. What prefix do fact tables use?",
+      "fix": "Rename the entity to 'fact_sales' so its type is obvious to consumers."
+    },
+    {
+      "code": "MISSING_GRAIN",
+      "target": "sales",
+      "hint": "Before adding measures, every fact needs one sentence: what does a single row mean?",
+      "fix": "Declare the grain, e.g. 'one row per sale line', on the sales fact."
+    },
+    {
+      "code": "FAN_OUT_RISK",
+      "target": "fact_returns -> sales",
+      "hint": "Two FACT tables are joined directly. Aggregating across that join can double-count.",
+      "fix": "Don't relate fact-to-fact. Relate both facts to a conformed dimension (e.g. dim_date / dim_product), and analyze returns at their own grain."
+    }
+  ],
+  "solution_notes": "The clean model renames 'sales' to 'fact_sales' with grain 'one row per sale line', keeps fact_returns at its own grain, and removes the fact_returns -> sales relationship (returns and sales conform through shared dimensions rather than a direct fact-to-fact join). After the fixes, re-validation shows no NAMING_CONVENTION, MISSING_GRAIN, or FAN_OUT_RISK issues."
+}
