@@ -3,8 +3,8 @@
   "module": 3,
   "edition": "governance",
   "title": "Spot the Flaw: Governance & Contracts Edition",
+  "brief": "This customer-360 model is heading to production behind a data contract. It is structurally sound, but a governance review flagged four gaps that would ship a weak contract: a Tier-1 critical asset with no freshness SLA, an unclassified PII column, a misnamed dimension, and that same dimension left undocumented. Fix all four in-app, then re-validate to see the contract go clean.",
   "difficulty": "intermediate",
-  "brief": "This customer-360 model is heading to production behind a data contract. It is structurally sound and correctly named, but a governance review flagged three gaps that would ship a weak contract: a Tier-1 critical asset with no freshness SLA, an unclassified PII column, and an undocumented dimension. Fix all three in-app, then re-validate to see the contract go clean.",
   "graph": {
     "entities": [
       {
@@ -33,19 +33,19 @@
         ]
       },
       {
-        "entity_name": "dim_marketing",
+        "entity_name": "marketing",
         "entity_type": "DIMENSION",
         "grain": null,
         "description": null,
         "columns": [
           { "name": "campaign_sk", "data_type": "INTEGER", "is_primary_key": true, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Surrogate key for the marketing campaign." },
-          { "name": "channel", "data_type": "VARCHAR(64)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Acquisition channel, e.g. paid_search or email." }
+          { "name": "channel", "data_type": "VARCHAR(64)", "is_primary_key": false, "is_foreign_key": false, "is_pii": false, "is_metric": false, "description": "Acquisition channel, e.g. paid_search or referral." }
         ]
       }
     ],
     "relationships": [
       { "from": "fact_orders.customer_sk", "to": "dim_customer.customer_sk", "cardinality": "N:1" },
-      { "from": "fact_orders.campaign_sk", "to": "dim_marketing.campaign_sk", "cardinality": "N:1" }
+      { "from": "fact_orders.campaign_sk", "to": "marketing.campaign_sk", "cardinality": "N:1" }
     ]
   },
   "expected_flaws": [
@@ -62,11 +62,17 @@
       "fix": "Select dim_customer.email and tick 'Contains PII' (pii_type EMAIL) so the contract governs it."
     },
     {
+      "code": "NAMING_CONVENTION",
+      "target": "marketing",
+      "hint": "A DIMENSION should announce itself by its name. One dimension is missing its type prefix.",
+      "fix": "Open the 'marketing' entity settings and rename it 'dim_marketing' in the Name field."
+    },
+    {
       "code": "MISSING_DESCRIPTION",
-      "target": "dim_marketing",
+      "target": "marketing",
       "hint": "A consumer can't sign a contract against an undocumented asset. Which dimension has no description?",
-      "fix": "Open dim_marketing's entity settings and write a description."
+      "fix": "In the same entity's settings, write a description."
     }
   ],
-  "solution_notes": "The contract-ready model declares a freshness SLA on the Tier-1 fact_orders asset, classifies dim_customer.email as PII (EMAIL), and documents dim_marketing. All three fixes are made with the in-app editors — Entity Settings for the SLA and description, the column editor's 'Contains PII' toggle for the classification. After the fixes, re-validation shows no MISSING_SLA, PII_EXPOSURE, or MISSING_DESCRIPTION issues, and the exported OpenDataContract/dbt artifacts carry the tier, slaProperties, and PII metadata."
+  "solution_notes": "The contract-ready model declares a freshness SLA on the Tier-1 fact_orders asset, classifies dim_customer.email as PII (EMAIL), renames the 'marketing' dimension to 'dim_marketing' (restoring the type prefix), and documents it. All four fixes are made with the in-app editors — Entity Settings for the SLA, rename, and description; the column editor's 'Contains PII' toggle for the classification. Renaming cascades to the fact_orders.campaign_sk foreign-key relationship automatically. After the fixes, re-validation shows no MISSING_SLA, PII_EXPOSURE, NAMING_CONVENTION, or MISSING_DESCRIPTION issues, and the exported OpenDataContract/dbt artifacts carry the tier, slaProperties, and PII metadata."
 }

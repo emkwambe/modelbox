@@ -32,7 +32,8 @@ By the end of Module 3 you can:
 5. Export the contract to **ODCS** (`tier`, `slaProperties`) and **dbt**
    (`meta`) and read what each field promises.
 6. Recognize the governance lints — **`MISSING_SLA`**, **`PII_EXPOSURE`**,
-   **`MISSING_DESCRIPTION`** — and clear them in-app.
+   **`NAMING_CONVENTION`**, **`MISSING_DESCRIPTION`** — and clear them in-app
+   (including renaming an entity to restore its type prefix).
 
 ---
 
@@ -78,11 +79,16 @@ column editor: select the column → tick **Contains PII** → choose the type.
 > The lint flags the *gap*, not correctly-tagged PII. A well-classified column
 > stays quiet — good governance is rewarded with silence.
 
-### 3.5 Documentation as a contract term
-Consumers can't sign a contract against an asset they can't understand. Every
-entity and column should carry a description. The **`MISSING_DESCRIPTION`** lint
-flags undocumented entities and columns. Set an entity's description in its
-**settings** popover.
+### 3.5 Naming & documentation as contract terms
+A contract is a shared vocabulary, so **names** carry meaning: a `FACT` is
+prefixed `fact_`, a `DIMENSION` `dim_`, a primary key ends in a key suffix
+(`_id`, `_sk`, …). The **`NAMING_CONVENTION`** lint flags a name that breaks the
+convention; fix it by **renaming** the entity (or column) in its editor — the
+**Name** field — and any foreign-key relationship follows the rename
+automatically. And consumers can't sign a contract against an asset they can't
+understand: every entity and column should carry a description. The
+**`MISSING_DESCRIPTION`** lint flags undocumented entities and columns; set an
+entity's description in its **settings** popover.
 
 ### 3.6 Exporting the contract
 One governed model → contract artifacts (**Export artifacts**):
@@ -96,8 +102,9 @@ declare once, propagate everywhere.
 
 ### 3.7 The governance loop
 Declare (tier / SLA / PII / description on the model) → **persist** → **export**
-(ODCS/dbt) → **lint** (`MISSING_SLA`, `PII_EXPOSURE`, `MISSING_DESCRIPTION`) →
-**grade** (the Trainer lab is scored by the very same linter). One engine governs
+(ODCS/dbt) → **lint** (`MISSING_SLA`, `PII_EXPOSURE`, `NAMING_CONVENTION`,
+`MISSING_DESCRIPTION`) → **grade** (the Trainer lab is scored by the very same
+linter). One engine governs
 the model, the exports, and your practice — they can never drift.
 
 ---
@@ -108,14 +115,15 @@ the model, the exports, and your practice — they can never drift.
 **Runs in:** `/trainer` (Select Lab → fix → Submit).
 
 A customer-360 model is heading to production behind a contract. It is
-structurally sound and correctly named, but a governance review flagged three
-gaps. **Every fix is made with the in-app editors** — no code, no re-modeling:
+structurally sound, but a governance review flagged four gaps. **Every fix is
+made with the in-app editors** — no code, no re-modeling:
 
 | Flaw | Lint code | Fix (in-app) |
 |---|---|---|
 | `fact_orders` is `TIER_1_CRITICAL` but has no freshness SLA | `MISSING_SLA` | Entity settings → **Freshness SLA** = `< 1h` |
 | `dim_customer.email` looks like PII but isn't classified | `PII_EXPOSURE` | Column editor → tick **Contains PII** (EMAIL) |
-| `dim_marketing` has no description | `MISSING_DESCRIPTION` | Entity settings → write a **description** |
+| the `marketing` dimension is missing its `dim_` prefix | `NAMING_CONVENTION` | Entity settings → **Name** = `dim_marketing` (the FK relationship follows automatically) |
+| that same dimension has no description | `MISSING_DESCRIPTION` | Entity settings → write a **description** |
 
 **Done when:** re-validation is clean of those codes.
 
@@ -128,7 +136,7 @@ gaps. **Every fix is made with the in-app editors** — no code, no re-modeling:
 | Tiering | 25% | Tier matches the asset's real business criticality; justified |
 | Freshness SLA | 25% | Critical/important assets carry a realistic SLA; no `MISSING_SLA` |
 | PII classification | 25% | Every sensitive column classified; no `PII_EXPOSURE` |
-| Documentation | 15% | Entities and columns described; no `MISSING_DESCRIPTION` |
+| Naming & documentation | 15% | Type prefixes correct and entities described; no `NAMING_CONVENTION` / `MISSING_DESCRIPTION` |
 | Export literacy | 10% | Can read the tier/`slaProperties`/`meta` in the ODCS & dbt exports |
 
 ## What's next

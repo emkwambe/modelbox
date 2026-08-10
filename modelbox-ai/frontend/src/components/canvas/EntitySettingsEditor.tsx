@@ -25,6 +25,7 @@ export default function EntitySettingsEditor() {
   const selectedColumn = useCanvasStore((s) => s.selectedColumn);
   const nodes = useCanvasStore((s) => s.nodes);
   const updateEntity = useCanvasStore((s) => s.updateEntity);
+  const renameEntity = useCanvasStore((s) => s.renameEntity);
   const selectNode = useCanvasStore((s) => s.selectNode);
 
   // The column editor takes precedence when a column is selected.
@@ -51,6 +52,20 @@ export default function EntitySettingsEditor() {
           ✕
         </button>
       </div>
+
+      <label style={field}>
+        <span style={lbl}>Name</span>
+        <input
+          key={`name-${selectedNodeId}`}
+          defaultValue={d.entity_name}
+          onBlur={(e) => renameEntity(d.entity_name, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+          }}
+          placeholder="e.g. fact_orders"
+          style={input}
+        />
+      </label>
 
       <label style={field}>
         <span style={lbl}>Description</span>

@@ -17,6 +17,7 @@ export default function ColumnSemanticEditor() {
   const selectedColumn = useCanvasStore((s) => s.selectedColumn);
   const nodes = useCanvasStore((s) => s.nodes);
   const updateColumn = useCanvasStore((s) => s.updateColumn);
+  const renameColumn = useCanvasStore((s) => s.renameColumn);
   const selectColumn = useCanvasStore((s) => s.selectColumn);
 
   if (!selectedColumn) return null;
@@ -65,6 +66,35 @@ export default function ColumnSemanticEditor() {
           ✕
         </button>
       </div>
+
+      <label
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 3,
+          marginTop: 10,
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>
+          Name
+        </span>
+        <input
+          key={`col-${selectedColumn.entityName}.${selectedColumn.columnName}`}
+          defaultValue={column.name}
+          onBlur={(e) =>
+            renameColumn(
+              selectedColumn!.entityName,
+              column.name,
+              e.target.value,
+            )
+          }
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+          }}
+          placeholder="e.g. customer_sk"
+          style={select}
+        />
+      </label>
 
       <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
         <button

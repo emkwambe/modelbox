@@ -74,6 +74,14 @@ interface CanvasState {
     columnName: string,
     patch: Partial<Column>,
   ) => void;
+  /** Rename an entity, cascading to node id, edges, and relationship refs. */
+  renameEntity: (oldName: string, newName: string) => void;
+  /** Rename a column, cascading to its entity's columns and relationship refs. */
+  renameColumn: (
+    entityName: string,
+    oldColumn: string,
+    newColumn: string,
+  ) => void;
   selectColumn: (entityName: string, columnName: string | null) => void;
   removeEntity: (nodeId: string) => void;
   getGraphPayload: () => { entities: Entity[]; relationships: Relationship[] };
@@ -130,6 +138,27 @@ function relationshipToEdge(rel: Relationship, index: number): RelationshipEdge 
       to_ref: rel.to,
     },
   };
+}
+
+/** Rewrite the entity part of an `entity.column` (or bare `entity`) ref. */
+function rewriteRefEntity(ref: string, oldName: string, newName: string): string {
+  const dot = ref.indexOf('.');
+  if (dot === -1) return ref === oldName ? newName : ref;
+  return ref.slice(0, dot) === oldName ? `${newName}${ref.slice(dot)}` : ref;
+}
+
+/** Rewrite the column part of an `entity.column` ref for one entity. */
+function rewriteRefColumn(
+  ref: string,
+  entityName: string,
+  oldColumn: string,
+  newColumn: string,
+): string {
+  const dot = ref.indexOf('.');
+  if (dot === -1) return ref;
+  return ref.slice(0, dot) === entityName && ref.slice(dot + 1) === oldColumn
+    ? `${entityName}.${newColumn}`
+    : ref;
 }
 
 /** Run a dagre layout pass, returning repositioned nodes. */
@@ -244,6 +273,96 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
               }
             : node,
         ),
+      });
+    },
+
+    renameEntity: (oldName, newName) => {
+      const trimmed = newName.trim();
+      if (!trimmed || trimmed === oldName) return;
+      // Reject a collision with another existing entity.
+      if (get().nodes.some((n) => n.id === trimmed)) return;
+      commit();
+      const sel = get().selectedColumn;
+      set({
+        nodes: get().nodes.map((node) =>
+          node.id === oldName
+            ? {
+                ...node,
+                id: trimmed,
+                data: { ...node.data, entity_name: trimmed },
+              }
+            : node,
+        ),
+        edges: get().edges.map((edge) => ({
+          ...edge,
+          source: edge.source === oldName ? trimmed : edge.source,
+          target: edge.target === oldName ? trimmed : edge.target,
+          data: edge.data
+            ? {
+                ...edge.data,
+                from_ref: rewriteRefEntity(edge.data.from_ref, oldName, trimmed),
+                to_ref: rewriteRefEntity(edge.data.to_ref, oldName, trimmed),
+              }
+            : edge.data,
+        })),
+        selectedNodeId:
+          get().selectedNodeId === oldName ? trimmed : get().selectedNodeId,
+        selectedColumn:
+          sel?.entityName === oldName
+            ? { entityName: trimmed, columnName: sel.columnName }
+            : sel,
+      });
+    },
+
+    renameColumn: (entityName, oldColumn, newColumn) => {
+      const trimmed = newColumn.trim();
+      if (!trimmed || trimmed === oldColumn) return;
+      const node = get().nodes.find((n) => n.id === entityName);
+      if (!node) return;
+      // Reject a collision with another column on the same entity.
+      if (node.data.columns.some((c) => c.name === trimmed)) return;
+      commit();
+      const sel = get().selectedColumn;
+      set({
+        nodes: get().nodes.map((n) =>
+          n.id === entityName
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  columns: n.data.columns.map((c) =>
+                    c.name === oldColumn ? { ...c, name: trimmed } : c,
+                  ),
+                },
+              }
+            : n,
+        ),
+        edges: get().edges.map((edge) =>
+          edge.data
+            ? {
+                ...edge,
+                data: {
+                  ...edge.data,
+                  from_ref: rewriteRefColumn(
+                    edge.data.from_ref,
+                    entityName,
+                    oldColumn,
+                    trimmed,
+                  ),
+                  to_ref: rewriteRefColumn(
+                    edge.data.to_ref,
+                    entityName,
+                    oldColumn,
+                    trimmed,
+                  ),
+                },
+              }
+            : edge,
+        ),
+        selectedColumn:
+          sel?.entityName === entityName && sel.columnName === oldColumn
+            ? { entityName, columnName: trimmed }
+            : sel,
       });
     },
 
