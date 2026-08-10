@@ -25,6 +25,12 @@ export type EntityType =
 
 export type Cardinality = '1:1' | '1:N' | 'N:1' | 'N:M';
 
+export type AssetTier =
+  | 'TIER_1_CRITICAL'
+  | 'TIER_2_IMPORTANT'
+  | 'TIER_3_STANDARD'
+  | 'TIER_4_EXPERIMENTAL';
+
 export type SourceType =
   | 'natural_language'
   | 'prd'
@@ -79,6 +85,8 @@ export interface Entity {
   entity_type: EntityType;
   description?: string | null;
   grain?: string | null;
+  tier?: AssetTier | null;
+  freshness_sla?: string | null;
   canvas_position_x: number;
   canvas_position_y: number;
   columns: Column[];
@@ -291,6 +299,8 @@ export interface EntityNodeData extends Record<string, unknown> {
   entity_type: EntityType;
   description?: string | null;
   grain?: string | null;
+  tier?: AssetTier | null;
+  freshness_sla?: string | null;
   columns: Column[];
 }
 

@@ -146,6 +146,9 @@ class SynthesisEngine:
                     entity_name=entity.entity_name,
                     entity_type=entity.entity_type,  # type: ignore[arg-type]
                     description=entity.description,
+                    grain=entity.grain,
+                    tier=entity.tier,  # type: ignore[arg-type]
+                    freshness_sla=entity.freshness_sla,
                     canvas_position_x=entity.canvas_position_x,
                     canvas_position_y=entity.canvas_position_y,
                     columns=[self._column_to_schema(c) for c in columns],
@@ -263,6 +266,9 @@ class SynthesisEngine:
                 canvas_position_x=entity.canvas_position_x,
                 canvas_position_y=entity.canvas_position_y,
                 description=entity.description,
+                grain=entity.grain,
+                tier=str(entity.tier) if entity.tier else None,
+                freshness_sla=entity.freshness_sla,
             )
             self._session.add(row)
             await self._session.flush()

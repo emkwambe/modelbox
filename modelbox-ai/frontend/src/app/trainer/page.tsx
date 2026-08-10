@@ -10,6 +10,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
 import ERDCanvas from '@/components/canvas/ERDCanvas';
+import ColumnSemanticEditor from '@/components/canvas/ColumnSemanticEditor';
+import EntitySettingsEditor from '@/components/canvas/EntitySettingsEditor';
 import TemplateLibraryModal from '@/components/TemplateLibraryModal';
 import LabModal from '@/components/trainer/LabModal';
 import { labToGraph, type Lab } from '@/content/trainer';
@@ -317,6 +319,8 @@ export default function TrainerPage() {
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
           <ERDCanvas />
+          <ColumnSemanticEditor />
+          <EntitySettingsEditor />
           {activeLab && (
             <div
               style={{

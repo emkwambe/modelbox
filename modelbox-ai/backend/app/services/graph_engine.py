@@ -202,6 +202,7 @@ class GraphEngine:
         issues.extend(self._lint_pii(entities))
         issues.extend(self._lint_orphans(entities, relationships))
         issues.extend(self._lint_fan_out(entities, relationships))
+        issues.extend(self._lint_sla(entities))
 
         is_valid = not any(issue.severity == "error" for issue in issues)
         return ValidationReport(is_valid=is_valid, issues=issues)
@@ -408,6 +409,31 @@ class GraphEngine:
                     entity_name=from_entity or None,
                 )
             )
+        return issues
+
+    @staticmethod
+    def _lint_sla(entities: list[EntitySchema]) -> list[ValidationIssue]:
+        """MISSING_SLA — a critical/important asset with no freshness SLA."""
+        critical = {"TIER_1_CRITICAL", "TIER_2_IMPORTANT"}
+        issues: list[ValidationIssue] = []
+        for entity in entities:
+            tier = entity.tier
+            tier_value = tier.value if hasattr(tier, "value") else str(tier)
+            if tier_value in critical and not (
+                entity.freshness_sla and entity.freshness_sla.strip()
+            ):
+                issues.append(
+                    ValidationIssue(
+                        severity="warning",
+                        code="MISSING_SLA",
+                        message=(
+                            f"{tier_value} asset '{entity.entity_name}' has no "
+                            f"declared freshness SLA."
+                        ),
+                        entities=[entity.entity_name],
+                        entity_name=entity.entity_name,
+                    )
+                )
         return issues
 
     @staticmethod

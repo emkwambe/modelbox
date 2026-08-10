@@ -38,6 +38,8 @@ def _model() -> SynthesizedModel:
                 entity_name="fact_reviews",
                 entity_type="FACT",  # type: ignore[arg-type]
                 grain="per review",
+                tier="TIER_1_CRITICAL",  # type: ignore[arg-type]
+                freshness_sla="< 4h",
                 columns=[
                     ColumnSchema(name="review_id", data_type="INT", is_primary_key=True),
                     # a declared measure on a non-numeric column
@@ -104,3 +106,9 @@ async def test_is_metric_survives_persist_and_reload(session: AsyncSession) -> N
     )
     assert rating.is_metric is True
     assert rating.aggregation == "AVG"
+
+    # Entity grain + governance metadata also round-trip (Sprint U2).
+    fact = next(e for e in reloaded.entities if e.entity_name == "fact_reviews")
+    assert fact.grain == "per review"
+    assert fact.tier == "TIER_1_CRITICAL"
+    assert fact.freshness_sla == "< 4h"

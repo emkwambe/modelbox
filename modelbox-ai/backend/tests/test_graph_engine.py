@@ -45,6 +45,8 @@ def entity(
     *,
     desc: str | None = "documented",
     grain: str | None = None,
+    tier: str | None = None,
+    sla: str | None = None,
 ) -> EntitySchema:
     return EntitySchema(
         entity_name=name,
@@ -52,6 +54,8 @@ def entity(
         columns=columns,
         description=desc,
         grain=grain,
+        tier=tier,  # type: ignore[arg-type]
+        freshness_sla=sla,
     )
 
 
@@ -362,6 +366,37 @@ def test_no_fan_out_on_fact_to_dimension(engine: GraphEngine) -> None:
         [rel("fact_o.c_sk", "dim_c.c_sk", "N:1")],  # the safe star-join
     )
     assert "FAN_OUT_RISK" not in _codes(report)
+
+
+def test_missing_sla_on_critical_asset(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [entity("fact_a", [col("id", pk=True)], tier="TIER_1_CRITICAL")],  # no SLA
+        [],
+    )
+    assert "MISSING_SLA" in _codes(report)
+
+
+def test_missing_sla_cleared_when_sla_present(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity(
+                "fact_a",
+                [col("id", pk=True)],
+                tier="TIER_1_CRITICAL",
+                sla="< 1h",
+            )
+        ],
+        [],
+    )
+    assert "MISSING_SLA" not in _codes(report)
+
+
+def test_no_missing_sla_for_low_tiers(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [entity("fact_a", [col("id", pk=True)], tier="TIER_3_STANDARD")],  # no SLA
+        [],
+    )
+    assert "MISSING_SLA" not in _codes(report)
 
 
 def test_fan_out_is_warning_only(engine: GraphEngine) -> None:

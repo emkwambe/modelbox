@@ -219,6 +219,9 @@ class ExporterService:
             }
             if entity.description:
                 model_doc["description"] = entity.description
+            meta = self._governance_meta(entity)
+            if meta:
+                model_doc["meta"] = meta
             models.append(model_doc)
 
         return yaml.safe_dump(
@@ -355,6 +358,13 @@ class ExporterService:
             }
             if entity.description:
                 table_doc["description"] = entity.description
+            tier = self._tier_value(entity)
+            if tier:
+                table_doc["tier"] = tier
+            if entity.freshness_sla:
+                table_doc["slaProperties"] = [
+                    {"property": "freshness", "value": entity.freshness_sla}
+                ]
             schema.append(table_doc)
 
         contract = {
@@ -900,6 +910,24 @@ class ExporterService:
             tok in upper
             for tok in ("INT", "NUMBER", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL")
         )
+
+    @staticmethod
+    def _tier_value(entity: EntitySchema) -> str | None:
+        tier = entity.tier
+        if tier is None:
+            return None
+        return tier.value if hasattr(tier, "value") else str(tier)
+
+    @classmethod
+    def _governance_meta(cls, entity: EntitySchema) -> dict[str, str]:
+        """dbt meta block carrying declared governance metadata."""
+        meta: dict[str, str] = {}
+        tier = cls._tier_value(entity)
+        if tier:
+            meta["tier"] = tier
+        if entity.freshness_sla:
+            meta["freshness_sla"] = entity.freshness_sla
+        return meta
 
     @staticmethod
     def _is_string_type(col: ColumnSchema) -> bool:

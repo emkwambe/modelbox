@@ -109,9 +109,52 @@ export default function ColumnSemanticEditor() {
         </label>
       )}
 
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginTop: 12,
+          fontSize: 13,
+          fontWeight: 600,
+          color: '#334155',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={Boolean(column.is_pii)}
+          onChange={(e) =>
+            updateColumn(selectedColumn!.entityName, selectedColumn!.columnName, {
+              is_pii: e.target.checked,
+              pii_type: e.target.checked ? (column.pii_type ?? 'EMAIL') : null,
+            })
+          }
+        />
+        Contains PII
+      </label>
+      {column.is_pii && (
+        <select
+          value={column.pii_type ?? 'EMAIL'}
+          onChange={(e) =>
+            updateColumn(selectedColumn!.entityName, selectedColumn!.columnName, {
+              pii_type: e.target.value as typeof column.pii_type,
+            })
+          }
+          style={{ ...select, marginTop: 6 }}
+        >
+          {['EMAIL', 'SSN', 'PHONE', 'CREDIT_CARD', 'IBAN', 'NAME', 'ADDRESS'].map(
+            (p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ),
+          )}
+        </select>
+      )}
+
       <p style={{ fontSize: 11, color: '#94a3b8', margin: '10px 0 0' }}>
-        Save the model to persist. Declared measures drive the MetricFlow / Cube /
-        LookML exports.
+        Save the model to persist. Declared measures drive the exports; classified
+        PII clears the exposure warning.
       </p>
     </div>
   );

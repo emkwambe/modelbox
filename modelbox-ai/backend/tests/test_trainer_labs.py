@@ -27,6 +27,8 @@ def _load(lab: dict) -> tuple[list[EntitySchema], list[RelationshipSchema]]:
             entity_type=e["entity_type"],
             grain=e.get("grain"),
             description=e.get("description"),
+            tier=e.get("tier"),
+            freshness_sla=e.get("freshness_sla"),
             columns=[ColumnSchema(**c) for c in e["columns"]],
         )
         for e in lab["graph"]["entities"]

@@ -173,6 +173,40 @@ def test_dbt_accepted_values_for_categorical_columns() -> None:
         )
 
 
+def test_governance_metadata_propagates_to_exports() -> None:
+    model = SynthesizedModel(
+        paradigm="3NF",  # type: ignore[arg-type]
+        entities=[
+            EntitySchema(
+                entity_name="fact_orders",
+                entity_type="FACT",  # type: ignore[arg-type]
+                grain="per order",
+                description="Orders.",
+                tier="TIER_1_CRITICAL",  # type: ignore[arg-type]
+                freshness_sla="< 1h",
+                columns=[_col("id", "INT", pk=True, desc="pk")],
+            )
+        ],
+    )
+    # OpenDataContract: tier + slaProperties.
+    odcs = yaml.safe_load(
+        ExporterService().export_data_contract(model, "opendatacontract", "sales")[
+            "datacontract.yaml"
+        ]
+    )
+    table = odcs["schema"][0]
+    assert table["tier"] == "TIER_1_CRITICAL"
+    assert table["slaProperties"] == [{"property": "freshness", "value": "< 1h"}]
+
+    # dbt schema.yml: meta block.
+    dbt = yaml.safe_load(
+        ExporterService().generate_dbt_project(model)["models/staging/schema.yml"]
+    )
+    meta = dbt["models"][0]["meta"]
+    assert meta["tier"] == "TIER_1_CRITICAL"
+    assert meta["freshness_sla"] == "< 1h"
+
+
 def test_metricflow_declared_measure_becomes_metric() -> None:
     # An explicitly declared measure (is_metric) is emitted as a measure + a
     # simple metric, even on a non-numeric column, using its aggregation.

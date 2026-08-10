@@ -37,10 +37,14 @@ function ERDCanvasInner() {
   const onEdgesChange = useCanvasStore((s) => s.onEdgesChange);
   const onConnect = useCanvasStore((s) => s.onConnect);
   const selectNode = useCanvasStore((s) => s.selectNode);
+  const selectColumn = useCanvasStore((s) => s.selectColumn);
 
   const onNodeClick = useCallback(
-    (_event: React.MouseEvent, node: EntityNodeType) => selectNode(node.id),
-    [selectNode],
+    (_event: React.MouseEvent, node: EntityNodeType) => {
+      selectNode(node.id);
+      selectColumn('', null); // node-level selection closes the column editor
+    },
+    [selectNode, selectColumn],
   );
 
   // Highlight edges whose endpoints both sit inside a CYCLIC_FK cycle.
@@ -67,7 +71,10 @@ function ERDCanvasInner() {
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       onNodeClick={onNodeClick}
-      onPaneClick={() => selectNode(null)}
+      onPaneClick={() => {
+        selectNode(null);
+        selectColumn('', null);
+      }}
       fitView
       proOptions={{ hideAttribution: true }}
     >

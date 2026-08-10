@@ -73,6 +73,9 @@ class GraphRepository:
                 canvas_position_x=entity.canvas_position_x,
                 canvas_position_y=entity.canvas_position_y,
                 description=entity.description,
+                grain=entity.grain,
+                tier=str(entity.tier) if entity.tier else None,
+                freshness_sla=entity.freshness_sla,
             )
             self._session.add(row)
             await self._session.flush()

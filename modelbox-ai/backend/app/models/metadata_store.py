@@ -224,6 +224,10 @@ class ModelEntity(Base):
         Float, nullable=False, server_default=text("0.0")
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Grain + governance metadata (Sprint U2).
+    grain: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tier: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    freshness_sla: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     data_model: Mapped["DataModel"] = relationship(back_populates="entities")
     columns: Mapped[list["EntityColumn"]] = relationship(

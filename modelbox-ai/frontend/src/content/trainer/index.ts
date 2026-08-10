@@ -5,6 +5,7 @@
  */
 
 import type {
+  AssetTier,
   Cardinality,
   Column,
   Entity,
@@ -14,6 +15,7 @@ import type {
 
 import m1lab1 from './m1_lab1_grain_and_fanout.json';
 import m2lab1 from './m2_lab1_semantic_grain_and_fanout.json';
+import m3lab1 from './m3_lab1_governance_and_contracts.json';
 
 export interface LabFlaw {
   code: string;
@@ -38,6 +40,8 @@ interface RawEntity {
   entity_type: string;
   grain?: string | null;
   description?: string | null;
+  tier?: string | null;
+  freshness_sla?: string | null;
   columns: RawColumn[];
 }
 
@@ -62,6 +66,7 @@ export interface Lab {
 export const LABS: Lab[] = [
   m1lab1 as unknown as Lab,
   m2lab1 as unknown as Lab,
+  m3lab1 as unknown as Lab,
 ];
 
 /** Convert a lab's flawed graph into loadable canvas entities/relationships. */
@@ -74,6 +79,8 @@ export function labToGraph(lab: Lab): {
     entity_type: e.entity_type as EntityType,
     description: e.description ?? null,
     grain: e.grain ?? null,
+    tier: (e.tier ?? null) as AssetTier | null,
+    freshness_sla: e.freshness_sla ?? null,
     canvas_position_x: 0,
     canvas_position_y: 0,
     columns: e.columns.map(

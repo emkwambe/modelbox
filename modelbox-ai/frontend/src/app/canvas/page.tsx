@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 
 import ERDCanvas from '@/components/canvas/ERDCanvas';
 import ColumnSemanticEditor from '@/components/canvas/ColumnSemanticEditor';
+import EntitySettingsEditor from '@/components/canvas/EntitySettingsEditor';
 import DiffPanel from '@/components/migration/DiffPanel';
 import ExportPanel from '@/components/editor/ExportPanel';
 import { deleteModel, saveGraph, updateModel } from '@/lib/api';
@@ -208,6 +209,7 @@ export default function CanvasPage() {
         <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
           <ERDCanvas />
           <ColumnSemanticEditor />
+          <EntitySettingsEditor />
         </div>
         {showDiff && (
           <div style={{ width: '45%', minWidth: 380, maxWidth: 720 }}>

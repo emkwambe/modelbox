@@ -45,6 +45,15 @@ class EntityType(str, enum.Enum):
     SATELLITE = "SATELLITE"
 
 
+class AssetTier(str, enum.Enum):
+    """Data-asset criticality tier (governance)."""
+
+    TIER_1_CRITICAL = "TIER_1_CRITICAL"
+    TIER_2_IMPORTANT = "TIER_2_IMPORTANT"
+    TIER_3_STANDARD = "TIER_3_STANDARD"
+    TIER_4_EXPERIMENTAL = "TIER_4_EXPERIMENTAL"
+
+
 class Cardinality(str, enum.Enum):
     """Relationship cardinalities (direction is from_ref -> to_ref)."""
 
@@ -453,6 +462,11 @@ class EntitySchema(BaseModel):
     grain: str | None = Field(
         default=None, description="Grain statement for FACT entities."
     )
+    # Governance metadata (Sprint U2): asset criticality + freshness SLA.
+    tier: AssetTier | None = None
+    freshness_sla: str | None = Field(
+        default=None, description="Freshness SLA, e.g. '< 1h'.", max_length=64
+    )
     canvas_position_x: float = 0.0
     canvas_position_y: float = 0.0
     columns: list[ColumnSchema] = Field(default_factory=list)
@@ -647,6 +661,7 @@ class ExportResponse(BaseModel):
 __all__ = [
     "Paradigm",
     "EntityType",
+    "AssetTier",
     "Cardinality",
     "SourceType",
     "PIIType",

@@ -108,6 +108,8 @@ function entityToNode(entity: Entity): EntityNode {
       entity_type: entity.entity_type,
       description: entity.description,
       grain: entity.grain,
+      tier: entity.tier,
+      freshness_sla: entity.freshness_sla,
       columns: entity.columns,
     },
   };
@@ -269,6 +271,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         entity_type: node.data.entity_type,
         description: node.data.description ?? null,
         grain: node.data.grain ?? null,
+        tier: node.data.tier ?? null,
+        freshness_sla: node.data.freshness_sla ?? null,
         canvas_position_x: node.position.x,
         canvas_position_y: node.position.y,
         columns: node.data.columns,

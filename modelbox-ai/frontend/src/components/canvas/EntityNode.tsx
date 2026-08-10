@@ -142,6 +142,20 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
           grain: {data.grain}
         </div>
       )}
+      {data.tier && (
+        <div
+          style={{
+            padding: '2px 10px',
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#7c3aed',
+            borderBottom: '1px solid #f1f5f9',
+          }}
+        >
+          {data.tier.replace('TIER_', 'Tier ').replace('_', ' · ')}
+          {data.freshness_sla ? ` · SLA ${data.freshness_sla}` : ''}
+        </div>
+      )}
       <ul style={{ listStyle: 'none', margin: 0, padding: '4px 0' }}>
         {data.columns.map((col) => {
           const isDangling = danglingColumns.has(col.name);
