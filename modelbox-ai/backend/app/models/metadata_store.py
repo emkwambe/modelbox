@@ -282,6 +282,7 @@ class EntityRelationship(Base):
         Uuid,
         ForeignKey("model_entities.entity_id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
     from_column_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid,
@@ -292,6 +293,7 @@ class EntityRelationship(Base):
         Uuid,
         ForeignKey("model_entities.entity_id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
     to_column_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid,

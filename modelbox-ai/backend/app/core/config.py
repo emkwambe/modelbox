@@ -109,7 +109,12 @@ class Settings(BaseSettings):
             if not stripped:
                 return []
             if stripped.startswith("["):
-                return json.loads(stripped)
+                try:
+                    return json.loads(stripped)
+                except json.JSONDecodeError:
+                    # Malformed JSON: fall back to comma-splitting rather than
+                    # crashing app startup on a config typo.
+                    pass
             return [origin.strip() for origin in stripped.split(",") if origin.strip()]
         return value
 
