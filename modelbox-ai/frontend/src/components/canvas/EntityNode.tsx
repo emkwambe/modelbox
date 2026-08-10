@@ -27,6 +27,8 @@ const WARNING_COLOR = '#f59e0b';
 
 export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
   const accent = ENTITY_ACCENT[data.entity_type] ?? '#64748b';
+  const selectColumn = useCanvasStore((s) => s.selectColumn);
+  const selectedColumn = useCanvasStore((s) => s.selectedColumn);
 
   // Pull this entity's lint issues from the validation report (FR-2.3).
   const issues = useCanvasStore(
@@ -144,6 +146,9 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
         {data.columns.map((col) => {
           const isDangling = danglingColumns.has(col.name);
           const isPiiExposure = !isDangling && piiExposureColumns.has(col.name);
+          const isSelected =
+            selectedColumn?.entityName === data.entity_name &&
+            selectedColumn?.columnName === col.name;
           return (
             <li
               key={col.name}
@@ -152,20 +157,28 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
                   ? 'Foreign key references a missing entity.'
                   : isPiiExposure
                     ? 'Looks like PII but is not classified (set is_pii/pii_type).'
-                    : undefined
+                    : 'Click to set semantic role (measure / dimension).'
               }
+              onClick={(e) => {
+                e.stopPropagation();
+                selectColumn(data.entity_name, col.name);
+              }}
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 gap: 12,
                 padding: '2px 10px',
-                background: isDangling
-                  ? '#fef2f2'
-                  : isPiiExposure
-                    ? '#fffbeb'
-                    : undefined,
+                cursor: 'pointer',
+                background: isSelected
+                  ? '#dbeafe'
+                  : isDangling
+                    ? '#fef2f2'
+                    : isPiiExposure
+                      ? '#fffbeb'
+                      : undefined,
                 color: isDangling ? ERROR_COLOR : undefined,
-                fontWeight: isDangling || isPiiExposure ? 600 : undefined,
+                fontWeight:
+                  isDangling || isPiiExposure || isSelected ? 600 : undefined,
               }}
             >
               <span>
@@ -189,7 +202,16 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
                   </span>
                 )}
               </span>
-              <span style={{ color: '#94a3b8' }}>{col.data_type}</span>
+              {col.is_metric ? (
+                <span
+                  title={`Measure (${col.aggregation ?? 'SUM'})`}
+                  style={{ color: '#2563eb', fontWeight: 700, fontSize: 11 }}
+                >
+                  Σ {(col.aggregation ?? 'SUM').toUpperCase()}
+                </span>
+              ) : (
+                <span style={{ color: '#94a3b8' }}>{col.data_type}</span>
+              )}
             </li>
           );
         })}

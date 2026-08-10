@@ -477,6 +477,7 @@ class ExporterService:
             entities_block: list[dict[str, object]] = []
             dimensions: list[dict[str, object]] = []
             measures: list[dict[str, object]] = []
+            measure_names: list[str] = []
 
             for col in entity.columns:
                 if col.is_primary_key:
@@ -496,18 +497,31 @@ class ExporterService:
                             "expr": col.name,
                         }
                     )
-                elif self._is_numeric(col):
+                elif col.is_metric or self._is_numeric(col):
+                    # Explicit measure declaration wins over the numeric heuristic.
+                    measure_name = f"total_{col.name}"
                     measures.append(
                         {
-                            "name": f"total_{col.name}",
+                            "name": measure_name,
                             "agg": (col.aggregation or "sum").lower(),
                             "expr": col.name,
                         }
                     )
+                    measure_names.append(measure_name)
                 else:
                     dimensions.append(
                         {"name": col.name, "type": "categorical", "expr": col.name}
                     )
+
+            # A simple metric per declared measure, so the layer is usable.
+            for measure_name in measure_names:
+                metrics.append(
+                    {
+                        "name": measure_name,
+                        "type": "simple",
+                        "type_params": {"measure": measure_name},
+                    }
+                )
 
             count_measure = f"{entity.entity_name}_count"
             measures.append({"name": count_measure, "agg": "count", "expr": "1"})

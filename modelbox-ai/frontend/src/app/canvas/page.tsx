@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import ERDCanvas from '@/components/canvas/ERDCanvas';
+import ColumnSemanticEditor from '@/components/canvas/ColumnSemanticEditor';
 import DiffPanel from '@/components/migration/DiffPanel';
 import ExportPanel from '@/components/editor/ExportPanel';
 import { deleteModel, saveGraph, updateModel } from '@/lib/api';
@@ -204,8 +205,9 @@ export default function CanvasPage() {
       </header>
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
           <ERDCanvas />
+          <ColumnSemanticEditor />
         </div>
         {showDiff && (
           <div style={{ width: '45%', minWidth: 380, maxWidth: 720 }}>

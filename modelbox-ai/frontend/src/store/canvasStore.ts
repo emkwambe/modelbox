@@ -55,6 +55,7 @@ interface CanvasState {
   // --- selection ---
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
+  selectedColumn: { entityName: string; columnName: string } | null;
 
   // --- history (undo/redo) ---
   past: CanvasSnapshot[];
@@ -68,6 +69,12 @@ interface CanvasState {
   // --- mutations ---
   addEntity: (entity: Entity) => void;
   updateEntity: (entityName: string, patch: Partial<EntityNodeData>) => void;
+  updateColumn: (
+    entityName: string,
+    columnName: string,
+    patch: Partial<Column>,
+  ) => void;
+  selectColumn: (entityName: string, columnName: string | null) => void;
   removeEntity: (nodeId: string) => void;
   getGraphPayload: () => { entities: Entity[]; relationships: Relationship[] };
   loadGraph: (
@@ -173,6 +180,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     validating: false,
     selectedNodeId: null,
     selectedEdgeId: null,
+    selectedColumn: null,
     past: [],
     future: [],
 
@@ -217,6 +225,30 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         ),
       });
     },
+
+    updateColumn: (entityName, columnName, patch) => {
+      commit();
+      set({
+        nodes: get().nodes.map((node) =>
+          node.id === entityName
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  columns: node.data.columns.map((c) =>
+                    c.name === columnName ? { ...c, ...patch } : c,
+                  ),
+                },
+              }
+            : node,
+        ),
+      });
+    },
+
+    selectColumn: (entityName, columnName) =>
+      set({
+        selectedColumn: columnName ? { entityName, columnName } : null,
+      }),
 
     removeEntity: (nodeId) => {
       commit();
@@ -342,6 +374,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         validating: false,
         selectedNodeId: null,
         selectedEdgeId: null,
+        selectedColumn: null,
         past: [],
         future: [],
       }),

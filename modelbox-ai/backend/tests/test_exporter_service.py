@@ -173,6 +173,38 @@ def test_dbt_accepted_values_for_categorical_columns() -> None:
         )
 
 
+def test_metricflow_declared_measure_becomes_metric() -> None:
+    # An explicitly declared measure (is_metric) is emitted as a measure + a
+    # simple metric, even on a non-numeric column, using its aggregation.
+    model = SynthesizedModel(
+        paradigm="KIMBALL",  # type: ignore[arg-type]
+        entities=[
+            EntitySchema(
+                entity_name="fact_orders",
+                entity_type="FACT",  # type: ignore[arg-type]
+                grain="per order",
+                columns=[
+                    _col("order_id", "INTEGER", pk=True),
+                    _col("rating", "VARCHAR(8)", metric=True, agg="avg"),  # declared
+                    _col("amount", "NUMERIC(12,2)"),  # numeric heuristic
+                ],
+            )
+        ],
+    )
+    doc = yaml.safe_load(
+        ExporterService().export_semantic_layer(model, "metricflow")[
+            "semantic_models.yml"
+        ]
+    )
+    fo = doc["semantic_models"][0]
+    measures = {m["name"]: m for m in fo["measures"]}
+    assert "total_rating" in measures  # declared measure emitted despite VARCHAR
+    assert measures["total_rating"]["agg"] == "avg"
+    assert "total_amount" in measures
+    metric_names = {m["name"] for m in doc["metrics"]}
+    assert {"total_rating", "total_amount"} <= metric_names  # a metric per measure
+
+
 # ---------------------------------------------------------------------------
 # Cube.js
 # ---------------------------------------------------------------------------
