@@ -25,6 +25,8 @@ from app.models.metadata_store import DataModel, WorkspaceMember
 from app.schemas.data_model import (
     ContractExportResponse,
     ContractFormat,
+    DictionaryExportResponse,
+    DictionaryFormat,
     DiffRequest,
     DiffResponse,
     ExportFormat,
@@ -374,6 +376,35 @@ async def export_semantic(
         ) from exc
     return SemanticExportResponse(
         model_id=model.model_id, engine=semantic_engine, files=files
+    )
+
+
+@router.get(
+    "/{model_id}/export/dictionary",
+    response_model=DictionaryExportResponse,
+    summary="Export a data dictionary + business glossary (Markdown/HTML/JSON)",
+)
+async def export_dictionary(
+    engine: SynthesisEngineDep,
+    exporter: ExporterServiceDep,
+    model: AuthorizedModelDep,
+    dictionary_format: DictionaryFormat = Query(
+        DictionaryFormat.MARKDOWN, alias="format"
+    ),
+) -> DictionaryExportResponse:
+    """Generate a documentation artifact from a persisted model (Pick 2)."""
+    result = await engine.get_model(model.model_id)
+    assert result is not None  # guaranteed by AuthorizedModelDep
+    try:
+        files = exporter.export_data_dictionary(
+            _to_synthesized(result), dictionary_format.value, dataset_name=model.title
+        )
+    except ExporterError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return DictionaryExportResponse(
+        model_id=model.model_id, format=dictionary_format, files=files
     )
 
 

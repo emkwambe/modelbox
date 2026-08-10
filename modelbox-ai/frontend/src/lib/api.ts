@@ -19,6 +19,8 @@ import type {
   ConnectionInfo,
   ContractExportResponse,
   ContractFormat,
+  DictionaryExportResponse,
+  DictionaryFormat,
   DiffRequest,
   DiffResponse,
   Entity,
@@ -297,6 +299,17 @@ export async function exportSemantic(
   const { data } = await apiClient.get<SemanticExportResponse>(
     `/model/${modelId}/export/semantic`,
     { params: { engine } },
+  );
+  return data;
+}
+
+export async function exportDictionary(
+  modelId: string,
+  format: DictionaryFormat,
+): Promise<DictionaryExportResponse> {
+  const { data } = await apiClient.get<DictionaryExportResponse>(
+    `/model/${modelId}/export/dictionary`,
+    { params: { format } },
   );
   return data;
 }

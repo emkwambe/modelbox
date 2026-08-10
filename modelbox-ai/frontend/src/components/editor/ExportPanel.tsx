@@ -14,24 +14,27 @@ import {
   downloadExportZip,
   exportArtifact,
   exportContract,
+  exportDictionary,
   exportSemantic,
   exportSyntheticData,
 } from '@/lib/api';
 import { useCanvasStore } from '@/store/canvasStore';
 import type {
   ContractFormat,
+  DictionaryFormat,
   ExportFormat,
   SeedFormat,
   SemanticEngine,
 } from '@/types/schema';
 
-type Kind = 'artifact' | 'seed' | 'contract' | 'semantic';
+type Kind = 'artifact' | 'seed' | 'contract' | 'semantic' | 'dictionary';
 
 const KINDS: { value: Kind; label: string }[] = [
   { value: 'artifact', label: 'Artifacts' },
   { value: 'seed', label: 'Seed data' },
   { value: 'contract', label: 'Contracts' },
   { value: 'semantic', label: 'Semantic' },
+  { value: 'dictionary', label: 'Dictionary' },
 ];
 
 const FORMATS: { value: ExportFormat; label: string }[] = [
@@ -59,6 +62,12 @@ const SEMANTIC_ENGINES: { value: SemanticEngine; label: string }[] = [
   { value: 'metricflow', label: 'MetricFlow' },
 ];
 
+const DICTIONARY_FORMATS: { value: DictionaryFormat; label: string }[] = [
+  { value: 'markdown', label: 'Markdown' },
+  { value: 'html', label: 'HTML' },
+  { value: 'json', label: 'JSON' },
+];
+
 /** Pick a Monaco language id from a file path. */
 function languageFor(path: string | null): string {
   if (!path) return 'plaintext';
@@ -66,6 +75,8 @@ function languageFor(path: string | null): string {
   if (path.endsWith('.yml') || path.endsWith('.yaml')) return 'yaml';
   if (path.endsWith('.js')) return 'javascript';
   if (path.endsWith('.json') || path.endsWith('.avsc')) return 'json';
+  if (path.endsWith('.md')) return 'markdown';
+  if (path.endsWith('.html')) return 'html';
   return 'plaintext';
 }
 
@@ -80,6 +91,8 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
   const [contractFormat, setContractFormat] =
     useState<ContractFormat>('opendatacontract');
   const [semanticEngine, setSemanticEngine] = useState<SemanticEngine>('cube');
+  const [dictionaryFormat, setDictionaryFormat] =
+    useState<DictionaryFormat>('markdown');
 
   const [files, setFiles] = useState<Record<string, string>>({});
   const [activeFile, setActiveFile] = useState<string | null>(null);
@@ -103,6 +116,8 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
         result = await exportContract(modelId, contractFormat);
       } else if (kind === 'semantic') {
         result = await exportSemantic(modelId, semanticEngine);
+      } else if (kind === 'dictionary') {
+        result = await exportDictionary(modelId, dictionaryFormat);
       } else {
         result = await exportArtifact(modelId, format, dialect);
       }
@@ -238,6 +253,19 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
             style={selectStyle}
           >
             {SEMANTIC_ENGINES.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        )}
+        {kind === 'dictionary' && (
+          <select
+            value={dictionaryFormat}
+            onChange={(e) => setDictionaryFormat(e.target.value as DictionaryFormat)}
+            style={selectStyle}
+          >
+            {DICTIONARY_FORMATS.map((f) => (
               <option key={f.value} value={f.value}>
                 {f.label}
               </option>

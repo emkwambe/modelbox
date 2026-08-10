@@ -55,6 +55,8 @@ export type ContractFormat = 'opendatacontract' | 'avro' | 'protobuf';
 
 export type SemanticEngine = 'cube' | 'lookml' | 'metricflow';
 
+export type DictionaryFormat = 'markdown' | 'html' | 'json';
+
 // ---------------------------------------------------------------------------
 // Core domain shapes
 // ---------------------------------------------------------------------------
@@ -254,6 +256,12 @@ export interface ContractExportResponse {
 export interface SemanticExportResponse {
   model_id: string;
   engine: SemanticEngine;
+  files: Record<string, string>;
+}
+
+export interface DictionaryExportResponse {
+  model_id: string;
+  format: DictionaryFormat;
   files: Record<string, string>;
 }
 

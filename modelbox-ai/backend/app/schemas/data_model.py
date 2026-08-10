@@ -341,6 +341,24 @@ class SemanticExportResponse(BaseModel):
     files: dict[str, str] = Field(default_factory=dict)
 
 
+class DictionaryFormat(str, enum.Enum):
+    """Data-dictionary output formats (Pick 2)."""
+
+    MARKDOWN = "markdown"
+    HTML = "html"
+    JSON = "json"
+
+
+class DictionaryExportResponse(BaseModel):
+    """A generated data dictionary + business glossary (Pick 2)."""
+
+    model_config = ConfigDict(use_enum_values=True, protected_namespaces=())
+
+    model_id: uuid.UUID
+    format: DictionaryFormat
+    files: dict[str, str] = Field(default_factory=dict)
+
+
 class PIIType(str, enum.Enum):
     """Privacy classification flags (FR-6.1)."""
 
@@ -639,4 +657,6 @@ __all__ = [
     "SemanticEngine",
     "ContractExportResponse",
     "SemanticExportResponse",
+    "DictionaryFormat",
+    "DictionaryExportResponse",
 ]
