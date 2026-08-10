@@ -329,6 +329,51 @@ def test_single_entity_is_not_orphan(engine: GraphEngine) -> None:
     assert "ORPHAN_ENTITY" not in _codes(report)
 
 
+def test_fan_out_many_to_many(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [entity("a", [col("id", pk=True)]), entity("b", [col("id", pk=True)])],
+        [rel("a.id", "b.id", "N:M")],
+    )
+    assert "FAN_OUT_RISK" in _codes(report)
+
+
+def test_fan_out_fact_to_fact(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity("fact_a", [col("a_id", pk=True)], "FACT", grain="per a"),
+            entity("fact_b", [col("b_id", pk=True)], "FACT", grain="per b"),
+        ],
+        [rel("fact_a.b_ref", "fact_b.b_id", "N:1")],  # N:1, but fact -> fact
+    )
+    assert any(i.code == "FAN_OUT_RISK" for i in report.issues)
+
+
+def test_no_fan_out_on_fact_to_dimension(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity("dim_c", [col("c_sk", pk=True)], "DIMENSION"),
+            entity(
+                "fact_o",
+                [col("o_id", pk=True), col("c_sk")],
+                "FACT",
+                grain="per order",
+            ),
+        ],
+        [rel("fact_o.c_sk", "dim_c.c_sk", "N:1")],  # the safe star-join
+    )
+    assert "FAN_OUT_RISK" not in _codes(report)
+
+
+def test_fan_out_is_warning_only(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [entity("a", [col("id", pk=True)]), entity("b", [col("id", pk=True)])],
+        [rel("a.id", "b.id", "N:M")],
+    )
+    fan_out = [i for i in report.issues if i.code == "FAN_OUT_RISK"]
+    assert fan_out and all(i.severity == "warning" for i in fan_out)
+    assert report.is_valid is True  # advisory, does not invalidate
+
+
 def test_governance_issues_are_warnings_only(engine: GraphEngine) -> None:
     # Multiple governance violations, but none invalidate the model.
     report = engine.validate(

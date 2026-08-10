@@ -201,6 +201,7 @@ class GraphEngine:
         issues.extend(self._lint_descriptions(entities))
         issues.extend(self._lint_pii(entities))
         issues.extend(self._lint_orphans(entities, relationships))
+        issues.extend(self._lint_fan_out(entities, relationships))
 
         is_valid = not any(issue.severity == "error" for issue in issues)
         return ValidationReport(is_valid=is_valid, issues=issues)
@@ -363,6 +364,50 @@ class GraphEngine:
                             column_name=column.name,
                         )
                     )
+        return issues
+
+    @classmethod
+    def _lint_fan_out(
+        cls,
+        entities: list[EntitySchema],
+        relationships: list[RelationshipSchema],
+    ) -> list[ValidationIssue]:
+        """FAN_OUT_RISK — relationships that can duplicate rows and inflate
+        aggregated measures in a semantic layer.
+
+        Flags the two classic traps: many-to-many (``N:M``) relationships, and
+        joins between two ``FACT`` entities (fact-to-fact / chasm trap).
+        """
+        types = {e.entity_name: cls._entity_type(e) for e in entities}
+        issues: list[ValidationIssue] = []
+        for rel in relationships:
+            from_entity = rel.from_ref.split(".", 1)[0]
+            to_entity = rel.to_ref.split(".", 1)[0]
+            cardinality = rel.cardinality
+            card_value = (
+                cardinality.value
+                if hasattr(cardinality, "value")
+                else str(cardinality)
+            )
+            reason: str | None = None
+            if card_value == "N:M":
+                reason = "many-to-many relationship"
+            elif types.get(from_entity) == "FACT" and types.get(to_entity) == "FACT":
+                reason = "join between two FACT entities"
+            if reason is None:
+                continue
+            issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    code="FAN_OUT_RISK",
+                    message=(
+                        f"Fan-out risk: {reason} ({from_entity} -> {to_entity}) "
+                        f"can duplicate rows and inflate aggregated measures."
+                    ),
+                    entities=[e for e in (from_entity, to_entity) if e],
+                    entity_name=from_entity or None,
+                )
+            )
         return issues
 
     @staticmethod
