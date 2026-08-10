@@ -137,6 +137,42 @@ def test_generate_dbt_project() -> None:
     assert rel_test["relationships"]["field"] == "customer_hk"
 
 
+def test_dbt_accepted_values_for_categorical_columns() -> None:
+    model = SynthesizedModel(
+        paradigm="3NF",  # type: ignore[arg-type]
+        entities=[
+            EntitySchema(
+                entity_name="orders",
+                entity_type="TABLE",  # type: ignore[arg-type]
+                columns=[
+                    _col("id", "INT", pk=True),
+                    _col("order_status", "VARCHAR(32)"),  # categorical -> accepted_values
+                    _col("amount", "NUMERIC(12,2)"),  # numeric -> no accepted_values
+                    _col("note", "VARCHAR(255)"),  # non-categorical string -> none
+                ],
+            )
+        ],
+    )
+    schema = yaml.safe_load(
+        ExporterService().generate_dbt_project(model)["models/staging/schema.yml"]
+    )
+    cols = {c["name"]: c for c in schema["models"][0]["columns"]}
+
+    status_tests = cols["order_status"].get("tests", [])
+    accepted = next(
+        (t["accepted_values"] for t in status_tests if isinstance(t, dict) and "accepted_values" in t),
+        None,
+    )
+    assert accepted == {"values": ["ACTIVE", "INACTIVE", "PENDING"]}
+
+    # Numeric and free-text columns get no accepted_values test.
+    for other in ("amount", "note"):
+        tests = cols[other].get("tests", [])
+        assert not any(
+            isinstance(t, dict) and "accepted_values" in t for t in tests
+        )
+
+
 # ---------------------------------------------------------------------------
 # Cube.js
 # ---------------------------------------------------------------------------

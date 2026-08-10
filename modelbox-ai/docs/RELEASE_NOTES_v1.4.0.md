@@ -2,82 +2,109 @@
 
 **Tag:** `v1.4.0`  ·  **Cut from:** `main`  ·  **CI:** green (Backend Pytest + Frontend `tsc`/build)
 
-This release adds the **Business Requirements Library** — a curated gallery of
-gold-standard reference architectures — on top of the completed v2.0 platform
-(see [v1.3.0](RELEASE_NOTES_v1.3.0.md)). It solves the blank-canvas problem for
-evaluators, gives ModelBox Trainer a set of pedagogical reference models, and
-doubles as a standardized regression corpus for the synthesis engine and linter.
+This release builds on the completed v2.0 platform ([v1.3.0](RELEASE_NOTES_v1.3.0.md))
+with a **Business Requirements Library**, a **governance lint pack**, a
+**data-dictionary exporter**, and **multi-engine brownfield introspection**
+(PostgreSQL, Snowflake, BigQuery, MySQL) — the highest-value additions from the
+2026 data-modeling-roles research review, each extending an engine ModelBox
+already owns rather than adding a new subsystem.
 
 ---
 
 ## Highlights
 
-- **Business Requirements & Starter Template Library** — 5 domain scenarios, one
-  per modeling paradigm, each with a natural-language prompt, a pre-built
-  verified graph, and a modeling rationale.
-- **Dual-mode launch** — synthesize live from the prompt, or hydrate a
-  gold-standard graph instantly with zero LLM latency or token cost.
-- **Trainer integration** — load reference architectures straight into the
-  Socratic sandbox.
+- **Business Requirements Library** — 5 gold-standard starter scenarios, dual-mode launch.
+- **Governance Lint Pack** — 5 convention/governance rules on the graph linter.
+- **Data Dictionary & Glossary exporter** — Markdown / HTML / JSON.
+- **Multi-engine introspection** — Postgres, Snowflake, BigQuery, MySQL.
+- **Connection management** — `DELETE /connectors/{id}`.
 
 ---
 
 ## Business Requirements Library
 
-Accessible from the home prompt bar (**"📚 Explore Requirements Library"**) and
-the Trainer header (**"📚 Library"**).
+Accessible from the home prompt bar ("📚 Explore Requirements Library") and the
+Trainer header ("📚 Library"). Five gold-standard scenarios — Subscription
+Analytics (Kimball/SCD2/MRR), E-Commerce (Kimball/order-line grain), Retail
+Banking (Data Vault), Healthcare EHR (3NF/PII), Marketing Attribution (OBT) —
+each with a raw prompt, a pre-built verified graph, and a modeling rationale.
 
-| Template | Paradigm | Key concepts |
+- **Mode A — Synthesize Live**: populates the prompt + paradigm.
+- **Mode B — Inspect Gold-Standard Graph**: hydrates the graph onto the canvas
+  with **no LLM call** (zero latency/tokens); PK and PII badges included.
+
+## Governance Lint Pack (FR-2.3)
+
+Five additive, **warning-severity** rules on `GraphEngine.validate` (never
+invalidate a model — `is_valid` still keys off errors only). They surface on the
+canvas node cards (badge + tooltip + amber border), with a column-level `🔓`
+highlight for unclassified PII.
+
+| Rule | Flags |
+|---|---|
+| `NAMING_CONVENTION` | non-snake_case, missing type prefix (`dim_`/`fact_`/`hub_`/`lnk_`/`sat_`), PK without key suffix |
+| `MISSING_GRAIN` | FACT entities with no declared business grain |
+| `MISSING_DESCRIPTION` | undocumented entities and columns |
+| `PII_EXPOSURE` | columns that look like PII (email/ssn/phone/dob/…) but aren't classified |
+| `ORPHAN_ENTITY` | isolated nodes in a multi-entity model (single-table/OBT exempt) |
+
+Live-verified: reintrospecting ModelBox's own DB surfaced **41 findings** across
+all five rules (previously "0 issues"), with `is_valid` still True.
+
+## Data Dictionary & Glossary Exporter (Pick 2)
+
+`GET /api/v1/model/{id}/export/dictionary?format=markdown|html|json` and a
+"Dictionary" tab in the export drawer:
+
+- **Markdown** — per-entity column tables (name/type/key/PII/description) with
+  resolved FK targets, a relationships table, and a business glossary.
+- **HTML** — self-contained styled page (escaped, PII-highlighted).
+- **JSON** — machine-readable metadata; structured context for AI agents.
+
+## Multi-Engine Brownfield Introspection (FR-2.1, Pick 3)
+
+`POST /api/v1/connectors/introspect` now dispatches on engine and reuses the
+engine-agnostic `build_graph` with a per-engine type map:
+
+| Engine | Driver | Notes |
 |---|---|---|
-| Subscription Analytics (SaaS) | Kimball | MRR/ARR facts, SCD Type 2 customer tiers, churn |
-| E-Commerce & Logistics | Kimball | Order-line grain, degenerate dimension, basket analysis |
-| Retail Banking & Ledger | Data Vault 2.0 | Hubs, Links, Satellites, immutable audit trail |
-| Healthcare Patient EHR | 3NF | N:1 FK constraints, explicit PII/PHI tagging |
-| Digital Marketing & Attribution | OBT | Multi-touch attribution, denormalized touchpoint grain |
+| PostgreSQL | asyncpg | `INFORMATION_SCHEMA` (unchanged) |
+| Snowflake | snowflake-connector-python | keys via `SHOW PRIMARY/IMPORTED KEYS` |
+| BigQuery | google-cloud-bigquery | service-account JSON; `<project>.<dataset>.INFORMATION_SCHEMA` |
+| MySQL | aiomysql | `key_column_usage` FKs; `tinyint(1)→BOOLEAN` |
 
-### Dual-mode interactive launch
+Type maps normalize each dialect (e.g. Snowflake `NUMBER→DECIMAL`,
+`TIMESTAMP_NTZ→TIMESTAMP`; BigQuery `INT64→BIGINT`, `GEOGRAPHY→JSON`; MySQL
+`mediumtext→TEXT`). Drivers are lazy-imported — a missing driver returns a clear
+`501`, not a crash. Connection URIs stay AES-256-GCM encrypted.
 
-- **Mode A — Synthesize Live** — populates the natural-language prompt and
-  paradigm selector so users can watch the LLM gateway turn requirements into a
-  validated graph in real time.
-- **Mode B — Inspect Gold-Standard Graph** — hydrates the pre-built
-  `SynthesizedModel` directly onto the canvas with **no LLM call** (zero latency,
-  zero tokens). Users immediately see entity types, primary-key badges, PII
-  flags, topological validity, and can export DDL/dbt/Cube/contracts/semantic.
+## Connection Management
 
-### Trainer launcher seam
+`DELETE /api/v1/connectors/{id}` (ADMIN+) with a per-row Delete button in the
+`/settings/connectors` UI. Migration `0008` adds `MYSQL` to the allowed engines.
 
-The library is wired into `/trainer` (Mode B only), so instructors and learners
-can drop a gold-standard reference architecture into the Spot-the-Flaw sandbox
-alongside the Socratic tutor.
+## Other
 
----
+- **dbt exporter** now scaffolds `accepted_values` tests for well-known
+  categorical columns (`status`, `tier`, `priority`, `severity`) — real values,
+  never fabricated — alongside the existing `unique`/`not_null`/`relationships`.
+- Trainer integration for the Requirements Library.
+- `canvasStore.loadGraph` gained an optional `paradigm` argument.
+- Appliance compose image tags bumped to `v1.3.0`; `UI_PORT` documented.
 
-## Implementation notes
-
-- **Frontend-only, no backend changes.** Templates live in a static registry
-  (`frontend/src/lib/templates.ts`); the modal is `TemplateLibraryModal`.
-- `canvasStore.loadGraph` gained an optional `paradigm` argument (backward
-  compatible) so Mode B reflects the template's paradigm on the canvas.
-- The card **Preview** expands to show each template's prompt and modeling
-  rationale (the "how it was done" explainer).
-
-## Housekeeping
-
-- Appliance compose image tags bumped `v1.2.0` → `v1.3.0`.
-
-## Known items / possible follow-ups
+## Known items / notes
 
 - Async-job-created models still default their `title` to `"Untitled Model"`.
-- The rationale lives in the card Preview rather than a dedicated side-panel
-  drawer (same content, lighter UI).
+- Live Snowflake/BigQuery paths reach their real drivers (verified: graceful
+  502 on bad account/credentials); MySQL is native once `aiomysql` is installed
+  (now in requirements). BigQuery/MySQL end-to-end need real accounts to verify.
 
 ---
 
 ## Publishing
 
-`release.yml` builds and pushes the backend + frontend images to GHCR on any
-`v*` tag, tagged `1.4.0`, `1.4`, and `latest`. Cut the tag from green `main`:
+`release.yml` builds and pushes backend + frontend images to GHCR on any `v*`
+tag, tagged `1.4.0`, `1.4`, and `latest`. Cut from green `main`:
 
 ```bash
 git tag v1.4.0

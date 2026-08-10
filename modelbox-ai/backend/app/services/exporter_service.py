@@ -31,6 +31,16 @@ from app.schemas.data_model import (
 if TYPE_CHECKING:
     from app.services.seed_generator import SeedResult
 
+# Conventional value sets for common categorical columns. Used to scaffold dbt
+# accepted_values tests only where the values are well-known — we never fabricate
+# a values list we can't stand behind.
+_CATEGORICAL_VALUES: dict[str, list[str]] = {
+    "status": ["ACTIVE", "INACTIVE", "PENDING"],
+    "tier": ["BRONZE", "SILVER", "GOLD", "PLATINUM"],
+    "priority": ["LOW", "MEDIUM", "HIGH"],
+    "severity": ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+}
+
 # Map friendly dialect names to SQLGlot dialect identifiers.
 _SQLGLOT_DIALECTS: dict[str, str] = {
     "postgres": "postgres",
@@ -196,6 +206,9 @@ class ExporterService:
                             }
                         }
                     )
+                accepted = self._accepted_values(col)
+                if accepted:
+                    tests.append({"accepted_values": {"values": accepted}})
                 if tests:
                     col_doc["tests"] = tests
                 columns.append(col_doc)
@@ -873,6 +886,26 @@ class ExporterService:
             tok in upper
             for tok in ("INT", "NUMBER", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL")
         )
+
+    @staticmethod
+    def _is_string_type(col: ColumnSchema) -> bool:
+        upper = col.data_type.upper()
+        return any(tok in upper for tok in ("CHAR", "TEXT", "STRING", "VARCHAR"))
+
+    @classmethod
+    def _accepted_values(cls, col: ColumnSchema) -> list[str] | None:
+        """Conventional accepted values for a categorical string column, or None.
+
+        Matches by column name (exact or ``*_<name>``) against a curated set of
+        well-known enums so the emitted dbt test asserts real values, not guesses.
+        """
+        if not cls._is_string_type(col):
+            return None
+        name = col.name.lower()
+        for key, values in _CATEGORICAL_VALUES.items():
+            if name == key or name.endswith(f"_{key}"):
+                return values
+        return None
 
     def _cube_type(self, col: ColumnSchema) -> str:
         upper = col.data_type.upper()
