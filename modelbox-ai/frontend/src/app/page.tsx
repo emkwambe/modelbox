@@ -5,10 +5,11 @@
  * jump to the canvas.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { synthesizeModel } from '@/lib/api';
+import { useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { Paradigm } from '@/types/schema';
 
@@ -17,13 +18,25 @@ const PARADIGMS: Paradigm[] = ['3NF', 'KIMBALL', 'DATA_VAULT', 'OBT'];
 export default function HomePage() {
   const router = useRouter();
   const loadModel = useCanvasStore((s) => s.loadModel);
+  const token = useAuthStore((s) => s.token);
+  const openModal = useAuthStore((s) => s.openModal);
   const [content, setContent] = useState('');
   const [paradigm, setParadigm] = useState<Paradigm>('KIMBALL');
   const [dialect, setDialect] = useState('snowflake');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  // Auth state is only known client-side (persisted). Gate auth-dependent UI
+  // behind mount to avoid an SSR/CSR hydration mismatch.
+  useEffect(() => setMounted(true), []);
+  const signedIn = mounted && Boolean(token);
 
   async function handleSynthesize() {
+    if (!token) {
+      openModal();
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -91,23 +104,57 @@ export default function HomePage() {
         </label>
       </div>
 
-      <button
-        type="button"
-        onClick={handleSynthesize}
-        disabled={loading || content.trim().length === 0}
-        style={{
-          marginTop: 20,
-          padding: '10px 20px',
-          borderRadius: 8,
-          border: 'none',
-          background: loading ? '#94a3b8' : '#2563eb',
-          color: '#ffffff',
-          fontWeight: 600,
-          cursor: loading ? 'default' : 'pointer',
-        }}
-      >
-        {loading ? 'Synthesizing…' : 'Synthesize model'}
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20 }}>
+        <button
+          type="button"
+          onClick={handleSynthesize}
+          disabled={loading || content.trim().length === 0}
+          style={{
+            padding: '10px 20px',
+            borderRadius: 8,
+            border: 'none',
+            background: loading ? '#94a3b8' : '#2563eb',
+            color: '#ffffff',
+            fontWeight: 600,
+            cursor: loading ? 'default' : 'pointer',
+          }}
+        >
+          {loading
+            ? 'Synthesizing…'
+            : signedIn
+              ? 'Synthesize model'
+              : 'Sign in to synthesize'}
+        </button>
+        {mounted && !signedIn && (
+          <button
+            type="button"
+            onClick={openModal}
+            style={{
+              padding: '10px 16px',
+              borderRadius: 8,
+              border: '1px solid #2563eb',
+              background: '#ffffff',
+              color: '#2563eb',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            🔒 Sign in
+          </button>
+        )}
+      </div>
+
+      {mounted && signedIn && (
+        <p style={{ color: '#16a34a', marginTop: 8, fontSize: 13 }}>
+          ✓ Signed in — ready to synthesize.
+        </p>
+      )}
+
+      {loading && (
+        <p style={{ color: '#64748b', marginTop: 8, fontSize: 13 }}>
+          Contacting the model… this can take up to a minute or two.
+        </p>
+      )}
 
       {error && (
         <p style={{ color: '#dc2626', marginTop: 12 }} role="alert">

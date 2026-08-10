@@ -13,7 +13,9 @@ export default function AuthBadge() {
   const token = useAuthStore((s) => s.token);
   const email = useAuthStore((s) => s.email);
   const logout = useAuthStore((s) => s.logout);
-  const [open, setOpen] = useState(false);
+  const modalOpen = useAuthStore((s) => s.modalOpen);
+  const openModal = useAuthStore((s) => s.openModal);
+  const closeModal = useAuthStore((s) => s.closeModal);
   const [mounted, setMounted] = useState(false);
 
   // Avoid SSR/CSR hydration mismatch: render only after the client mounts
@@ -64,14 +66,19 @@ export default function AuthBadge() {
         ) : (
           <button
             type="button"
-            style={{ ...btn, borderColor: '#2563eb', color: '#2563eb' }}
-            onClick={() => setOpen(true)}
+            style={{
+              ...btn,
+              borderColor: '#2563eb',
+              color: '#fff',
+              background: '#2563eb',
+            }}
+            onClick={openModal}
           >
             Sign in
           </button>
         )}
       </div>
-      {open && <AuthModal onClose={() => setOpen(false)} />}
+      {modalOpen && <AuthModal onClose={closeModal} />}
     </>
   );
 }

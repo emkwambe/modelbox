@@ -36,12 +36,14 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// On 401, clear the session so the UI can prompt for sign-in again.
+// On 401, clear the session and prompt for sign-in.
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401) {
-      useAuthStore.getState().logout();
+      const auth = useAuthStore.getState();
+      auth.logout();
+      auth.openModal();
     }
     return Promise.reject(error);
   },
