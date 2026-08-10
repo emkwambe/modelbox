@@ -70,7 +70,11 @@ interface CanvasState {
   updateEntity: (entityName: string, patch: Partial<EntityNodeData>) => void;
   removeEntity: (nodeId: string) => void;
   getGraphPayload: () => { entities: Entity[]; relationships: Relationship[] };
-  loadGraph: (entities: Entity[], relationships: Relationship[]) => void;
+  loadGraph: (
+    entities: Entity[],
+    relationships: Relationship[],
+    paradigm?: Paradigm | null,
+  ) => void;
   loadModel: (model: SynthesizeResponse) => void;
   applyLayout: (direction?: LayoutDirection) => void;
   setValidation: (report: ValidationReport | null) => void;
@@ -245,11 +249,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       return { entities, relationships };
     },
 
-    loadGraph: (entities, relationships) => {
+    loadGraph: (entities, relationships, paradigm = null) => {
       commit();
       set({
         modelId: null,
-        paradigm: null,
+        paradigm,
         nodes: entities.map(entityToNode),
         edges: relationships.map(relationshipToEdge),
         validation: null,

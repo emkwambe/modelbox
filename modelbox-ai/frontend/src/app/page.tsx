@@ -9,7 +9,9 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
+import TemplateLibraryModal from '@/components/TemplateLibraryModal';
 import { enqueueSynthesis, getJob, getModel } from '@/lib/api';
+import type { Template } from '@/lib/templates';
 import { useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { Paradigm, SynthesizeResponse } from '@/types/schema';
@@ -24,6 +26,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export default function HomePage() {
   const router = useRouter();
   const loadModel = useCanvasStore((s) => s.loadModel);
+  const loadGraph = useCanvasStore((s) => s.loadGraph);
   const token = useAuthStore((s) => s.token);
   const openModal = useAuthStore((s) => s.openModal);
   const activeWorkspaceId = useAuthStore((s) => s.activeWorkspaceId);
@@ -34,6 +37,19 @@ export default function HomePage() {
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
+
+  function handleUsePrompt(t: Template) {
+    setContent(t.rawPrompt);
+    setParadigm(t.paradigm);
+    setShowLibrary(false);
+  }
+
+  function handleLoadGraph(t: Template) {
+    loadGraph(t.entities, t.relationships, t.paradigm);
+    setShowLibrary(false);
+    router.push('/canvas');
+  }
 
   // Auth state is only known client-side (persisted). Gate auth-dependent UI
   // behind mount to avoid an SSR/CSR hydration mismatch.
@@ -98,6 +114,32 @@ export default function HomePage() {
           Connect a database →
         </Link>
       </p>
+
+      <button
+        type="button"
+        onClick={() => setShowLibrary(true)}
+        style={{
+          marginTop: 12,
+          padding: '8px 14px',
+          borderRadius: 8,
+          border: '1px solid #7c3aed',
+          background: '#f5f3ff',
+          color: '#7c3aed',
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: 'pointer',
+        }}
+      >
+        📚 Explore Requirements Library
+      </button>
+
+      {showLibrary && (
+        <TemplateLibraryModal
+          onClose={() => setShowLibrary(false)}
+          onUsePrompt={handleUsePrompt}
+          onLoadGraph={handleLoadGraph}
+        />
+      )}
 
       <textarea
         value={content}
