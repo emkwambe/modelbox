@@ -15,11 +15,14 @@ from app.api.v1.dependencies import (
     ExporterServiceDep,
     SessionDep,
     SynthesisEngineDep,
+    require_membership,
     require_model_role,
     resolve_user_workspace,
 )
 from app.models.metadata_store import DataModel
 from app.schemas.data_model import (
+    DiffRequest,
+    DiffResponse,
     ExportFormat,
     ExportResponse,
     GraphUpdateRequest,
@@ -30,6 +33,7 @@ from app.schemas.data_model import (
     SynthesizeResponse,
     ValidationReport,
 )
+from app.services.diff_engine import DiffEngine
 from app.services.exporter_service import ExporterError
 from app.services.graph_engine import GraphEngine
 from app.services.graph_repository import GraphRepository
@@ -68,6 +72,54 @@ async def synthesize_model(
         session, user, payload.workspace_id
     )
     return await engine.synthesize(payload)
+
+
+@router.post(
+    "/diff",
+    response_model=DiffResponse,
+    summary="Diff two models into migration DDL + breaking changes",
+)
+async def diff_models(
+    payload: DiffRequest,
+    engine: SynthesisEngineDep,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> DiffResponse:
+    """Compare a source (V1) and target (V2) model into ALTER DDL (FR-2.2).
+
+    Both models are authorized independently against the caller's workspace
+    membership. Emits dialect-specific migration statements and flags
+    destructive/breaking changes.
+    """
+    source = await session.get(DataModel, payload.source_model_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model {payload.source_model_id} not found.",
+        )
+    target = await session.get(DataModel, payload.target_model_id)
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model {payload.target_model_id} not found.",
+        )
+    await require_membership(session, user.user_id, source.workspace_id)
+    await require_membership(session, user.user_id, target.workspace_id)
+
+    source_model = await engine.get_model(payload.source_model_id)
+    target_model = await engine.get_model(payload.target_model_id)
+    assert source_model is not None and target_model is not None
+
+    statements, breaking = DiffEngine(payload.dialect).diff(
+        _to_synthesized(source_model), _to_synthesized(target_model)
+    )
+    return DiffResponse(
+        source_model_id=payload.source_model_id,
+        target_model_id=payload.target_model_id,
+        dialect=payload.dialect,
+        alter_statements=statements,
+        breaking_changes=breaking,
+    )
 
 
 @router.get(

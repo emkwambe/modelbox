@@ -242,6 +242,31 @@ class IntrospectRequest(BaseModel):
     schema_name: str = "public"
 
 
+# ---------------------------------------------------------------------------
+# Schema diffing & migration (Phase 2, FR-2.2)
+# ---------------------------------------------------------------------------
+class DiffRequest(BaseModel):
+    """Diff two persisted models (V1 source -> V2 target)."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    source_model_id: uuid.UUID
+    target_model_id: uuid.UUID
+    dialect: str = Field(default="postgres", max_length=64)
+
+
+class DiffResponse(BaseModel):
+    """Migration DDL + breaking-change report for a model diff (FR-2.2)."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    source_model_id: uuid.UUID
+    target_model_id: uuid.UUID
+    dialect: str
+    alter_statements: list[str] = Field(default_factory=list)
+    breaking_changes: list[str] = Field(default_factory=list)
+
+
 class PIIType(str, enum.Enum):
     """Privacy classification flags (FR-6.1)."""
 
@@ -531,4 +556,6 @@ __all__ = [
     "ConnectionCreateRequest",
     "ConnectionInfo",
     "IntrospectRequest",
+    "DiffRequest",
+    "DiffResponse",
 ]
