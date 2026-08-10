@@ -34,7 +34,7 @@ ModelBox is a **deterministic NL/DDL → typed-graph → multi-dialect codegen p
 
 - **Pillar 1 — Enterprise Designer:** async synthesis, canvas-edit persistence, live graph state.
 - **Pillar 2 — Migration & Governance Mesh:** DB introspection, schema diff → `ALTER`, synthetic seed data, and data contracts (OpenDataContract/Avro/Protobuf/LookML/MetricFlow).
-- **Pillar 3 — Academy & Trainer:** Socratic tutor, "Spot the Flaw" challenge mode, auto-graded rubrics.
+- **Pillar 3 — ModelBox Trainer:** the interactive teaching & learning engine for **RealityDB Academy** data-modeling courses — Socratic tutor, "Spot the Flaw" challenge mode, auto-graded rubrics.
 
 ### 2. Personas & buyers
 
@@ -58,7 +58,8 @@ ModelBox is a **deterministic NL/DDL → typed-graph → multi-dialect codegen p
 - **FR-2.4 Referential synthetic seed:** generate CSV/SQL seed honoring `topological_order()` (dimensions before facts) + column constraints; never touch production. ⟳
 - **FR-2.5 (ecosystem, optional) Cross-product seams:** synthetic seed MAY delegate to **RealityDB** (`@realitydb/cli`) for compliance-graded data; generated SQL/dbt MAY be validated by **SafeSQL Pro** (safesqlpro.dev) detectors / GitHub Action. See §2.6.
 
-**Module 3 — Academy & Trainer**
+**Module 3 — ModelBox Trainer** *(Teaching & Learning Engine)*
+*The interactive data-modeling sandbox and tutoring engine for **RealityDB Academy** courses. ModelBox is the schema source-of-truth + canvas; RealityDB supplies the underlying data-generation engine (see §2.6).*
 - **FR-3.1 Socratic tutor:** guide schema creation via interactive prompt chains (step-by-step), not one-shot generation.
 - **FR-3.2 Spot-the-Flaw:** present intentionally defective schemas (cyclic FK, missing PK, fan-out risk) to diagnose/fix with linter feedback.
 - **FR-3.3 Auto-graded rubrics:** submit student ERD JSON → scored rubric from **graph invariants** (reuse `GraphEngine`) + requirements coverage.
@@ -205,7 +206,7 @@ The three Mpingo products form one loop — **design (ModelBox) → populate (Re
 | **Synthetic data** | ModelBox → RealityDB | FR-2.4 native emitter, OR emit a RealityDB manifest → SimLab live Postgres in 60s |
 | **SQL/dbt correctness** | ModelBox → SafeSQL | validate generated dbt/DDL through SafeSQL's 33 detectors; surface a "passed N detectors" badge on the export panel + optional CI GitHub Action |
 | **Schema connection** | shared | one Postgres introspection layer reused by ModelBox (FR-2.1), SafeSQL ("connect your DB"), RealityDB (SimLab) |
-| **Trainer** | ties all three | model on ModelBox canvas, grade design via `GraphEngine`, grade queries via SafeSQL, on RealityDB data → RealityDB Academy cert |
+| **ModelBox Trainer** | ties all three | model on ModelBox canvas, grade design via `GraphEngine`, grade queries via SafeSQL, on RealityDB data → RealityDB Academy cert |
 
 ---
 
