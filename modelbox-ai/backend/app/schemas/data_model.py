@@ -438,6 +438,20 @@ class ColumnSchema(BaseModel):
     )
     is_metric: bool = False
     aggregation: str | None = None
+    # Quality rules (Sprint U3) — numeric bounds + text format pattern.
+    # These declare the data contract's *assertions* and export to dbt tests /
+    # ODCS quality blocks; the linter flags contradictory or uncompilable rules.
+    min_value: float | None = Field(
+        default=None, description="Inclusive lower bound for numeric values."
+    )
+    max_value: float | None = Field(
+        default=None, description="Inclusive upper bound for numeric values."
+    )
+    regex_pattern: str | None = Field(
+        default=None,
+        description="Regex the column's values must match.",
+        max_length=512,
+    )
 
     @field_validator("pii_type", mode="after")
     @classmethod

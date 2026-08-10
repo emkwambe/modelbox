@@ -203,6 +203,7 @@ class GraphEngine:
         issues.extend(self._lint_orphans(entities, relationships))
         issues.extend(self._lint_fan_out(entities, relationships))
         issues.extend(self._lint_sla(entities))
+        issues.extend(self._lint_quality(entities))
 
         is_valid = not any(issue.severity == "error" for issue in issues)
         return ValidationReport(is_valid=is_valid, issues=issues)
@@ -434,6 +435,55 @@ class GraphEngine:
                         entity_name=entity.entity_name,
                     )
                 )
+        return issues
+
+    @staticmethod
+    def _lint_quality(entities: list[EntitySchema]) -> list[ValidationIssue]:
+        """Quality-rule lints (Sprint U3) — a declared rule that can never pass.
+
+        Flags *broken* quality assertions before they ship as dbt/ODCS tests:
+        * ``INVALID_RANGE`` — a numeric range whose min exceeds its max (no row
+          can satisfy it), and
+        * ``INVALID_REGEX`` — a pattern that does not compile (would crash the
+          generated test).
+        Correctly-formed rules stay quiet — good quality is rewarded with silence.
+        """
+        issues: list[ValidationIssue] = []
+        for entity in entities:
+            for column in entity.columns:
+                lo, hi = column.min_value, column.max_value
+                if lo is not None and hi is not None and lo > hi:
+                    issues.append(
+                        ValidationIssue(
+                            severity="warning",
+                            code="INVALID_RANGE",
+                            message=(
+                                f"Column '{entity.entity_name}.{column.name}' has an "
+                                f"impossible range: min ({lo}) > max ({hi})."
+                            ),
+                            entities=[entity.entity_name],
+                            entity_name=entity.entity_name,
+                            column_name=column.name,
+                        )
+                    )
+                pattern = column.regex_pattern
+                if pattern and pattern.strip():
+                    try:
+                        re.compile(pattern)
+                    except re.error as exc:
+                        issues.append(
+                            ValidationIssue(
+                                severity="warning",
+                                code="INVALID_REGEX",
+                                message=(
+                                    f"Column '{entity.entity_name}.{column.name}' has an "
+                                    f"invalid regex pattern: {exc}."
+                                ),
+                                entities=[entity.entity_name],
+                                entity_name=entity.entity_name,
+                                column_name=column.name,
+                            )
+                        )
         return issues
 
     @staticmethod

@@ -78,6 +78,10 @@ export interface Column {
   references?: string | null;
   is_metric: boolean;
   aggregation?: string | null;
+  // Quality rules (Sprint U3) — numeric bounds + text format pattern.
+  min_value?: number | null;
+  max_value?: number | null;
+  regex_pattern?: string | null;
 }
 
 export interface Entity {

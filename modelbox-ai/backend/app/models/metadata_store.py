@@ -269,6 +269,10 @@ class EntityColumn(Base):
         default=False, server_default=text("false")
     )
     aggregation: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Quality rules (Sprint U3) — numeric bounds + text format pattern.
+    min_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    regex_pattern: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     entity: Mapped["ModelEntity"] = relationship(back_populates="columns")
 

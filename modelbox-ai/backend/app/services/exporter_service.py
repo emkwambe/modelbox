@@ -209,6 +209,7 @@ class ExporterService:
                 accepted = self._accepted_values(col)
                 if accepted:
                     tests.append({"accepted_values": {"values": accepted}})
+                tests.extend(self._dbt_quality_tests(col))
                 if tests:
                     col_doc["tests"] = tests
                 columns.append(col_doc)
@@ -350,6 +351,9 @@ class ExporterService:
                     prop["description"] = col.description
                 if col.is_pii:
                     prop["classification"] = "PII"
+                quality = self._odcs_quality(col)
+                if quality:
+                    prop["quality"] = quality
                 properties.append(prop)
             table_doc: dict[str, object] = {
                 "name": entity.entity_name,
@@ -933,6 +937,49 @@ class ExporterService:
     def _is_string_type(col: ColumnSchema) -> bool:
         upper = col.data_type.upper()
         return any(tok in upper for tok in ("CHAR", "TEXT", "STRING", "VARCHAR"))
+
+    @staticmethod
+    def _dbt_quality_tests(col: ColumnSchema) -> list[object]:
+        """Declared quality rules -> dbt_expectations column tests (Sprint U3).
+
+        Numeric bounds become ``expect_column_values_to_be_between`` and a regex
+        becomes ``expect_column_values_to_match_regex`` — the de-facto dbt way to
+        express range/pattern assertions.
+        """
+        tests: list[object] = []
+        if col.min_value is not None or col.max_value is not None:
+            between: dict[str, object] = {}
+            if col.min_value is not None:
+                between["min_value"] = col.min_value
+            if col.max_value is not None:
+                between["max_value"] = col.max_value
+            tests.append(
+                {"dbt_expectations.expect_column_values_to_be_between": between}
+            )
+        if col.regex_pattern and col.regex_pattern.strip():
+            tests.append(
+                {
+                    "dbt_expectations.expect_column_values_to_match_regex": {
+                        "regex": col.regex_pattern
+                    }
+                }
+            )
+        return tests
+
+    @staticmethod
+    def _odcs_quality(col: ColumnSchema) -> list[dict[str, object]]:
+        """Declared quality rules -> ODCS column ``quality`` assertions (U3)."""
+        quality: list[dict[str, object]] = []
+        if col.min_value is not None or col.max_value is not None:
+            rule: dict[str, object] = {"rule": "range"}
+            if col.min_value is not None:
+                rule["mustBeGreaterThanOrEqualTo"] = col.min_value
+            if col.max_value is not None:
+                rule["mustBeLessThanOrEqualTo"] = col.max_value
+            quality.append(rule)
+        if col.regex_pattern and col.regex_pattern.strip():
+            quality.append({"rule": "regex", "pattern": col.regex_pattern})
+        return quality
 
     @classmethod
     def _accepted_values(cls, col: ColumnSchema) -> list[str] | None:

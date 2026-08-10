@@ -93,6 +93,9 @@ class GraphRepository:
                     description=col.description,
                     is_metric=col.is_metric,
                     aggregation=col.aggregation,
+                    min_value=col.min_value,
+                    max_value=col.max_value,
+                    regex_pattern=col.regex_pattern,
                     ordinal_position=col.ordinal_position
                     if col.ordinal_position is not None
                     else position,

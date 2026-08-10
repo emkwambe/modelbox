@@ -16,6 +16,7 @@ import type {
 import m1lab1 from './m1_lab1_grain_and_fanout.json';
 import m2lab1 from './m2_lab1_semantic_grain_and_fanout.json';
 import m3lab1 from './m3_lab1_governance_and_contracts.json';
+import m4lab1 from './m4_lab1_quality_and_testing.json';
 
 export interface LabFlaw {
   code: string;
@@ -33,6 +34,9 @@ interface RawColumn {
   is_metric: boolean;
   aggregation?: string | null;
   description?: string | null;
+  min_value?: number | null;
+  max_value?: number | null;
+  regex_pattern?: string | null;
 }
 
 interface RawEntity {
@@ -67,6 +71,7 @@ export const LABS: Lab[] = [
   m1lab1 as unknown as Lab,
   m2lab1 as unknown as Lab,
   m3lab1 as unknown as Lab,
+  m4lab1 as unknown as Lab,
 ];
 
 /** Convert a lab's flawed graph into loadable canvas entities/relationships. */
@@ -93,6 +98,9 @@ export function labToGraph(lab: Lab): {
         is_metric: c.is_metric,
         aggregation: c.aggregation ?? null,
         description: c.description ?? null,
+        min_value: c.min_value ?? null,
+        max_value: c.max_value ?? null,
+        regex_pattern: c.regex_pattern ?? null,
       }),
     ),
   }));

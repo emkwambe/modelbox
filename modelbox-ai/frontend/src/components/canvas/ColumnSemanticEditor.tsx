@@ -152,9 +152,76 @@ export default function ColumnSemanticEditor() {
         </select>
       )}
 
+      <div style={qualityBox}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>
+          Quality rules
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={qualityLabel}>Min</span>
+            <input
+              type="number"
+              value={column.min_value ?? ''}
+              onChange={(e) =>
+                updateColumn(
+                  selectedColumn!.entityName,
+                  selectedColumn!.columnName,
+                  {
+                    min_value:
+                      e.target.value === '' ? null : Number(e.target.value),
+                  },
+                )
+              }
+              style={select}
+            />
+          </label>
+          <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={qualityLabel}>Max</span>
+            <input
+              type="number"
+              value={column.max_value ?? ''}
+              onChange={(e) =>
+                updateColumn(
+                  selectedColumn!.entityName,
+                  selectedColumn!.columnName,
+                  {
+                    max_value:
+                      e.target.value === '' ? null : Number(e.target.value),
+                  },
+                )
+              }
+              style={select}
+            />
+          </label>
+        </div>
+        <label
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 3,
+            marginTop: 6,
+          }}
+        >
+          <span style={qualityLabel}>Regex pattern</span>
+          <input
+            type="text"
+            value={column.regex_pattern ?? ''}
+            placeholder="^[^@]+@[^@]+$"
+            onChange={(e) =>
+              updateColumn(
+                selectedColumn!.entityName,
+                selectedColumn!.columnName,
+                { regex_pattern: e.target.value === '' ? null : e.target.value },
+              )
+            }
+            style={select}
+          />
+        </label>
+      </div>
+
       <p style={{ fontSize: 11, color: '#94a3b8', margin: '10px 0 0' }}>
         Save the model to persist. Declared measures drive the exports; classified
-        PII clears the exposure warning.
+        PII clears the exposure warning; quality rules export as dbt / ODCS tests.
       </p>
     </div>
   );
@@ -206,4 +273,18 @@ const select: React.CSSProperties = {
   borderRadius: 6,
   border: '1px solid #cbd5e1',
   fontSize: 13,
+  width: '100%',
+  boxSizing: 'border-box',
+};
+
+const qualityBox: React.CSSProperties = {
+  marginTop: 12,
+  paddingTop: 10,
+  borderTop: '1px solid #f1f5f9',
+};
+
+const qualityLabel: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: '#475569',
 };

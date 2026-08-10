@@ -49,6 +49,18 @@ def _model() -> SynthesizedModel:
                         is_metric=True,
                         aggregation="AVG",
                     ),
+                    # declared quality rules (Sprint U3)
+                    ColumnSchema(
+                        name="stars",
+                        data_type="INT",
+                        min_value=1,
+                        max_value=5,
+                    ),
+                    ColumnSchema(
+                        name="email",
+                        data_type="VARCHAR(320)",
+                        regex_pattern=r"^[^@]+@[^@]+$",
+                    ),
                 ],
             )
         ],
@@ -112,3 +124,10 @@ async def test_is_metric_survives_persist_and_reload(session: AsyncSession) -> N
     assert fact.grain == "per review"
     assert fact.tier == "TIER_1_CRITICAL"
     assert fact.freshness_sla == "< 4h"
+
+    # Column quality rules also round-trip (Sprint U3).
+    stars = next(c for c in fact.columns if c.name == "stars")
+    assert stars.min_value == 1
+    assert stars.max_value == 5
+    email = next(c for c in fact.columns if c.name == "email")
+    assert email.regex_pattern == r"^[^@]+@[^@]+$"

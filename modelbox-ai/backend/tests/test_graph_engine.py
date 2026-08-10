@@ -27,14 +27,21 @@ def col(
     fk: bool = False,
     pii: bool = False,
     desc: str | None = "documented",
+    data_type: str = "VARCHAR(64)",
+    min_value: float | None = None,
+    max_value: float | None = None,
+    regex_pattern: str | None = None,
 ) -> ColumnSchema:
     return ColumnSchema(
         name=name,
-        data_type="VARCHAR(64)",
+        data_type=data_type,
         is_primary_key=pk,
         is_foreign_key=fk,
         is_pii=pii,
         description=desc,
+        min_value=min_value,
+        max_value=max_value,
+        regex_pattern=regex_pattern,
     )
 
 
@@ -397,6 +404,92 @@ def test_no_missing_sla_for_low_tiers(engine: GraphEngine) -> None:
         [],
     )
     assert "MISSING_SLA" not in _codes(report)
+
+
+# ---------------------------------------------------------------------------
+# Quality-rule lints (Sprint U3)
+# ---------------------------------------------------------------------------
+def test_invalid_range_when_min_exceeds_max(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity(
+                "t",
+                [
+                    col("id", pk=True),
+                    col("score", data_type="INT", min_value=100, max_value=1),
+                ],
+            )
+        ],
+        [],
+    )
+    assert "INVALID_RANGE" in _codes(report)
+
+
+def test_valid_range_is_quiet(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity(
+                "t",
+                [
+                    col("id", pk=True),
+                    col("score", data_type="INT", min_value=0, max_value=100),
+                ],
+            )
+        ],
+        [],
+    )
+    assert "INVALID_RANGE" not in _codes(report)
+
+
+def test_invalid_regex_that_does_not_compile(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity(
+                "t",
+                [
+                    col("id", pk=True),
+                    col("email", regex_pattern="([a-z"),  # unbalanced group
+                ],
+            )
+        ],
+        [],
+    )
+    assert "INVALID_REGEX" in _codes(report)
+
+
+def test_valid_regex_is_quiet(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity(
+                "t",
+                [
+                    col("id", pk=True),
+                    col("email", regex_pattern=r"^[^@]+@[^@]+\.[a-z]+$"),
+                ],
+            )
+        ],
+        [],
+    )
+    assert "INVALID_REGEX" not in _codes(report)
+
+
+def test_quality_lints_are_warnings_only(engine: GraphEngine) -> None:
+    """A broken quality rule never invalidates the model — advisory only."""
+    report = engine.validate(
+        [
+            entity(
+                "t",
+                [
+                    col("id", pk=True),
+                    col("score", data_type="INT", min_value=100, max_value=1),
+                    col("email", regex_pattern="([a-z"),
+                ],
+            )
+        ],
+        [],
+    )
+    assert report.is_valid is True
+    assert {"INVALID_RANGE", "INVALID_REGEX"} <= _codes(report)
 
 
 def test_fan_out_is_warning_only(engine: GraphEngine) -> None:

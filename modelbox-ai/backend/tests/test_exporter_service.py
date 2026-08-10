@@ -23,6 +23,9 @@ def _col(
     metric: bool = False,
     agg: str | None = None,
     desc: str | None = None,
+    min_value: float | None = None,
+    max_value: float | None = None,
+    regex_pattern: str | None = None,
 ) -> ColumnSchema:
     return ColumnSchema(
         name=name,
@@ -32,6 +35,9 @@ def _col(
         is_metric=metric,
         aggregation=agg,
         description=desc,
+        min_value=min_value,
+        max_value=max_value,
+        regex_pattern=regex_pattern,
     )
 
 
@@ -205,6 +211,60 @@ def test_governance_metadata_propagates_to_exports() -> None:
     meta = dbt["models"][0]["meta"]
     assert meta["tier"] == "TIER_1_CRITICAL"
     assert meta["freshness_sla"] == "< 1h"
+
+
+def test_quality_rules_propagate_to_exports() -> None:
+    model = SynthesizedModel(
+        paradigm="3NF",  # type: ignore[arg-type]
+        entities=[
+            EntitySchema(
+                entity_name="fact_orders",
+                entity_type="FACT",  # type: ignore[arg-type]
+                grain="per order",
+                description="Orders.",
+                columns=[
+                    _col("id", "INT", pk=True, desc="pk"),
+                    _col("score", "INT", min_value=0, max_value=100),
+                    _col("email", "VARCHAR(320)", regex_pattern=r"^[^@]+@[^@]+$"),
+                ],
+            )
+        ],
+    )
+    # dbt: range -> expect_column_values_to_be_between; regex -> match_regex.
+    dbt = yaml.safe_load(
+        ExporterService().generate_dbt_project(model)["models/staging/schema.yml"]
+    )
+    cols = {c["name"]: c for c in dbt["models"][0]["columns"]}
+    score_tests = cols["score"]["tests"]
+    between = next(
+        t["dbt_expectations.expect_column_values_to_be_between"]
+        for t in score_tests
+        if isinstance(t, dict)
+        and "dbt_expectations.expect_column_values_to_be_between" in t
+    )
+    assert between == {"min_value": 0, "max_value": 100}
+    email_tests = cols["email"]["tests"]
+    regex = next(
+        t["dbt_expectations.expect_column_values_to_match_regex"]
+        for t in email_tests
+        if isinstance(t, dict)
+        and "dbt_expectations.expect_column_values_to_match_regex" in t
+    )
+    assert regex == {"regex": r"^[^@]+@[^@]+$"}
+
+    # ODCS: column-level quality assertions.
+    odcs = yaml.safe_load(
+        ExporterService().export_data_contract(model, "opendatacontract", "sales")[
+            "datacontract.yaml"
+        ]
+    )
+    props = {p["name"]: p for p in odcs["schema"][0]["properties"]}
+    assert props["score"]["quality"] == [
+        {"rule": "range", "mustBeGreaterThanOrEqualTo": 0, "mustBeLessThanOrEqualTo": 100}
+    ]
+    assert props["email"]["quality"] == [
+        {"rule": "regex", "pattern": r"^[^@]+@[^@]+$"}
+    ]
 
 
 def test_metricflow_declared_measure_becomes_metric() -> None:
