@@ -175,6 +175,9 @@ export default function HomePage() {
           <Link href="/settings/api-keys" style={navLink}>
             API keys
           </Link>
+          <Link href="/docs" style={navLink}>
+            Docs
+          </Link>
         </div>
       </nav>
 

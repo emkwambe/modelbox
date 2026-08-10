@@ -22,3 +22,98 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/* In-app documentation (/docs) markdown rendering. */
+.markdown-body {
+  color: #0f172a;
+  font-size: 15px;
+  line-height: 1.65;
+}
+.markdown-body h1 {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  margin: 0 0 12px;
+}
+.markdown-body h2 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 32px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e2e8f0;
+  scroll-margin-top: 24px;
+}
+.markdown-body h3 {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 24px 0 8px;
+  scroll-margin-top: 24px;
+}
+.markdown-body p {
+  margin: 10px 0;
+}
+.markdown-body a {
+  color: #2563eb;
+  text-decoration: none;
+}
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+.markdown-body ul,
+.markdown-body ol {
+  margin: 10px 0;
+  padding-left: 22px;
+}
+.markdown-body li {
+  margin: 4px 0;
+}
+.markdown-body blockquote {
+  margin: 12px 0;
+  padding: 4px 14px;
+  border-left: 3px solid #cbd5e1;
+  color: #475569;
+  background: #f8fafc;
+}
+.markdown-body code {
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.markdown-body pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 14px 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: 13px;
+}
+.markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+  display: block;
+  overflow-x: auto;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #e2e8f0;
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 14px;
+}
+.markdown-body th {
+  background: #f8fafc;
+}
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 28px 0;
+}
