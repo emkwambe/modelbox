@@ -13,6 +13,7 @@ import { useRouter } from 'next/navigation';
 
 import {
   createConnection,
+  deleteConnection,
   introspectConnection,
   listConnections,
 } from '@/lib/api';
@@ -23,8 +24,8 @@ import type { ConnectionEngine, ConnectionInfo } from '@/types/schema';
 const ENGINES: { value: ConnectionEngine; label: string; enabled: boolean }[] = [
   { value: 'POSTGRESQL', label: 'PostgreSQL', enabled: true },
   { value: 'SNOWFLAKE', label: 'Snowflake', enabled: true },
-  { value: 'BIGQUERY', label: 'BigQuery (coming soon)', enabled: false },
-  { value: 'MYSQL', label: 'MySQL (coming soon)', enabled: false },
+  { value: 'BIGQUERY', label: 'BigQuery', enabled: true },
+  { value: 'MYSQL', label: 'MySQL', enabled: true },
 ];
 
 export default function ConnectorsPage() {
@@ -77,6 +78,17 @@ export default function ConnectorsPage() {
       setError(errMessage(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleDelete(conn: ConnectionInfo) {
+    if (!window.confirm(`Delete connection "${conn.name}"?`)) return;
+    setError(null);
+    try {
+      await deleteConnection(conn.connection_id);
+      await refresh();
+    } catch (e) {
+      setError(errMessage(e));
     }
   }
 
@@ -192,16 +204,27 @@ export default function ConnectorsPage() {
                       {conn.engine} · {conn.uri_masked ?? 'postgresql://***'}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleIntrospect(conn)}
-                    disabled={introspectingId !== null}
-                    style={primaryBtn}
-                  >
-                    {introspectingId === conn.connection_id
-                      ? 'Introspecting…'
-                      : 'Introspect →'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => handleIntrospect(conn)}
+                      disabled={introspectingId !== null}
+                      style={primaryBtn}
+                    >
+                      {introspectingId === conn.connection_id
+                        ? 'Introspecting…'
+                        : 'Introspect →'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(conn)}
+                      disabled={introspectingId !== null}
+                      title="Delete connection"
+                      style={dangerBtn}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -284,4 +307,15 @@ const primaryBtn: React.CSSProperties = {
   fontWeight: 600,
   cursor: 'pointer',
   alignSelf: 'flex-start',
+};
+
+const dangerBtn: React.CSSProperties = {
+  padding: '8px 12px',
+  borderRadius: 6,
+  border: '1px solid #dc2626',
+  background: '#ffffff',
+  color: '#dc2626',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
 };

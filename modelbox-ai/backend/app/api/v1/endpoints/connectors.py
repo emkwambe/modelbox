@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy import select
 
 from app.api.v1.dependencies import (
@@ -103,6 +103,29 @@ async def list_connections(
     return [_to_info(c) for c in rows]
 
 
+@router.delete(
+    "/{connection_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a database connection (ADMIN+)",
+)
+async def delete_connection(
+    connection_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
+) -> Response:
+    """Remove a stored connection. Requires ADMIN+ in its workspace."""
+    connection = await session.get(DatabaseConnection, connection_id)
+    if connection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Connection {connection_id} not found.",
+        )
+    await require_workspace_role(
+        session, user.user_id, connection.workspace_id, "ADMIN"
+    )
+    await session.delete(connection)
+    await session.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post(
     "/introspect",
     response_model=SynthesizeResponse,
@@ -129,6 +152,14 @@ async def introspect_connection(
             )
         elif engine == "SNOWFLAKE":
             graph = await IntrospectionService.introspect_snowflake(
+                uri, payload.schema_name
+            )
+        elif engine == "BIGQUERY":
+            graph = await IntrospectionService.introspect_bigquery(
+                uri, payload.schema_name
+            )
+        elif engine == "MYSQL":
+            graph = await IntrospectionService.introspect_mysql(
                 uri, payload.schema_name
             )
         else:

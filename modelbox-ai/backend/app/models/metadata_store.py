@@ -42,7 +42,7 @@ PARADIGMS = ("3NF", "KIMBALL", "DATA_VAULT", "OBT")
 CARDINALITIES = ("1:1", "1:N", "N:1", "N:M")
 WORKSPACE_ROLES = ("OWNER", "ADMIN", "MEMBER")
 JOB_STATUSES = ("PENDING", "PROCESSING", "COMPLETED", "FAILED")
-CONNECTION_ENGINES = ("POSTGRESQL", "SNOWFLAKE", "BIGQUERY", "DUCKDB")
+CONNECTION_ENGINES = ("POSTGRESQL", "SNOWFLAKE", "BIGQUERY", "MYSQL", "DUCKDB")
 
 
 class Base(DeclarativeBase):
@@ -375,7 +375,7 @@ class DatabaseConnection(Base):
             "workspace_id", "name", name="uq_database_connections_workspace_name"
         ),
         CheckConstraint(
-            "engine IN ('POSTGRESQL', 'SNOWFLAKE', 'BIGQUERY', 'DUCKDB')",
+            "engine IN ('POSTGRESQL', 'SNOWFLAKE', 'BIGQUERY', 'MYSQL', 'DUCKDB')",
             name="ck_database_connections_engine",
         ),
     )

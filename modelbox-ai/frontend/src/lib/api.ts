@@ -262,6 +262,10 @@ export async function introspectConnection(
   return data;
 }
 
+export async function deleteConnection(connectionId: string): Promise<void> {
+  await apiClient.delete(`/connectors/${connectionId}`);
+}
+
 // --- Schema diffing (FR-2.2) ---
 export async function diffModels(payload: DiffRequest): Promise<DiffResponse> {
   const { data } = await apiClient.post<DiffResponse>('/model/diff', payload);

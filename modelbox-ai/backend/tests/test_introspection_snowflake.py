@@ -8,6 +8,8 @@ that feeds IntrospectionService.build_graph.
 from __future__ import annotations
 
 from app.services.introspection import (
+    _BIGQUERY_TYPE_MAP,
+    _MYSQL_TYPE_MAP,
     _SNOWFLAKE_TYPE_MAP,
     IntrospectionService,
 )
@@ -102,3 +104,91 @@ def test_connect_kwargs_schema_name_is_authoritative() -> None:
     assert kwargs["schema"] == "ARG_SCHEMA"
     assert kwargs["database"] == "DB"
     assert kwargs["warehouse"] == "WH"
+
+
+# ---------------------------------------------------------------------------
+# BigQuery
+# ---------------------------------------------------------------------------
+def test_bigquery_type_normalization() -> None:
+    model = IntrospectionService.build_graph(
+        tables=["events"],
+        columns=_cols(
+            ("events", "id", "INT64", 1),
+            ("events", "name", "STRING", 2),
+            ("events", "amount", "NUMERIC", 3),
+            ("events", "ts", "TIMESTAMP", 4),
+            ("events", "loc", "GEOGRAPHY", 5),
+            ("events", "ratio", "FLOAT64", 6),
+        ),
+        primary_keys=set(),
+        foreign_keys=[],
+        type_map=_BIGQUERY_TYPE_MAP,
+    )
+    types = {c.name: c.data_type for c in model.entities[0].columns}
+    assert types["id"] == "BIGINT"  # INT64 -> BIGINT
+    assert types["name"] == "VARCHAR"  # STRING -> VARCHAR
+    assert types["amount"] == "DECIMAL"  # NUMERIC -> DECIMAL
+    assert types["ts"] == "TIMESTAMP"
+    assert types["loc"] == "JSON"  # GEOGRAPHY -> JSON
+    assert types["ratio"] == "DOUBLE"  # FLOAT64 -> DOUBLE
+
+
+def test_bigquery_config_extracts_project() -> None:
+    import json
+
+    uri = json.dumps({"type": "service_account", "project_id": "my-proj", "x": 1})
+    info, project = IntrospectionService._bigquery_config(uri)
+    assert project == "my-proj"
+    assert info["type"] == "service_account"
+
+
+# ---------------------------------------------------------------------------
+# MySQL
+# ---------------------------------------------------------------------------
+def test_mysql_type_normalization() -> None:
+    model = IntrospectionService.build_graph(
+        tables=["users"],
+        columns=_cols(
+            ("users", "id", "int", 1),
+            ("users", "bio", "mediumtext", 2),
+            ("users", "created", "datetime", 3),
+            ("users", "score", "double", 4),
+        ),
+        primary_keys={("users", "id")},
+        foreign_keys=[],
+        type_map=_MYSQL_TYPE_MAP,
+    )
+    types = {c.name: c.data_type for c in model.entities[0].columns}
+    assert types["id"] == "INT"
+    assert types["bio"] == "TEXT"  # mediumtext -> TEXT
+    assert types["created"] == "TIMESTAMP"  # datetime -> TIMESTAMP
+    assert types["score"] == "DOUBLE"
+
+
+def test_mysql_tinyint1_is_boolean() -> None:
+    # tinyint(1) is MySQL's boolean; DATA_TYPE is 'tinyint' but COLUMN_TYPE
+    # carries the (1). The effective type must resolve to BOOLEAN.
+    assert (
+        IntrospectionService._mysql_effective_type("tinyint", "tinyint(1)") == "boolean"
+    )
+    assert (
+        IntrospectionService._mysql_effective_type("tinyint", "tinyint(4)") == "tinyint"
+    )
+    assert _MYSQL_TYPE_MAP["boolean"] == "BOOLEAN"
+
+
+def test_parse_mysql_uri() -> None:
+    cfg = IntrospectionService._parse_mysql_uri(
+        "mysql://root:p%40ss@db.internal:3307/shop"
+    )
+    assert cfg["host"] == "db.internal"
+    assert cfg["port"] == 3307
+    assert cfg["user"] == "root"
+    assert cfg["password"] == "p@ss"
+    assert cfg["db"] == "shop"
+
+
+def test_parse_mysql_uri_defaults() -> None:
+    cfg = IntrospectionService._parse_mysql_uri("mysql://localhost/mydb")
+    assert cfg["port"] == 3306
+    assert cfg["db"] == "mydb"
