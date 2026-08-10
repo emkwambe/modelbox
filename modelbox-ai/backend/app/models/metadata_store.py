@@ -397,6 +397,47 @@ class DatabaseConnection(Base):
     )
 
 
+class ApiKey(Base):
+    """A programmatic API key (workspace-scoped, SHA-256 hashed at rest).
+
+    Authenticates as its creating user, so it inherits that user's workspace
+    memberships and RBAC. Only the prefix and hash are stored — the plaintext
+    secret is shown once at creation and is unrecoverable thereafter.
+    """
+
+    __tablename__ = "api_keys"
+    __table_args__ = (
+        UniqueConstraint("key_hash", name="uq_api_keys_key_hash"),
+    )
+
+    api_key_id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    key_prefix: Mapped[str] = mapped_column(String(20), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_used_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class TrainerAssignment(Base):
     """A data-modeling assignment (ModelBox Trainer — isolated tables)."""
 
@@ -461,6 +502,7 @@ __all__ = [
     "EntityRelationship",
     "SynthesisJob",
     "DatabaseConnection",
+    "ApiKey",
     "TrainerAssignment",
     "TrainerSubmission",
     "PARADIGMS",

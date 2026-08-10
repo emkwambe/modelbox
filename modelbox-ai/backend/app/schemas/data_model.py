@@ -15,6 +15,7 @@ All models use Pydantic v2 idioms (``model_config``, ``field_validator``).
 
 from __future__ import annotations
 
+import datetime
 import enum
 import uuid
 
@@ -96,6 +97,37 @@ class UserOut(BaseModel):
     user_id: uuid.UUID
     email: str
     full_name: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# API keys (programmatic access)
+# ---------------------------------------------------------------------------
+class ApiKeyCreateRequest(BaseModel):
+    """Create a programmatic API key."""
+
+    name: str = Field(..., min_length=1, max_length=120)
+    workspace_id: uuid.UUID | None = None
+    expires_at: datetime.datetime | None = None
+
+
+class ApiKeyInfo(BaseModel):
+    """A stored API key (never exposes the secret or hash)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    api_key_id: uuid.UUID
+    workspace_id: uuid.UUID
+    name: str
+    key_prefix: str
+    created_at: datetime.datetime
+    expires_at: datetime.datetime | None = None
+    last_used_at: datetime.datetime | None = None
+
+
+class ApiKeyCreatedResponse(ApiKeyInfo):
+    """API key creation response — includes the plaintext secret ONCE."""
+
+    api_key: str
 
 
 class ModelUpdateRequest(BaseModel):
@@ -624,6 +656,9 @@ __all__ = [
     "ModelUpdateRequest",
     "ModelInfo",
     "WorkspaceInfo",
+    "ApiKeyCreateRequest",
+    "ApiKeyInfo",
+    "ApiKeyCreatedResponse",
     "JobCreatedResponse",
     "JobStatusResponse",
     "AssignmentCreateRequest",

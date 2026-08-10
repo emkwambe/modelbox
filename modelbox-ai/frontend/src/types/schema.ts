@@ -155,6 +155,21 @@ export interface WorkspaceInfo {
   role: string;
 }
 
+export interface ApiKeyInfo {
+  api_key_id: string;
+  workspace_id: string;
+  name: string;
+  key_prefix: string;
+  created_at: string;
+  expires_at?: string | null;
+  last_used_at?: string | null;
+}
+
+export interface ApiKeyCreatedResponse extends ApiKeyInfo {
+  /** The plaintext secret — returned once, at creation. */
+  api_key: string;
+}
+
 export interface ModelInfo {
   model_id: string;
   workspace_id: string;

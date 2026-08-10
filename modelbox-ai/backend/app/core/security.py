@@ -8,6 +8,8 @@ bcrypt via passlib.
 from __future__ import annotations
 
 import datetime
+import hashlib
+import secrets
 from typing import Any
 
 import bcrypt
@@ -17,6 +19,24 @@ from app.core.config import get_settings
 
 # bcrypt operates on the first 72 bytes of the password.
 _BCRYPT_MAX_BYTES = 72
+
+# Programmatic API-key prefix (mb_live_<random>).
+_API_KEY_PREFIX = "mb_live_"
+
+
+def generate_api_key() -> tuple[str, str, str]:
+    """Mint a new API key. Returns ``(plaintext, key_prefix, key_hash)``.
+
+    Only the prefix (for display) and the SHA-256 hash (for lookup) are stored;
+    the plaintext is returned to the caller once and never persisted.
+    """
+    key = f"{_API_KEY_PREFIX}{secrets.token_urlsafe(32)}"
+    return key, key[:12], hash_api_key(key)
+
+
+def hash_api_key(key: str) -> str:
+    """Return the SHA-256 hex digest used to look up a stored API key."""
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
 class TokenError(Exception):

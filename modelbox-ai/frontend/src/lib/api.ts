@@ -15,6 +15,8 @@ import type {
   TrainerGraph,
 } from '@/types/trainer';
 import type {
+  ApiKeyCreatedResponse,
+  ApiKeyInfo,
   ConnectionCreateRequest,
   ConnectionInfo,
   ContractExportResponse,
@@ -102,6 +104,27 @@ export async function register(
     { email, password, full_name: fullName ?? null },
   );
   return data.access_token;
+}
+
+// --- API keys (programmatic access) ---
+export async function listApiKeys(): Promise<ApiKeyInfo[]> {
+  const { data } = await apiClient.get<ApiKeyInfo[]>('/auth/api-keys');
+  return data;
+}
+
+export async function createApiKey(payload: {
+  name: string;
+  expires_at?: string | null;
+}): Promise<ApiKeyCreatedResponse> {
+  const { data } = await apiClient.post<ApiKeyCreatedResponse>(
+    '/auth/api-keys',
+    payload,
+  );
+  return data;
+}
+
+export async function revokeApiKey(keyId: string): Promise<void> {
+  await apiClient.delete(`/auth/api-keys/${keyId}`);
 }
 
 // --- ModelBox Trainer (Pillar 3) ---

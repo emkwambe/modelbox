@@ -112,6 +112,12 @@ export default function HomePage() {
           style={{ color: '#2563eb', fontWeight: 600 }}
         >
           Connect a database →
+        </Link>{' '}
+        <Link
+          href="/settings/api-keys"
+          style={{ color: '#2563eb', fontWeight: 600 }}
+        >
+          API keys →
         </Link>
       </p>
 

@@ -7,17 +7,23 @@ hosts the authentication + workspace-authorization dependencies (Slice 3A).
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import (
+    APIKeyHeader,
+    HTTPAuthorizationCredentials,
+    HTTPBearer,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
-from app.core.security import TokenError, decode_access_token
+from app.core.security import TokenError, decode_access_token, hash_api_key
 from app.models.metadata_store import (
+    ApiKey,
     DataModel,
     User,
     Workspace,
@@ -65,6 +71,34 @@ ExporterServiceDep = Annotated[ExporterService, Depends(get_exporter_service)]
 # Authentication & workspace authorization (Slice 3A)
 # ---------------------------------------------------------------------------
 _bearer = HTTPBearer(auto_error=False)
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def _user_from_api_key(session: AsyncSession, raw_key: str) -> User | None:
+    """Resolve the user behind an ``X-API-Key`` (None if invalid/expired)."""
+    record = (
+        await session.execute(
+            select(ApiKey).where(ApiKey.key_hash == hash_api_key(raw_key))
+        )
+    ).scalar_one_or_none()
+    if record is None:
+        return None
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if record.expires_at is not None:
+        expires = record.expires_at
+        if expires.tzinfo is None:  # SQLite returns naive datetimes
+            expires = expires.replace(tzinfo=datetime.timezone.utc)
+        if expires <= now:
+            return None
+
+    record.last_used_at = now
+    await session.flush()
+
+    user = await session.get(User, record.user_id)
+    if user is None or not user.is_active:
+        return None
+    return user
 
 
 async def get_current_user(
@@ -72,13 +106,21 @@ async def get_current_user(
     credentials: Annotated[
         HTTPAuthorizationCredentials | None, Depends(_bearer)
     ],
+    api_key: Annotated[str | None, Depends(_api_key_header)] = None,
 ) -> User:
-    """Resolve the authenticated user from a Bearer JWT (401 on failure)."""
+    """Resolve the caller from a Bearer JWT or an ``X-API-Key`` (401 on failure)."""
     unauthorized = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Not authenticated.",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    # Programmatic access: X-API-Key (for CI/CD pipelines and agents).
+    if api_key:
+        user = await _user_from_api_key(session, api_key)
+        if user is None:
+            raise unauthorized
+        return user
+
     if credentials is None:
         raise unauthorized
     try:
