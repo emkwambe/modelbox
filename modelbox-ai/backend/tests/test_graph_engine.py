@@ -20,12 +20,21 @@ from app.services.graph_engine import GraphEngine
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def col(name: str, *, pk: bool = False, fk: bool = False) -> ColumnSchema:
+def col(
+    name: str,
+    *,
+    pk: bool = False,
+    fk: bool = False,
+    pii: bool = False,
+    desc: str | None = "documented",
+) -> ColumnSchema:
     return ColumnSchema(
         name=name,
         data_type="VARCHAR(64)",
         is_primary_key=pk,
         is_foreign_key=fk,
+        is_pii=pii,
+        description=desc,
     )
 
 
@@ -33,11 +42,16 @@ def entity(
     name: str,
     columns: list[ColumnSchema],
     entity_type: str = "TABLE",
+    *,
+    desc: str | None = "documented",
+    grain: str | None = None,
 ) -> EntitySchema:
     return EntitySchema(
         entity_name=name,
         entity_type=entity_type,  # type: ignore[arg-type]
         columns=columns,
+        description=desc,
+        grain=grain,
     )
 
 
@@ -144,3 +158,148 @@ def test_valid_model_passes(engine: GraphEngine) -> None:
 
     assert report.is_valid is True
     assert report.issues == []
+
+
+# ---------------------------------------------------------------------------
+# Governance lint pack (Pick 1) — NAMING / GRAIN / DESCRIPTION / PII / ORPHAN
+# ---------------------------------------------------------------------------
+def _codes(report) -> set[str]:
+    return {issue.code for issue in report.issues}
+
+
+def test_naming_convention_non_snake_case(engine: GraphEngine) -> None:
+    report = engine.validate([entity("Orders", [col("id", pk=True)])], [])
+    assert "NAMING_CONVENTION" in _codes(report)
+
+
+def test_naming_convention_missing_type_prefix(engine: GraphEngine) -> None:
+    # A FACT entity should be prefixed 'fact_'.
+    report = engine.validate(
+        [entity("sales", [col("sale_id", pk=True)], "FACT", grain="per sale")], []
+    )
+    assert any(
+        i.code == "NAMING_CONVENTION" and "prefix" in i.message for i in report.issues
+    )
+
+
+def test_naming_convention_bad_pk_suffix(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [entity("dim_customer", [col("customer", pk=True)], "DIMENSION")], []
+    )
+    assert any(
+        i.code == "NAMING_CONVENTION" and i.column_name == "customer"
+        for i in report.issues
+    )
+
+
+def test_naming_convention_clean(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [entity("dim_customer", [col("customer_sk", pk=True)], "DIMENSION")], []
+    )
+    assert "NAMING_CONVENTION" not in _codes(report)
+
+
+def test_missing_grain_on_fact(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [entity("fact_orders", [col("order_id", pk=True)], "FACT")], []
+    )
+    assert "MISSING_GRAIN" in _codes(report)
+
+
+def test_grain_present_is_clean(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity(
+                "fact_orders",
+                [col("order_id", pk=True)],
+                "FACT",
+                grain="one row per order",
+            )
+        ],
+        [],
+    )
+    assert "MISSING_GRAIN" not in _codes(report)
+
+
+def test_missing_description_flags_undocumented(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity(
+                "dim_customer",
+                [col("customer_sk", pk=True, desc=None)],
+                "DIMENSION",
+                desc=None,
+            )
+        ],
+        [],
+    )
+    # Both the entity and its column are undocumented.
+    desc_issues = [i for i in report.issues if i.code == "MISSING_DESCRIPTION"]
+    assert len(desc_issues) >= 2
+
+
+def test_documented_entity_is_clean(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [entity("dim_customer", [col("customer_sk", pk=True)], "DIMENSION")], []
+    )
+    assert "MISSING_DESCRIPTION" not in _codes(report)
+
+
+def test_pii_exposure_untagged(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity(
+                "dim_customer",
+                [col("customer_sk", pk=True), col("email")],
+                "DIMENSION",
+            )
+        ],
+        [],
+    )
+    assert any(
+        i.code == "PII_EXPOSURE" and i.column_name == "email" for i in report.issues
+    )
+
+
+def test_pii_classified_is_clean(engine: GraphEngine) -> None:
+    # A correctly classified PII column must NOT be flagged (no false positives).
+    report = engine.validate(
+        [
+            entity(
+                "dim_customer",
+                [col("customer_sk", pk=True), col("email", pii=True)],
+                "DIMENSION",
+            )
+        ],
+        [],
+    )
+    assert "PII_EXPOSURE" not in _codes(report)
+
+
+def test_orphan_entity_flagged(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity("dim_a", [col("a_sk", pk=True)], "DIMENSION"),
+            entity("dim_b", [col("b_sk", pk=True)], "DIMENSION"),
+        ],
+        [],  # no relationships -> both orphaned
+    )
+    assert "ORPHAN_ENTITY" in _codes(report)
+
+
+def test_single_entity_is_not_orphan(engine: GraphEngine) -> None:
+    # A one-table model (e.g. OBT) is legitimately relationship-free.
+    report = engine.validate([entity("obt_events", [col("event_id", pk=True)])], [])
+    assert "ORPHAN_ENTITY" not in _codes(report)
+
+
+def test_governance_issues_are_warnings_only(engine: GraphEngine) -> None:
+    # Multiple governance violations, but none invalidate the model.
+    report = engine.validate(
+        [entity("Orders", [col("id", pk=True)], "FACT", desc=None)], []
+    )
+    governance = {"NAMING_CONVENTION", "MISSING_GRAIN", "MISSING_DESCRIPTION"}
+    gov_issues = [i for i in report.issues if i.code in governance]
+    assert gov_issues
+    assert all(i.severity == "warning" for i in gov_issues)
+    assert report.is_valid is True

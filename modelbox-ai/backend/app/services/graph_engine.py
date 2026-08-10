@@ -15,6 +15,8 @@ service class — API handlers only orchestrate it.
 
 from __future__ import annotations
 
+import re
+
 import networkx as nx
 
 from app.schemas.data_model import (
@@ -22,6 +24,31 @@ from app.schemas.data_model import (
     RelationshipSchema,
     ValidationIssue,
     ValidationReport,
+)
+
+# Governance/convention lint configuration (FR-2.3, Pick 1).
+# Entity-type -> expected name prefix.
+_PREFIX_BY_TYPE: dict[str, str] = {
+    "FACT": "fact_",
+    "DIMENSION": "dim_",
+    "HUB": "hub_",
+    "LINK": "lnk_",
+    "SATELLITE": "sat_",
+}
+_SNAKE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_KEY_SUFFIXES = ("_id", "_sk", "_key", "_hk", "_pk")
+# Column-name fragments that strongly imply personal data.
+_PII_PATTERNS = (
+    "email",
+    "ssn",
+    "social_security",
+    "phone",
+    "dob",
+    "date_of_birth",
+    "birth_date",
+    "credit_card",
+    "passport",
+    "iban",
 )
 
 
@@ -164,5 +191,203 @@ class GraphEngine:
                     )
                 )
 
+        # 4–8. Governance & convention lints (Pick 1). These are advisory
+        # warnings — they never invalidate a model, only nudge quality.
+        issues.extend(self._lint_naming(entities))
+        issues.extend(self._lint_grain(entities))
+        issues.extend(self._lint_descriptions(entities))
+        issues.extend(self._lint_pii(entities))
+        issues.extend(self._lint_orphans(entities, relationships))
+
         is_valid = not any(issue.severity == "error" for issue in issues)
         return ValidationReport(is_valid=is_valid, issues=issues)
+
+    # -----------------------------------------------------------------------
+    # Governance & convention lints (FR-2.3, Pick 1)
+    # -----------------------------------------------------------------------
+    @staticmethod
+    def _entity_type(entity: EntitySchema) -> str:
+        """Normalize the entity type to its string value (enum or str)."""
+        etype = entity.entity_type
+        return etype.value if hasattr(etype, "value") else str(etype)
+
+    @classmethod
+    def _lint_naming(cls, entities: list[EntitySchema]) -> list[ValidationIssue]:
+        """NAMING_CONVENTION — snake_case + type prefix + key suffix checks."""
+        issues: list[ValidationIssue] = []
+        for entity in entities:
+            name = entity.entity_name
+            if not _SNAKE_RE.match(name):
+                issues.append(
+                    ValidationIssue(
+                        severity="warning",
+                        code="NAMING_CONVENTION",
+                        message=f"Entity '{name}' is not snake_case.",
+                        entities=[name],
+                        entity_name=name,
+                    )
+                )
+            prefix = _PREFIX_BY_TYPE.get(cls._entity_type(entity))
+            if prefix and not name.startswith(prefix):
+                issues.append(
+                    ValidationIssue(
+                        severity="warning",
+                        code="NAMING_CONVENTION",
+                        message=(
+                            f"{cls._entity_type(entity)} entity '{name}' should be "
+                            f"prefixed '{prefix}'."
+                        ),
+                        entities=[name],
+                        entity_name=name,
+                    )
+                )
+            for column in entity.columns:
+                if not _SNAKE_RE.match(column.name):
+                    issues.append(
+                        ValidationIssue(
+                            severity="warning",
+                            code="NAMING_CONVENTION",
+                            message=f"Column '{name}.{column.name}' is not snake_case.",
+                            entities=[name],
+                            entity_name=name,
+                            column_name=column.name,
+                        )
+                    )
+                # A bare 'id' is an accepted surrogate key; otherwise a PK should
+                # carry a key suffix.
+                if (
+                    column.is_primary_key
+                    and column.name != "id"
+                    and not column.name.endswith(_KEY_SUFFIXES)
+                ):
+                    issues.append(
+                        ValidationIssue(
+                            severity="warning",
+                            code="NAMING_CONVENTION",
+                            message=(
+                                f"Primary key '{name}.{column.name}' should end with a "
+                                f"key suffix ({', '.join(_KEY_SUFFIXES)})."
+                            ),
+                            entities=[name],
+                            entity_name=name,
+                            column_name=column.name,
+                        )
+                    )
+        return issues
+
+    @classmethod
+    def _lint_grain(cls, entities: list[EntitySchema]) -> list[ValidationIssue]:
+        """MISSING_GRAIN — FACT entities must declare a business grain."""
+        issues: list[ValidationIssue] = []
+        for entity in entities:
+            if cls._entity_type(entity) == "FACT" and not (
+                entity.grain and entity.grain.strip()
+            ):
+                issues.append(
+                    ValidationIssue(
+                        severity="warning",
+                        code="MISSING_GRAIN",
+                        message=(
+                            f"Fact entity '{entity.entity_name}' has no declared grain."
+                        ),
+                        entities=[entity.entity_name],
+                        entity_name=entity.entity_name,
+                    )
+                )
+        return issues
+
+    @staticmethod
+    def _lint_descriptions(entities: list[EntitySchema]) -> list[ValidationIssue]:
+        """MISSING_DESCRIPTION — entities and columns should be documented."""
+        issues: list[ValidationIssue] = []
+        for entity in entities:
+            name = entity.entity_name
+            if not (entity.description and entity.description.strip()):
+                issues.append(
+                    ValidationIssue(
+                        severity="warning",
+                        code="MISSING_DESCRIPTION",
+                        message=f"Entity '{name}' has no description.",
+                        entities=[name],
+                        entity_name=name,
+                    )
+                )
+            undocumented = [
+                c.name
+                for c in entity.columns
+                if not (c.description and c.description.strip())
+            ]
+            if undocumented:
+                shown = ", ".join(undocumented[:6])
+                more = "…" if len(undocumented) > 6 else ""
+                issues.append(
+                    ValidationIssue(
+                        severity="warning",
+                        code="MISSING_DESCRIPTION",
+                        message=(
+                            f"Entity '{name}' has {len(undocumented)} undocumented "
+                            f"column(s): {shown}{more}."
+                        ),
+                        entities=[name],
+                        entity_name=name,
+                    )
+                )
+        return issues
+
+    @staticmethod
+    def _lint_pii(entities: list[EntitySchema]) -> list[ValidationIssue]:
+        """PII_EXPOSURE — columns that look like PII but are not classified.
+
+        Flags the governance *gap* (unclassified personal data), not correctly
+        tagged PII — so well-tagged models stay quiet.
+        """
+        issues: list[ValidationIssue] = []
+        for entity in entities:
+            for column in entity.columns:
+                lowered = column.name.lower()
+                looks_like_pii = any(p in lowered for p in _PII_PATTERNS)
+                if looks_like_pii and not column.is_pii:
+                    issues.append(
+                        ValidationIssue(
+                            severity="warning",
+                            code="PII_EXPOSURE",
+                            message=(
+                                f"Column '{entity.entity_name}.{column.name}' looks "
+                                f"like PII but is not classified (set is_pii/pii_type)."
+                            ),
+                            entities=[entity.entity_name],
+                            entity_name=entity.entity_name,
+                            column_name=column.name,
+                        )
+                    )
+        return issues
+
+    @staticmethod
+    def _lint_orphans(
+        entities: list[EntitySchema],
+        relationships: list[RelationshipSchema],
+    ) -> list[ValidationIssue]:
+        """ORPHAN_ENTITY — isolated nodes in a multi-entity model."""
+        # A single-table model (e.g. OBT) is legitimately relationship-free.
+        if len(entities) <= 1:
+            return []
+        connected: set[str] = set()
+        for rel in relationships:
+            connected.add(rel.from_ref.split(".", 1)[0])
+            connected.add(rel.to_ref.split(".", 1)[0])
+        issues: list[ValidationIssue] = []
+        for entity in entities:
+            if entity.entity_name not in connected:
+                issues.append(
+                    ValidationIssue(
+                        severity="warning",
+                        code="ORPHAN_ENTITY",
+                        message=(
+                            f"Entity '{entity.entity_name}' has no relationships to "
+                            f"other entities."
+                        ),
+                        entities=[entity.entity_name],
+                        entity_name=entity.entity_name,
+                    )
+                )
+        return issues

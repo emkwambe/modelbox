@@ -49,6 +49,12 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
       )
       .map((i) => i.column_name as string),
   );
+  // Columns flagged as unclassified PII by the governance lint (Pick 1).
+  const piiExposureColumns = new Set(
+    issues
+      .filter((i) => i.code === 'PII_EXPOSURE' && i.column_name)
+      .map((i) => i.column_name as string),
+  );
   const statusColor = hasError
     ? ERROR_COLOR
     : hasWarning
@@ -136,20 +142,29 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
       <ul style={{ listStyle: 'none', margin: 0, padding: '4px 0' }}>
         {data.columns.map((col) => {
           const isDangling = danglingColumns.has(col.name);
+          const isPiiExposure = !isDangling && piiExposureColumns.has(col.name);
           return (
             <li
               key={col.name}
               title={
-                isDangling ? 'Foreign key references a missing entity.' : undefined
+                isDangling
+                  ? 'Foreign key references a missing entity.'
+                  : isPiiExposure
+                    ? 'Looks like PII but is not classified (set is_pii/pii_type).'
+                    : undefined
               }
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 gap: 12,
                 padding: '2px 10px',
-                background: isDangling ? '#fef2f2' : undefined,
+                background: isDangling
+                  ? '#fef2f2'
+                  : isPiiExposure
+                    ? '#fffbeb'
+                    : undefined,
                 color: isDangling ? ERROR_COLOR : undefined,
-                fontWeight: isDangling ? 600 : undefined,
+                fontWeight: isDangling || isPiiExposure ? 600 : undefined,
               }}
             >
               <span>
@@ -157,6 +172,12 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
                 {col.is_foreign_key && <span title="Foreign key">🔗 </span>}
                 {col.name}
                 {isDangling && <span title="Dangling reference"> ⛔</span>}
+                {isPiiExposure && (
+                  <span title="Unclassified PII" style={{ color: WARNING_COLOR }}>
+                    {' '}
+                    🔓
+                  </span>
+                )}
                 {col.is_pii && (
                   <span
                     title={col.pii_type ?? 'PII'}
