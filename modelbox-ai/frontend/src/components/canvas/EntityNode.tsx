@@ -66,14 +66,14 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
   return (
     <div
       style={{
-        minWidth: 220,
-        borderRadius: 8,
+        minWidth: 230,
+        borderRadius: 10,
         border: `${statusColor ? 2 : 1}px solid ${borderColor}`,
         boxShadow: statusColor
           ? `0 0 0 3px ${statusColor}33`
           : selected
-            ? `0 0 0 2px ${accent}33`
-            : '0 1px 3px #0000001a',
+            ? `0 0 0 2px ${accent}33, 0 4px 14px rgba(15,23,42,0.10)`
+            : '0 2px 8px rgba(15,23,42,0.08)',
         background: '#ffffff',
         fontSize: 12,
         overflow: 'hidden',
@@ -84,8 +84,9 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
         style={{
           background: accent,
           color: '#ffffff',
-          padding: '6px 10px',
-          fontWeight: 600,
+          padding: '7px 11px',
+          fontWeight: 700,
+          letterSpacing: 0.2,
           display: 'flex',
           justifyContent: 'space-between',
           gap: 8,
