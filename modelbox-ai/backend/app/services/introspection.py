@@ -273,6 +273,15 @@ class IntrospectionService:
         return params
 
     @staticmethod
+    def _snowflake_connect_kwargs(uri: str, schema_name: str) -> dict[str, str]:
+        """Final connect() kwargs. The explicit schema_name is authoritative,
+        so it replaces any schema parsed from the URI (avoids a duplicate kwarg).
+        """
+        params = IntrospectionService._parse_snowflake_uri(uri)
+        params["schema"] = schema_name
+        return params
+
+    @staticmethod
     async def introspect_snowflake(
         connection_uri: str, schema_name: str = "PUBLIC"
     ) -> SynthesizedModel:
@@ -293,7 +302,9 @@ class IntrospectionService:
                 "snowflake-connector-python is not installed on the appliance."
             ) from exc
 
-        params = IntrospectionService._parse_snowflake_uri(connection_uri)
+        params = IntrospectionService._snowflake_connect_kwargs(
+            connection_uri, schema_name
+        )
 
         def _lower_keys(row: dict[str, Any]) -> dict[str, Any]:
             return {str(k).lower(): v for k, v in row.items()}
@@ -304,7 +315,7 @@ class IntrospectionService:
             set[tuple[str, str]],
             list[dict[str, str]],
         ]:
-            conn = sf.connect(schema=schema_name, **params)
+            conn = sf.connect(**params)
             try:
                 cur = conn.cursor(sf.DictCursor)
                 tables = [

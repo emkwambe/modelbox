@@ -91,3 +91,14 @@ def test_parse_snowflake_uri_percent_encoded_password() -> None:
     assert params["password"] == "p@ss/word"
     assert params["database"] == "DB"
     assert "schema" not in params
+
+
+def test_connect_kwargs_schema_name_is_authoritative() -> None:
+    # Regression: the explicit schema_name must replace (not duplicate) the
+    # schema parsed from the URI, so connect() never gets two 'schema' values.
+    kwargs = IntrospectionService._snowflake_connect_kwargs(
+        "snowflake://u:p@acct/DB/URI_SCHEMA?warehouse=WH", "ARG_SCHEMA"
+    )
+    assert kwargs["schema"] == "ARG_SCHEMA"
+    assert kwargs["database"] == "DB"
+    assert kwargs["warehouse"] == "WH"
