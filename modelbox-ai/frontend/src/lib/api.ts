@@ -65,6 +65,18 @@ export async function fetchMe(): Promise<{ email: string }> {
   return data;
 }
 
+export async function register(
+  email: string,
+  password: string,
+  fullName?: string,
+): Promise<string> {
+  const { data } = await apiClient.post<{ access_token: string }>(
+    '/auth/register',
+    { email, password, full_name: fullName ?? null },
+  );
+  return data.access_token;
+}
+
 export async function synthesizeModel(
   request: SynthesizeRequest,
 ): Promise<SynthesizeResponse> {
