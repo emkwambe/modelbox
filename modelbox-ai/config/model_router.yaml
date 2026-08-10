@@ -31,7 +31,7 @@ providers:
   anthropic_cloud:
     type: "anthropic"
     api_key_env: "ANTHROPIC_API_KEY"
-    default_model: "claude-3-5-sonnet-20241022"
+    default_model: "claude-sonnet-4-5-20250929"
     egress: "cloud"
 
   openai_cloud:

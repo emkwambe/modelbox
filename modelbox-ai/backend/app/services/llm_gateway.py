@@ -67,8 +67,13 @@ class LLMGateway:
         """Lazily construct the Instructor-patched async completion client."""
         if self._client is None:
             import instructor
+            import litellm
             from litellm import acompletion
 
+            # Drop provider-unsupported params instead of erroring — e.g. Claude 5
+            # reasoning models only accept temperature=1, so a configured
+            # temperature=0.0 is silently dropped rather than 400-ing.
+            litellm.drop_params = True
             self._client = instructor.from_litellm(acompletion)
         return self._client
 
