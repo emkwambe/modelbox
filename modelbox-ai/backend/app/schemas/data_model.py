@@ -130,6 +130,27 @@ class WorkspaceInfo(BaseModel):
     role: str
 
 
+class JobCreatedResponse(BaseModel):
+    """202 response when an async synthesis job is enqueued (FR-1.1)."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    job_id: uuid.UUID
+    status: str
+    poll_url: str
+
+
+class JobStatusResponse(BaseModel):
+    """Async job status for polling (FR-1.1)."""
+
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    job_id: uuid.UUID
+    status: str
+    result_model_id: uuid.UUID | None = None
+    error: str | None = None
+
+
 class PIIType(str, enum.Enum):
     """Privacy classification flags (FR-6.1)."""
 
@@ -383,6 +404,8 @@ __all__ = [
     "ModelUpdateRequest",
     "ModelInfo",
     "WorkspaceInfo",
+    "JobCreatedResponse",
+    "JobStatusResponse",
     "ColumnSchema",
     "EntitySchema",
     "RelationshipSchema",

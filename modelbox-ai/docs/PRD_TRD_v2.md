@@ -85,7 +85,14 @@ Async NFR: job P95 enqueue < 200ms. Introspection creds encrypted at rest (AES-2
    CORE SPINE:  GraphEngine (NetworkX) · LLM Gateway (LiteLLM) · ExporterService · Postgres metadata
 ```
 
-### 1. Migration `0005` — schema extensions  ⟳ (rewritten to match real conventions)
+### 1. v2 schema extensions — **delivered phased** (one migration per pillar)
+
+> Implementation note: rather than one big `0005`, tables ship with the code that
+> uses them: **`0005` = `synthesis_jobs`** (P1, shipped) · `database_connections`
+> (P2) · `trainer_assignments` / `trainer_submissions` (P3). The full target
+> schema below is the reference; each phase migrates its slice.
+
+#### Migration `0005` — schema extensions  ⟳ (rewritten to match real conventions)
 
 > Corrections vs the v2.0 draft: UUID PKs (not `VARCHAR(36)`), real FK targets
 > (`workspaces.workspace_id`, `users.user_id`, `data_models.model_id`),

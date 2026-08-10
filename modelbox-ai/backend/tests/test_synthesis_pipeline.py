@@ -211,6 +211,7 @@ def _apply_overrides(app, session: AsyncSession, user: User, gateway) -> None:
         get_paradigm_translator,
         get_synthesis_engine,
     )
+    from app.api.v1.endpoints.jobs import get_job_enqueuer
     from app.core.database import get_db_session
 
     async def _session_override() -> AsyncIterator[AsyncSession]:
@@ -224,6 +225,8 @@ def _apply_overrides(app, session: AsyncSession, user: User, gateway) -> None:
     app.dependency_overrides[get_paradigm_translator] = lambda: ParadigmTranslator(
         session, gateway
     )
+    # No-op enqueuer so tests never need a Celery broker.
+    app.dependency_overrides[get_job_enqueuer] = lambda: (lambda job_id: None)
 
 
 @pytest_asyncio.fixture
@@ -668,6 +671,81 @@ async def test_register_creates_user_and_workspace(
         )
         assert probe.status_code == 404
     app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Async synthesis jobs (v2 FR-1.1)
+# ---------------------------------------------------------------------------
+async def test_process_job_completes(session: AsyncSession) -> None:
+    from app.models.metadata_store import SynthesisJob
+    from app.services.job_service import JobService
+
+    user, workspace = await _seed_user_workspace(session, "jobs@example.com")
+    request = SynthesizeRequest(
+        source_type="natural_language",  # type: ignore[arg-type]
+        content="track orders",
+        target_paradigm="KIMBALL",  # type: ignore[arg-type]
+        dialect="snowflake",
+        workspace_id=workspace,
+    )
+    job = await JobService(session).create_job(user, request, workspace)
+    assert job.status == "PENDING"
+
+    await JobService.process_job(
+        session, StubGateway(kimball_model()), job.job_id
+    )
+
+    refreshed = await session.get(SynthesisJob, job.job_id)
+    assert refreshed is not None
+    assert refreshed.status == "COMPLETED"
+    assert refreshed.result_model_id is not None
+    # The referenced model exists.
+    assert await session.get(DataModel, refreshed.result_model_id) is not None
+
+
+async def test_enqueue_synthesis_returns_202(api_client: AsyncClient) -> None:
+    response = await api_client.post(
+        "/api/v1/jobs/synthesize",
+        json={
+            "source_type": "natural_language",
+            "content": "track customers and orders",
+            "target_paradigm": "KIMBALL",
+            "dialect": "snowflake",
+        },
+    )
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "PENDING"
+    assert body["poll_url"].endswith(body["job_id"])
+    uuid.UUID(body["job_id"])
+
+
+async def test_poll_job_status(session: AsyncSession) -> None:
+    from app.main import create_app
+    from app.services.job_service import JobService
+
+    user, workspace = await _seed_user_workspace(session, "poll@example.com")
+    request = SynthesizeRequest(
+        source_type="natural_language",  # type: ignore[arg-type]
+        content="orders",
+        target_paradigm="KIMBALL",  # type: ignore[arg-type]
+        dialect="snowflake",
+        workspace_id=workspace,
+    )
+    job = await JobService(session).create_job(user, request, workspace)
+
+    app = create_app()
+    _apply_overrides(app, session, user, StubGateway(kimball_model()))
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        ok = await client.get(f"/api/v1/jobs/{job.job_id}")
+        missing = await client.get(f"/api/v1/jobs/{uuid.uuid4()}")
+    app.dependency_overrides.clear()
+
+    assert ok.status_code == 200
+    assert ok.json()["status"] == "PENDING"
+    assert missing.status_code == 404
 
 
 # ---------------------------------------------------------------------------

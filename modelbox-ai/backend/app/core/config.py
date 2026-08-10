@@ -53,6 +53,9 @@ class Settings(BaseSettings):
         default="redis://localhost:6379/0",
         description="Redis 7 cache / task-broker DSN.",
     )
+    # Celery broker/result backend (async synthesis jobs — FR-1.1).
+    celery_broker_url: str = "redis://localhost:6379/1"
+    celery_result_backend: str = "redis://localhost:6379/1"
     db_echo: bool = Field(
         default=False, description="Echo SQLAlchemy statements (debug only)."
     )

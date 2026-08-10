@@ -39,6 +39,7 @@ from sqlalchemy.orm import (
 PARADIGMS = ("3NF", "KIMBALL", "DATA_VAULT", "OBT")
 CARDINALITIES = ("1:1", "1:N", "N:1", "N:M")
 WORKSPACE_ROLES = ("OWNER", "ADMIN", "MEMBER")
+JOB_STATUSES = ("PENDING", "PROCESSING", "COMPLETED", "FAILED")
 
 
 class Base(DeclarativeBase):
@@ -305,6 +306,60 @@ class EntityRelationship(Base):
     data_model: Mapped["DataModel"] = relationship(back_populates="relationships")
 
 
+class SynthesisJob(Base):
+    """Async synthesis job tracking (FR-1.1)."""
+
+    __tablename__ = "synthesis_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')",
+            name="ck_synthesis_jobs_status",
+        ),
+        CheckConstraint(
+            "paradigm IN ('3NF', 'KIMBALL', 'DATA_VAULT', 'OBT')",
+            name="ck_synthesis_jobs_paradigm",
+        ),
+    )
+
+    job_id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="PENDING", server_default=text("'PENDING'")
+    )
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    paradigm: Mapped[str] = mapped_column(String(32), nullable=False)
+    dialect: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default=text("'snowflake'")
+    )
+    result_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("data_models.model_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+        nullable=False,
+    )
+
+
 __all__ = [
     "Base",
     "User",
@@ -314,7 +369,9 @@ __all__ = [
     "ModelEntity",
     "EntityColumn",
     "EntityRelationship",
+    "SynthesisJob",
     "PARADIGMS",
     "CARDINALITIES",
     "WORKSPACE_ROLES",
+    "JOB_STATUSES",
 ]
