@@ -88,12 +88,26 @@ npm run dev
 | `POST` | `/api/v1/model/{model_id}/transform-paradigm` | Transform between 3NF / Kimball / Data Vault 2.0 / OBT |
 | `GET`  | `/health` | Liveness / readiness probe |
 
+## LLM providers & regional routing
+
+`config/model_router.yaml` spans all major regions: **US** (OpenAI, Anthropic,
+Gemini), **EU-sovereign** (Mistral), **APAC** (DeepSeek, Kimi/Moonshot — cloud;
+Qwen & DeepSeek open-weights locally), and **local/air-gapped** (Ollama, vLLM).
+New providers are pure config — any OpenAI-compatible endpoint uses
+`type: openai_compatible` with a `base_url` + `api_key_env` (no code changes).
+
+> **Data-residency note:** the APAC *cloud* providers (DeepSeek, Kimi) are wired
+> as **opt-in fallbacks**, never primaries for sensitive tasks. Sending schema
+> metadata to any third-party cloud has residency/compliance implications —
+> for zero-egress guarantees use `AIRGAPPED=true` with local open-weights.
+
 ## Governance & air-gap
 
 Set `AIRGAPPED=true` to enforce **zero data egress** (FR-6.2): the LLM gateway
 strips every cloud provider from each task's routing chain and pins execution to
 local runtimes (Ollama / vLLM). Routing is keyed off the explicit `egress:`
-classification in `config/model_router.yaml`, so the policy is deterministic.
+classification in `config/model_router.yaml` (any non-`local` egress — including
+`cloud_apac` — is stripped in air-gapped mode), so the policy is deterministic.
 
 ## Releases (container images)
 

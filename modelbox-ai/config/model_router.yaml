@@ -54,6 +54,22 @@ providers:
     default_model: "mistral-large-latest"
     egress: "cloud_eu"
 
+  # APAC cloud providers (OpenAI-compatible). Opt-in fallbacks — NOT primaries
+  # for sensitive tasks; see README on data-residency considerations.
+  deepseek_cloud:
+    type: "openai_compatible"
+    base_url: "https://api.deepseek.com/v1"
+    api_key_env: "DEEPSEEK_API_KEY"
+    default_model: "deepseek-chat"
+    egress: "cloud_apac"
+
+  kimi_cloud:
+    type: "openai_compatible"
+    base_url: "https://api.moonshot.ai/v1"
+    api_key_env: "MOONSHOT_API_KEY"
+    default_model: "kimi-k2-0711-preview"
+    egress: "cloud_apac"
+
   local_ollama:
     type: "ollama"
     base_url: "http://ollama-engine:11434"
@@ -72,27 +88,29 @@ providers:
 # -----------------------------------------------------------------------------
 task_routing:
   # Unstructured PRD/BRD parsing -> high-reasoning, large-context model.
+  # Kimi's long context is a strong fallback for very large documents.
   unstructured_doc_parsing:
     primary: "anthropic_cloud"
-    fallback: ["openai_cloud", "airgapped_vllm"]
+    fallback: ["openai_cloud", "kimi_cloud", "airgapped_vllm"]
     temperature: 0.1
 
   # Schema normalization, ERD synthesis & constraint checking -> reasoning-heavy.
   schema_reasoning_and_erd:
     primary: "airgapped_vllm"
-    fallback: ["anthropic_cloud", "openai_cloud"]
+    fallback: ["anthropic_cloud", "openai_cloud", "deepseek_cloud"]
     temperature: 0.0
 
   # High-volume SQL DDL generation & dialect transpilation -> fast code model.
+  # DeepSeek is a cost-effective, code-strong fallback here.
   ddl_code_generation:
     primary: "local_ollama"
-    fallback: ["openai_cloud", "mistral_cloud"]
+    fallback: ["deepseek_cloud", "openai_cloud", "mistral_cloud"]
     temperature: 0.0
 
   # Business description & data-dictionary enrichment -> cost-effective LLM.
   data_dictionary_enrichment:
     primary: "local_ollama"
-    fallback: ["gemini_cloud", "openai_cloud"]
+    fallback: ["gemini_cloud", "kimi_cloud", "openai_cloud"]
     temperature: 0.3
 
 # -----------------------------------------------------------------------------
