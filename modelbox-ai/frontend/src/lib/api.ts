@@ -15,13 +15,24 @@ import type {
   TrainerGraph,
 } from '@/types/trainer';
 import type {
+  ConnectionCreateRequest,
+  ConnectionInfo,
+  ContractExportResponse,
+  ContractFormat,
+  DiffRequest,
+  DiffResponse,
   Entity,
   ExportFormat,
   ExportResponse,
+  IntrospectRequest,
   JobCreatedResponse,
   JobStatus,
   ModelInfo,
   Relationship,
+  SemanticEngine,
+  SemanticExportResponse,
+  SyntheticSeedRequest,
+  SyntheticSeedResponse,
   SynthesizeRequest,
   SynthesizeResponse,
   TransformParadigmRequest,
@@ -217,6 +228,70 @@ export async function saveGraph(
   const { data } = await apiClient.put<ValidationReport>(
     `/model/${modelId}/graph`,
     payload,
+  );
+  return data;
+}
+
+// --- Connectors & brownfield introspection (FR-2.1) ---
+export async function listConnections(): Promise<ConnectionInfo[]> {
+  const { data } = await apiClient.get<ConnectionInfo[]>('/connectors');
+  return data;
+}
+
+export async function createConnection(
+  payload: ConnectionCreateRequest,
+): Promise<ConnectionInfo> {
+  const { data } = await apiClient.post<ConnectionInfo>('/connectors', payload);
+  return data;
+}
+
+export async function introspectConnection(
+  payload: IntrospectRequest,
+): Promise<SynthesizeResponse> {
+  const { data } = await apiClient.post<SynthesizeResponse>(
+    '/connectors/introspect',
+    payload,
+  );
+  return data;
+}
+
+// --- Schema diffing (FR-2.2) ---
+export async function diffModels(payload: DiffRequest): Promise<DiffResponse> {
+  const { data } = await apiClient.post<DiffResponse>('/model/diff', payload);
+  return data;
+}
+
+// --- Synthetic seed data (FR-2.4) ---
+export async function exportSyntheticData(
+  modelId: string,
+  payload: SyntheticSeedRequest,
+): Promise<SyntheticSeedResponse> {
+  const { data } = await apiClient.post<SyntheticSeedResponse>(
+    `/model/${modelId}/export/synthetic-data`,
+    payload,
+  );
+  return data;
+}
+
+// --- Data contracts & semantic layers (FR-2.3, Phase 3) ---
+export async function exportContract(
+  modelId: string,
+  format: ContractFormat,
+): Promise<ContractExportResponse> {
+  const { data } = await apiClient.get<ContractExportResponse>(
+    `/model/${modelId}/export/contract`,
+    { params: { format } },
+  );
+  return data;
+}
+
+export async function exportSemantic(
+  modelId: string,
+  engine: SemanticEngine,
+): Promise<SemanticExportResponse> {
+  const { data } = await apiClient.get<SemanticExportResponse>(
+    `/model/${modelId}/export/semantic`,
+    { params: { engine } },
   );
   return data;
 }

@@ -42,6 +42,19 @@ export type PIIType =
 
 export type ExportFormat = 'ddl' | 'dbt' | 'cube';
 
+// Governance & migration mesh (Phase 2/3) wire-value unions.
+export type ConnectionEngine =
+  | 'POSTGRESQL'
+  | 'SNOWFLAKE'
+  | 'BIGQUERY'
+  | 'MYSQL';
+
+export type SeedFormat = 'sql_insert' | 'csv';
+
+export type ContractFormat = 'opendatacontract' | 'avro' | 'protobuf';
+
+export type SemanticEngine = 'cube' | 'lookml' | 'metricflow';
+
 // ---------------------------------------------------------------------------
 // Core domain shapes
 // ---------------------------------------------------------------------------
@@ -178,6 +191,70 @@ export interface ValidationIssue {
 export interface ValidationReport {
   is_valid: boolean;
   issues: ValidationIssue[];
+}
+
+// ---------------------------------------------------------------------------
+// Migration & Governance Mesh (Phase 2/3)
+// ---------------------------------------------------------------------------
+export interface ConnectionInfo {
+  connection_id: string;
+  workspace_id: string;
+  name: string;
+  engine: string;
+  uri_masked?: string | null;
+}
+
+export interface ConnectionCreateRequest {
+  name: string;
+  engine: ConnectionEngine;
+  connection_uri: string;
+  workspace_id?: string | null;
+}
+
+export interface IntrospectRequest {
+  connection_id: string;
+  schema_name: string;
+}
+
+export interface DiffRequest {
+  source_model_id: string;
+  target_model_id: string;
+  dialect: string;
+}
+
+export interface DiffResponse {
+  source_model_id: string;
+  target_model_id: string;
+  dialect: string;
+  alter_statements: string[];
+  breaking_changes: string[];
+}
+
+export interface SyntheticSeedRequest {
+  row_count_per_entity: number;
+  format: SeedFormat;
+  dialect: string;
+}
+
+export interface SyntheticSeedResponse {
+  model_id: string;
+  format: SeedFormat;
+  dialect: string;
+  row_count_per_entity: number;
+  generation_order: string[];
+  files: Record<string, string>;
+}
+
+export interface ContractExportResponse {
+  model_id: string;
+  format: ContractFormat;
+  files: Record<string, string>;
+}
+
+export interface SemanticExportResponse {
+  model_id: string;
+  engine: SemanticEngine;
+  files: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------

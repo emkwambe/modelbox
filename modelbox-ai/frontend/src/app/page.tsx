@@ -90,6 +90,12 @@ export default function HomePage() {
         Describe your business requirements and synthesize a data model.{' '}
         <Link href="/trainer" style={{ color: '#2563eb', fontWeight: 600 }}>
           Or open ModelBox Trainer →
+        </Link>{' '}
+        <Link
+          href="/settings/connectors"
+          style={{ color: '#2563eb', fontWeight: 600 }}
+        >
+          Connect a database →
         </Link>
       </p>
 
