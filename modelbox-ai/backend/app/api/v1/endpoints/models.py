@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import io
+import uuid
 import zipfile
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import select
 
 from app.api.v1.dependencies import (
     AuthorizedModelDep,
@@ -19,7 +21,7 @@ from app.api.v1.dependencies import (
     require_model_role,
     resolve_user_workspace,
 )
-from app.models.metadata_store import DataModel
+from app.models.metadata_store import DataModel, WorkspaceMember
 from app.schemas.data_model import (
     ContractExportResponse,
     ContractFormat,
@@ -78,6 +80,48 @@ async def synthesize_model(
         session, user, payload.workspace_id
     )
     return await engine.synthesize(payload)
+
+
+@router.get(
+    "",
+    response_model=list[ModelInfo],
+    summary="List models in the caller's workspaces",
+)
+async def list_models(
+    session: SessionDep,
+    user: CurrentUserDep,
+    workspace_id: uuid.UUID | None = Query(default=None),
+) -> list[ModelInfo]:
+    """List models the caller can access, newest first (FR-2.2 diff selector)."""
+    member_ws = (
+        await session.execute(
+            select(WorkspaceMember.workspace_id).where(
+                WorkspaceMember.user_id == user.user_id
+            )
+        )
+    ).scalars().all()
+
+    if workspace_id is not None:
+        if workspace_id not in member_ws:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this workspace.",
+            )
+        ws_ids: list[uuid.UUID] = [workspace_id]
+    else:
+        ws_ids = list(member_ws)
+
+    if not ws_ids:
+        return []
+
+    rows = (
+        await session.execute(
+            select(DataModel)
+            .where(DataModel.workspace_id.in_(ws_ids))
+            .order_by(DataModel.created_at.desc())
+        )
+    ).scalars().all()
+    return [ModelInfo.model_validate(row) for row in rows]
 
 
 @router.post(

@@ -141,6 +141,11 @@ export async function listWorkspaces(): Promise<WorkspaceInfo[]> {
   return data;
 }
 
+export async function listModels(): Promise<ModelInfo[]> {
+  const { data } = await apiClient.get<ModelInfo[]>('/model');
+  return data;
+}
+
 export async function deleteModel(modelId: string): Promise<void> {
   await apiClient.delete(`/model/${modelId}`);
 }

@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import ERDCanvas from '@/components/canvas/ERDCanvas';
+import DiffPanel from '@/components/migration/DiffPanel';
 import ExportPanel from '@/components/editor/ExportPanel';
 import { deleteModel, saveGraph, updateModel } from '@/lib/api';
 import { useCanvasStore } from '@/store/canvasStore';
@@ -23,6 +24,7 @@ export default function CanvasPage() {
   const setValidation = useCanvasStore((s) => s.setValidation);
   const getGraphPayload = useCanvasStore((s) => s.getGraphPayload);
   const [showExport, setShowExport] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -158,7 +160,31 @@ export default function CanvasPage() {
           </button>
           <button
             type="button"
-            onClick={() => setShowExport((v) => !v)}
+            onClick={() => {
+              setShowDiff((v) => !v);
+              setShowExport(false);
+            }}
+            disabled={!modelId}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 6,
+              border: '1px solid #7c3aed',
+              background: showDiff ? '#7c3aed' : '#ffffff',
+              color: showDiff ? '#ffffff' : '#7c3aed',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: modelId ? 'pointer' : 'default',
+              opacity: modelId ? 1 : 0.5,
+            }}
+          >
+            {showDiff ? 'Hide diff' : 'Diff & migrate'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowExport((v) => !v);
+              setShowDiff(false);
+            }}
             disabled={!modelId}
             style={{
               padding: '6px 14px',
@@ -181,6 +207,11 @@ export default function CanvasPage() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <ERDCanvas />
         </div>
+        {showDiff && (
+          <div style={{ width: '45%', minWidth: 380, maxWidth: 720 }}>
+            <DiffPanel onClose={() => setShowDiff(false)} />
+          </div>
+        )}
         {showExport && (
           <div style={{ width: '45%', minWidth: 380, maxWidth: 720 }}>
             <ExportPanel onClose={() => setShowExport(false)} />
