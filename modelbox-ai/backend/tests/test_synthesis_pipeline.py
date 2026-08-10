@@ -749,6 +749,178 @@ async def test_poll_job_status(session: AsyncSession) -> None:
 
 
 # ---------------------------------------------------------------------------
+# ModelBox Trainer (Pillar 3)
+# ---------------------------------------------------------------------------
+async def _seed_assignment(
+    session: AsyncSession, workspace_id: uuid.UUID
+) -> uuid.UUID:
+    from app.models.metadata_store import TrainerAssignment
+
+    assignment = TrainerAssignment(
+        workspace_id=workspace_id,
+        title="Design a sales star schema",
+        description="Model products and sales.",
+        expected_graph_invariants={
+            "NO_CYCLIC_FK": True,
+            "PK_PRESENT": True,
+            "NO_DANGLING_REF": True,
+        },
+    )
+    session.add(assignment)
+    await session.flush()
+    return assignment.assignment_id
+
+
+_CLEAN_GRAPH = {
+    "entities": [
+        {
+            "entity_name": "dim_product",
+            "entity_type": "DIMENSION",
+            "columns": [
+                {"name": "product_key", "data_type": "VARCHAR(64)",
+                 "is_primary_key": True},
+            ],
+        },
+        {
+            "entity_name": "fact_sales",
+            "entity_type": "FACT",
+            "columns": [
+                {"name": "sale_id", "data_type": "VARCHAR(32)",
+                 "is_primary_key": True},
+                {"name": "product_key", "data_type": "VARCHAR(64)",
+                 "is_foreign_key": True},
+            ],
+        },
+    ],
+    "relationships": [
+        {"from": "fact_sales.product_key", "to": "dim_product.product_key",
+         "cardinality": "N:1"},
+    ],
+}
+
+_FLAWED_GRAPH = {
+    "entities": [
+        {
+            "entity_name": "a",
+            "entity_type": "TABLE",
+            "columns": [
+                {"name": "id", "data_type": "INT", "is_primary_key": True},
+                {"name": "b_id", "data_type": "INT", "is_foreign_key": True},
+            ],
+        },
+        {
+            "entity_name": "b",
+            "entity_type": "TABLE",
+            "columns": [
+                {"name": "b_col", "data_type": "INT"},
+            ],
+        },
+    ],
+    "relationships": [
+        {"from": "a.b_id", "to": "b.b_col", "cardinality": "N:1"},
+        {"from": "b.b_col", "to": "a.id", "cardinality": "N:1"},
+    ],
+}
+
+
+async def test_grade_clean_graph_scores_100(session: AsyncSession) -> None:
+    user, workspace = await _seed_user_workspace(session, "grade1@example.com")
+    assignment_id = await _seed_assignment(session, workspace)
+
+    client, app = _client_for(session, user)
+    async with client:
+        response = await client.post(
+            "/api/v1/trainer/grade",
+            json={
+                "assignment_id": str(assignment_id),
+                "submitted_graph": _CLEAN_GRAPH,
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["score"] == 100.0
+    assert body["violations"] == []
+
+
+async def test_grade_flawed_graph_deducts(session: AsyncSession) -> None:
+    user, workspace = await _seed_user_workspace(session, "grade2@example.com")
+    assignment_id = await _seed_assignment(session, workspace)
+
+    client, app = _client_for(session, user)
+    async with client:
+        response = await client.post(
+            "/api/v1/trainer/grade",
+            json={
+                "assignment_id": str(assignment_id),
+                "submitted_graph": _FLAWED_GRAPH,
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["score"] < 100.0
+    codes = {v.split(":", 1)[0] for v in body["violations"]}
+    assert "CYCLIC_FK" in codes
+    assert "MISSING_PK" in codes
+
+
+async def test_socratic_step_returns_question(session: AsyncSession) -> None:
+    from app.api.v1.dependencies import get_llm_gateway
+    from app.main import create_app
+    from app.schemas.data_model import SocraticStepResponse
+
+    user, workspace = await _seed_user_workspace(session, "socratic@example.com")
+    assignment_id = await _seed_assignment(session, workspace)
+
+    app = create_app()
+    _apply_overrides(app, session, user, StubGateway(kimball_model()))
+    # Socratic uses the gateway directly; return a canned tutoring response.
+    app.dependency_overrides[get_llm_gateway] = lambda: StubGateway(
+        SocraticStepResponse(
+            next_question="What surrogate key will dim_product use?",
+            hints=["Prefer a surrogate hash key over the natural key."],
+        )
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/v1/trainer/socratic/step",
+            json={"assignment_id": str(assignment_id), "conversation_history": []},
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "surrogate key" in response.json()["next_question"]
+
+
+async def test_trainer_workspace_isolation(session: AsyncSession) -> None:
+    owner, workspace = await _seed_user_workspace(session, "t-owner@example.com")
+    assignment_id = await _seed_assignment(session, workspace)
+    outsider = await _seed_user(session, "t-outsider@example.com")
+
+    client, app = _client_for(session, outsider)
+    async with client:
+        get_resp = await client.get(
+            f"/api/v1/trainer/assignments/{assignment_id}"
+        )
+        grade_resp = await client.post(
+            "/api/v1/trainer/grade",
+            json={
+                "assignment_id": str(assignment_id),
+                "submitted_graph": _CLEAN_GRAPH,
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert get_resp.status_code == 403
+    assert grade_resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
 # Canvas edit persistence (v2 FR-1.2)
 # ---------------------------------------------------------------------------
 async def test_put_graph_replaces_and_validates(session: AsyncSession) -> None:

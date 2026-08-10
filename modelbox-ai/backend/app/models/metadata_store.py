@@ -16,11 +16,13 @@ import datetime
 import uuid
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -360,6 +362,59 @@ class SynthesisJob(Base):
     )
 
 
+class TrainerAssignment(Base):
+    """A data-modeling assignment (ModelBox Trainer — isolated tables)."""
+
+    __tablename__ = "trainer_assignments"
+
+    assignment_id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(150), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    # Optional defective seed graph for "Spot the Flaw" mode.
+    flawed_graph_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    expected_graph_invariants: Mapped[dict] = mapped_column(
+        JSON, nullable=False
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class TrainerSubmission(Base):
+    """A graded student submission (ModelBox Trainer)."""
+
+    __tablename__ = "trainer_submissions"
+
+    submission_id: Mapped[uuid.UUID] = _uuid_pk()
+    assignment_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("trainer_assignments.assignment_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    submitted_graph_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    feedback_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
 __all__ = [
     "Base",
     "User",
@@ -370,6 +425,8 @@ __all__ = [
     "EntityColumn",
     "EntityRelationship",
     "SynthesisJob",
+    "TrainerAssignment",
+    "TrainerSubmission",
     "PARADIGMS",
     "CARDINALITIES",
     "WORKSPACE_ROLES",

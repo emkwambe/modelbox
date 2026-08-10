@@ -151,6 +151,66 @@ class JobStatusResponse(BaseModel):
     error: str | None = None
 
 
+# ---------------------------------------------------------------------------
+# ModelBox Trainer (Pillar 3) — isolated teaching/learning contracts
+# ---------------------------------------------------------------------------
+class AssignmentCreateRequest(BaseModel):
+    """Create a trainer assignment (FR-3.2)."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    title: str = Field(..., min_length=1, max_length=150)
+    description: str = Field(..., min_length=1)
+    workspace_id: uuid.UUID | None = None
+    # Optional defective seed graph for "Spot the Flaw" mode.
+    flawed_graph: "GraphUpdateRequest | None" = None
+    # e.g. {"NO_CYCLIC_FK": true, "PK_PRESENT": true, "NO_DANGLING_REF": true}
+    expected_invariants: dict[str, bool] = Field(default_factory=dict)
+
+
+class AssignmentInfo(BaseModel):
+    """Assignment as returned to instructors/learners."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    assignment_id: uuid.UUID
+    workspace_id: uuid.UUID
+    title: str
+    description: str
+    flawed_graph_json: dict | None = None
+    expected_graph_invariants: dict
+
+
+class SocraticStepRequest(BaseModel):
+    """One turn of Socratic tutoring (FR-3.1)."""
+
+    assignment_id: uuid.UUID
+    conversation_history: list[dict[str, str]] = Field(default_factory=list)
+    current_graph: "GraphUpdateRequest | None" = None
+
+
+class SocraticStepResponse(BaseModel):
+    """The tutor's next guiding question — never a full solution (FR-3.1)."""
+
+    next_question: str
+    hints: list[str] = Field(default_factory=list)
+
+
+class GradeRequest(BaseModel):
+    """Submit a student ERD for auto-grading (FR-3.3)."""
+
+    assignment_id: uuid.UUID
+    submitted_graph: "GraphUpdateRequest"
+
+
+class GradeResponse(BaseModel):
+    """Structured rubric result (FR-3.3)."""
+
+    score: float
+    passed_invariants: list[str] = Field(default_factory=list)
+    violations: list[str] = Field(default_factory=list)
+
+
 class PIIType(str, enum.Enum):
     """Privacy classification flags (FR-6.1)."""
 
@@ -418,6 +478,12 @@ __all__ = [
     "WorkspaceInfo",
     "JobCreatedResponse",
     "JobStatusResponse",
+    "AssignmentCreateRequest",
+    "AssignmentInfo",
+    "SocraticStepRequest",
+    "SocraticStepResponse",
+    "GradeRequest",
+    "GradeResponse",
     "ColumnSchema",
     "EntitySchema",
     "RelationshipSchema",

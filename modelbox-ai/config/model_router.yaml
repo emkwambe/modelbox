@@ -113,6 +113,13 @@ task_routing:
     fallback: ["gemini_cloud", "kimi_cloud", "openai_cloud"]
     temperature: 0.3
 
+  # ModelBox Trainer Socratic tutoring (Pillar 3) — isolated task route.
+  # local_ollama fallback keeps a path under AIRGAPPED=true.
+  socratic_tutoring:
+    primary: "anthropic_cloud"
+    fallback: ["openai_cloud", "local_ollama"]
+    temperature: 0.4
+
 # -----------------------------------------------------------------------------
 # Air-gapped override — applied when AIRGAPPED=true. Every task collapses to
 # local providers only; cloud fallbacks are dropped at resolution time.
