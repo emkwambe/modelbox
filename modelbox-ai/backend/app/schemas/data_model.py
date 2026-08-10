@@ -302,6 +302,45 @@ class SyntheticSeedResponse(BaseModel):
     files: dict[str, str] = Field(default_factory=dict)
 
 
+# ---------------------------------------------------------------------------
+# Data contracts & semantic layers (Phase 3, FR-2.3)
+# ---------------------------------------------------------------------------
+class ContractFormat(str, enum.Enum):
+    """Governance data-contract formats (FR-2.3)."""
+
+    OPENDATACONTRACT = "opendatacontract"
+    AVRO = "avro"
+    PROTOBUF = "protobuf"
+
+
+class SemanticEngine(str, enum.Enum):
+    """Semantic-layer target engines (FR-2.3)."""
+
+    CUBE = "cube"
+    LOOKML = "lookml"
+    METRICFLOW = "metricflow"
+
+
+class ContractExportResponse(BaseModel):
+    """A generated data contract (FR-2.3)."""
+
+    model_config = ConfigDict(use_enum_values=True, protected_namespaces=())
+
+    model_id: uuid.UUID
+    format: ContractFormat
+    files: dict[str, str] = Field(default_factory=dict)
+
+
+class SemanticExportResponse(BaseModel):
+    """A generated semantic-layer definition (FR-2.3)."""
+
+    model_config = ConfigDict(use_enum_values=True, protected_namespaces=())
+
+    model_id: uuid.UUID
+    engine: SemanticEngine
+    files: dict[str, str] = Field(default_factory=dict)
+
+
 class PIIType(str, enum.Enum):
     """Privacy classification flags (FR-6.1)."""
 
@@ -596,4 +635,8 @@ __all__ = [
     "SeedFormat",
     "SyntheticSeedRequest",
     "SyntheticSeedResponse",
+    "ContractFormat",
+    "SemanticEngine",
+    "ContractExportResponse",
+    "SemanticExportResponse",
 ]

@@ -21,6 +21,8 @@ from app.api.v1.dependencies import (
 )
 from app.models.metadata_store import DataModel
 from app.schemas.data_model import (
+    ContractExportResponse,
+    ContractFormat,
     DiffRequest,
     DiffResponse,
     ExportFormat,
@@ -28,6 +30,8 @@ from app.schemas.data_model import (
     GraphUpdateRequest,
     ModelInfo,
     ModelUpdateRequest,
+    SemanticEngine,
+    SemanticExportResponse,
     SyntheticSeedRequest,
     SyntheticSeedResponse,
     SynthesizedModel,
@@ -272,6 +276,60 @@ async def export_synthetic_data(
         row_count_per_entity=payload.row_count_per_entity,
         generation_order=seed.generation_order,
         files=seed.files,
+    )
+
+
+@router.get(
+    "/{model_id}/export/contract",
+    response_model=ContractExportResponse,
+    summary="Export a governance data contract (ODCS / Avro / Protobuf)",
+)
+async def export_contract(
+    engine: SynthesisEngineDep,
+    exporter: ExporterServiceDep,
+    model: AuthorizedModelDep,
+    contract_format: ContractFormat = Query(ContractFormat.OPENDATACONTRACT, alias="format"),
+) -> ContractExportResponse:
+    """Generate a data contract from a persisted model (FR-2.3, Phase 3)."""
+    result = await engine.get_model(model.model_id)
+    assert result is not None  # guaranteed by AuthorizedModelDep
+    try:
+        files = exporter.export_data_contract(
+            _to_synthesized(result), contract_format.value, dataset_name=model.title
+        )
+    except ExporterError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return ContractExportResponse(
+        model_id=model.model_id, format=contract_format, files=files
+    )
+
+
+@router.get(
+    "/{model_id}/export/semantic",
+    response_model=SemanticExportResponse,
+    summary="Export a semantic layer (Cube.js / LookML / MetricFlow)",
+)
+async def export_semantic(
+    engine: SynthesisEngineDep,
+    exporter: ExporterServiceDep,
+    model: AuthorizedModelDep,
+    semantic_engine: SemanticEngine = Query(SemanticEngine.CUBE, alias="engine"),
+) -> SemanticExportResponse:
+    """Generate a BI semantic-layer definition from a model (FR-2.3, Phase 3)."""
+    result = await engine.get_model(model.model_id)
+    assert result is not None  # guaranteed by AuthorizedModelDep
+    try:
+        files = exporter.export_semantic_layer(
+            _to_synthesized(result), semantic_engine.value
+        )
+    except ExporterError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return SemanticExportResponse(
+        model_id=model.model_id, engine=semantic_engine, files=files
     )
 
 

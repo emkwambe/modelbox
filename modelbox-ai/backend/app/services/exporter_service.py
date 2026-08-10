@@ -14,6 +14,8 @@ and safe to run in air-gapped deployments.
 
 from __future__ import annotations
 
+import json
+import re
 from typing import TYPE_CHECKING
 
 import sqlglot
@@ -292,6 +294,304 @@ class ExporterService:
             "  measures: {\n" + ",\n".join(measures) + "\n  }",
         ]
         return f"cube(`{cube_name}`, {{\n" + "".join(sections) + "\n});\n"
+
+    # ---------------------------------------------------------------------
+    # 5. Data contracts (Phase 3, FR-2.3)
+    # ---------------------------------------------------------------------
+    def export_data_contract(
+        self,
+        model: SynthesizedModel,
+        contract_format: str,
+        dataset_name: str = "modelbox_dataset",
+    ) -> dict[str, str]:
+        """Emit a governance data contract in the requested format."""
+        fmt = contract_format.lower()
+        if fmt in ("opendatacontract", "odcs"):
+            return {"datacontract.yaml": self._odcs_contract(model, dataset_name)}
+        if fmt == "avro":
+            return {
+                f"{entity.entity_name}.avsc": self._avro_schema(entity, dataset_name)
+                for entity in model.entities
+            }
+        if fmt in ("protobuf", "proto", "proto3"):
+            return {f"{dataset_name}.proto": self._protobuf_schema(model, dataset_name)}
+        raise ExporterError(f"Unsupported contract format: {contract_format}")
+
+    def _odcs_contract(self, model: SynthesizedModel, dataset_name: str) -> str:
+        """Open Data Contract Standard (v0.9.x) YAML."""
+        schema: list[dict[str, object]] = []
+        for entity in model.entities:
+            properties: list[dict[str, object]] = []
+            for col in entity.columns:
+                prop: dict[str, object] = {
+                    "name": col.name,
+                    "logicalType": self._logical_type(col.data_type),
+                    "physicalType": col.data_type,
+                    "required": col.is_primary_key,
+                    "primaryKey": col.is_primary_key,
+                }
+                if col.description:
+                    prop["description"] = col.description
+                if col.is_pii:
+                    prop["classification"] = "PII"
+                properties.append(prop)
+            table_doc: dict[str, object] = {
+                "name": entity.entity_name,
+                "physicalType": "table",
+                "properties": properties,
+            }
+            if entity.description:
+                table_doc["description"] = entity.description
+            schema.append(table_doc)
+
+        contract = {
+            "apiVersion": "v0.9.3",
+            "kind": "DataContract",
+            "id": dataset_name,
+            "info": {
+                "title": dataset_name,
+                "version": "1.0.0",
+                "owner": "modelbox",
+            },
+            "schema": schema,
+        }
+        return yaml.safe_dump(contract, sort_keys=False, default_flow_style=False)
+
+    def _avro_schema(self, entity: EntitySchema, namespace: str) -> str:
+        """Apache Avro record schema (JSON) for one entity."""
+        fields: list[dict[str, object]] = []
+        for col in entity.columns:
+            avro_type = self._avro_type(col.data_type)
+            # Non-key columns are nullable via a ["null", T] union defaulting null.
+            if not col.is_primary_key:
+                field: dict[str, object] = {
+                    "name": col.name,
+                    "type": ["null", avro_type],
+                    "default": None,
+                }
+            else:
+                field = {"name": col.name, "type": avro_type}
+            if col.description:
+                field["doc"] = col.description
+            fields.append(field)
+
+        record = {
+            "type": "record",
+            "name": self._to_pascal_case(entity.entity_name),
+            "namespace": namespace,
+            "fields": fields,
+        }
+        return json.dumps(record, indent=2)
+
+    def _protobuf_schema(self, model: SynthesizedModel, package: str) -> str:
+        """Protobuf proto3 message definitions for the whole model."""
+        lines = ['syntax = "proto3";', "", f"package {package};", ""]
+        for entity in model.entities:
+            lines.append(f"message {self._to_pascal_case(entity.entity_name)} {{")
+            for tag, col in enumerate(entity.columns, start=1):
+                lines.append(f"  {self._proto_type(col.data_type)} {col.name} = {tag};")
+            lines.append("}")
+            lines.append("")
+        return "\n".join(lines)
+
+    # ---------------------------------------------------------------------
+    # 6. Semantic layers (Phase 3, FR-2.3)
+    # ---------------------------------------------------------------------
+    def export_semantic_layer(
+        self, model: SynthesizedModel, engine: str
+    ) -> dict[str, str]:
+        """Emit a semantic-layer definition for the requested BI engine."""
+        eng = engine.lower()
+        if eng == "cube":
+            return self.generate_cube_schema(model)
+        if eng == "lookml":
+            return {
+                f"{entity.entity_name}.view.lkml": self._lookml_view(entity)
+                for entity in model.entities
+            }
+        if eng == "metricflow":
+            return {"semantic_models.yml": self._metricflow(model)}
+        raise ExporterError(f"Unsupported semantic engine: {engine}")
+
+    def _lookml_view(self, entity: EntitySchema) -> str:
+        lines = [f"view: {entity.entity_name} {{", f"  sql_table_name: {entity.entity_name} ;;", ""]
+        for col in entity.columns:
+            if self._is_temporal(col.data_type):
+                lines.append(f"  dimension_group: {col.name} {{")
+                lines.append("    type: time")
+                lines.append("    timeframes: [raw, date, week, month, quarter, year]")
+                lines.append(f"    sql: ${{TABLE}}.{col.name} ;;")
+                lines.append("  }")
+            else:
+                lines.append(f"  dimension: {col.name} {{")
+                if col.is_primary_key:
+                    lines.append("    primary_key: yes")
+                lines.append(f"    type: {self._lookml_type(col.data_type)}")
+                lines.append(f"    sql: ${{TABLE}}.{col.name} ;;")
+                lines.append("  }")
+            lines.append("")
+
+        for col in entity.columns:
+            if self._is_numeric(col) and not col.is_primary_key:
+                agg = (col.aggregation or "sum").lower()
+                lines.append(f"  measure: total_{col.name} {{")
+                lines.append(f"    type: {agg}")
+                lines.append(f"    sql: ${{TABLE}}.{col.name} ;;")
+                lines.append("  }")
+                lines.append("")
+
+        lines.append("  measure: count {")
+        lines.append("    type: count")
+        lines.append("  }")
+        lines.append("}")
+        return "\n".join(lines)
+
+    def _metricflow(self, model: SynthesizedModel) -> str:
+        # Map (entity, column) -> parent for foreign-key entity declarations.
+        fk_refs: dict[tuple[str, str], str] = {}
+        for rel in model.relationships:
+            from_entity, from_col = self._split_ref(rel.from_ref)
+            to_entity, _ = self._split_ref(rel.to_ref)
+            if from_col:
+                fk_refs[(from_entity, from_col)] = to_entity
+
+        semantic_models: list[dict[str, object]] = []
+        metrics: list[dict[str, object]] = []
+        for entity in model.entities:
+            entities_block: list[dict[str, object]] = []
+            dimensions: list[dict[str, object]] = []
+            measures: list[dict[str, object]] = []
+
+            for col in entity.columns:
+                if col.is_primary_key:
+                    entities_block.append(
+                        {"name": col.name, "type": "primary", "expr": col.name}
+                    )
+                elif (entity.entity_name, col.name) in fk_refs:
+                    entities_block.append(
+                        {"name": col.name, "type": "foreign", "expr": col.name}
+                    )
+                elif self._is_temporal(col.data_type):
+                    dimensions.append(
+                        {
+                            "name": col.name,
+                            "type": "time",
+                            "type_params": {"time_granularity": "day"},
+                            "expr": col.name,
+                        }
+                    )
+                elif self._is_numeric(col):
+                    measures.append(
+                        {
+                            "name": f"total_{col.name}",
+                            "agg": (col.aggregation or "sum").lower(),
+                            "expr": col.name,
+                        }
+                    )
+                else:
+                    dimensions.append(
+                        {"name": col.name, "type": "categorical", "expr": col.name}
+                    )
+
+            count_measure = f"{entity.entity_name}_count"
+            measures.append({"name": count_measure, "agg": "count", "expr": "1"})
+            metrics.append(
+                {
+                    "name": count_measure,
+                    "type": "simple",
+                    "type_params": {"measure": count_measure},
+                }
+            )
+
+            model_doc: dict[str, object] = {
+                "name": entity.entity_name,
+                "model": f"ref('{entity.entity_name}')",
+                "entities": entities_block,
+            }
+            if dimensions:
+                model_doc["dimensions"] = dimensions
+            model_doc["measures"] = measures
+            semantic_models.append(model_doc)
+
+        return yaml.safe_dump(
+            {"semantic_models": semantic_models, "metrics": metrics},
+            sort_keys=False,
+            default_flow_style=False,
+        )
+
+    # ---------------------------------------------------------------------
+    # Type mapping helpers
+    # ---------------------------------------------------------------------
+    @staticmethod
+    def _logical_type(data_type: str) -> str:
+        t = data_type.upper()
+        if any(tok in t for tok in ("INT", "SERIAL", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL", "NUMBER")):
+            return "number"
+        if "BOOL" in t:
+            return "boolean"
+        if any(tok in t for tok in ("TIMESTAMP", "DATE", "TIME")):
+            return "date"
+        return "string"
+
+    @staticmethod
+    def _is_temporal(data_type: str) -> bool:
+        t = data_type.upper()
+        return any(tok in t for tok in ("TIMESTAMP", "DATETIME", "DATE", "TIME"))
+
+    def _avro_type(self, data_type: str) -> object:
+        t = data_type.upper()
+        if "BOOL" in t:
+            return "boolean"
+        if any(tok in t for tok in ("BIGINT", "BIGSERIAL")):
+            return "long"
+        if "TIMESTAMP" in t or "DATETIME" in t:
+            return {"type": "long", "logicalType": "timestamp-micros"}
+        if "DATE" in t:
+            return {"type": "int", "logicalType": "date"}
+        if any(tok in t for tok in ("NUMERIC", "DECIMAL", "NUMBER")):
+            precision, scale = self._parse_precision_scale(data_type)
+            return {
+                "type": "bytes",
+                "logicalType": "decimal",
+                "precision": precision,
+                "scale": scale,
+            }
+        if any(tok in t for tok in ("FLOAT", "DOUBLE", "REAL")):
+            return "double"
+        if any(tok in t for tok in ("INT", "SERIAL")):
+            return "int"
+        return "string"
+
+    @staticmethod
+    def _proto_type(data_type: str) -> str:
+        t = data_type.upper()
+        if "BOOL" in t:
+            return "bool"
+        if any(tok in t for tok in ("BIGINT", "BIGSERIAL")):
+            return "int64"
+        if any(tok in t for tok in ("FLOAT", "DOUBLE", "REAL", "NUMERIC", "DECIMAL", "NUMBER")):
+            return "double"
+        if any(tok in t for tok in ("INT", "SERIAL")):
+            return "int32"
+        return "string"
+
+    def _lookml_type(self, data_type: str) -> str:
+        t = data_type.upper()
+        if "BOOL" in t:
+            return "yesno"
+        if any(
+            tok in t
+            for tok in ("INT", "SERIAL", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL", "NUMBER")
+        ):
+            return "number"
+        return "string"
+
+    @staticmethod
+    def _parse_precision_scale(data_type: str) -> tuple[int, int]:
+        match = re.search(r"\((\d+)\s*,\s*(\d+)\)", data_type)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+        return 38, 9
 
     # ---------------------------------------------------------------------
     # Helpers
