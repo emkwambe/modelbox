@@ -88,6 +88,8 @@ class GraphRepository:
                     is_pii=col.is_pii,
                     pii_type=str(col.pii_type) if col.pii_type else None,
                     description=col.description,
+                    is_metric=col.is_metric,
+                    aggregation=col.aggregation,
                     ordinal_position=col.ordinal_position
                     if col.ordinal_position is not None
                     else position,

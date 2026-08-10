@@ -260,6 +260,11 @@ class EntityColumn(Base):
     pii_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     ordinal_position: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Semantic-layer declaration (FR-2.3 / Semantic Sprint 2).
+    is_metric: Mapped[bool] = mapped_column(
+        default=False, server_default=text("false")
+    )
+    aggregation: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     entity: Mapped["ModelEntity"] = relationship(back_populates="columns")
 
