@@ -37,7 +37,9 @@ _PREFIX_BY_TYPE: dict[str, str] = {
 }
 _SNAKE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _KEY_SUFFIXES = ("_id", "_sk", "_key", "_hk", "_pk")
-# Column-name fragments that strongly imply personal data.
+# Column-name fragments that strongly imply personal data. Kept specific to
+# avoid false positives — e.g. "ip_address" (not bare "ip", which would match
+# zip/shipping/description/recipient).
 _PII_PATTERNS = (
     "email",
     "ssn",
@@ -49,6 +51,7 @@ _PII_PATTERNS = (
     "credit_card",
     "passport",
     "iban",
+    "ip_address",
 )
 
 

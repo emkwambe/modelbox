@@ -261,6 +261,42 @@ def test_pii_exposure_untagged(engine: GraphEngine) -> None:
     )
 
 
+def test_pii_exposure_flags_unclassified_ip_address(engine: GraphEngine) -> None:
+    report = engine.validate(
+        [
+            entity(
+                "sessions",
+                [col("id", pk=True), col("ip_address")],  # not tagged is_pii
+            )
+        ],
+        [],
+    )
+    assert any(
+        i.code == "PII_EXPOSURE" and i.column_name == "ip_address"
+        for i in report.issues
+    )
+
+
+def test_pii_exposure_no_false_positive_on_ip_substrings(engine: GraphEngine) -> None:
+    # "ip" appears inside zip/shipping/description/recipient — must NOT flag.
+    report = engine.validate(
+        [
+            entity(
+                "orders",
+                [
+                    col("id", pk=True),
+                    col("zip_code"),
+                    col("shipping_status"),
+                    col("description"),
+                    col("recipient_count"),
+                ],
+            )
+        ],
+        [],
+    )
+    assert "PII_EXPOSURE" not in _codes(report)
+
+
 def test_pii_classified_is_clean(engine: GraphEngine) -> None:
     # A correctly classified PII column must NOT be flagged (no false positives).
     report = engine.validate(
