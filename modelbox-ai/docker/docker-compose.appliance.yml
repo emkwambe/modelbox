@@ -19,7 +19,7 @@ services:
     build:
       context: ../frontend
       dockerfile: ../docker/Dockerfile.frontend
-    image: modelbox/web-ui:v1.2.0
+    image: modelbox/web-ui:v1.3.0
     ports:
       - "${UI_PORT:-3000}:3000"
     environment:
@@ -33,7 +33,7 @@ services:
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
-    image: modelbox/core-engine:v1.2.0
+    image: modelbox/core-engine:v1.3.0
     ports:
       - "8000:8000"
     environment:
@@ -79,7 +79,7 @@ services:
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
-    image: modelbox/core-engine:v1.2.0
+    image: modelbox/core-engine:v1.3.0
     command: ["celery", "-A", "app.worker", "worker", "--loglevel=info"]
     environment:
       - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:-secret}@postgres-db:5432/modelbox_metadata

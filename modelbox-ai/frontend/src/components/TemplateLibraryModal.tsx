@@ -19,7 +19,8 @@ import {
 
 interface Props {
   onClose: () => void;
-  onUsePrompt: (template: Template) => void;
+  /** Mode A — populate a prompt bar. Omit where there is none (e.g. Trainer). */
+  onUsePrompt?: (template: Template) => void;
   onLoadGraph: (template: Template) => void;
 }
 
@@ -134,9 +135,11 @@ export default function TemplateLibraryModal({
                 >
                   {expanded === t.id ? 'Hide' : 'Preview'}
                 </button>
-                <button type="button" onClick={() => onUsePrompt(t)} style={ghostBtn}>
-                  Use prompt →
-                </button>
+                {onUsePrompt && (
+                  <button type="button" onClick={() => onUsePrompt(t)} style={ghostBtn}>
+                    Use prompt →
+                  </button>
+                )}
                 <button type="button" onClick={() => onLoadGraph(t)} style={primaryBtn}>
                   Load canvas →
                 </button>

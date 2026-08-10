@@ -10,12 +10,14 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
 import ERDCanvas from '@/components/canvas/ERDCanvas';
+import TemplateLibraryModal from '@/components/TemplateLibraryModal';
 import {
   getAssignment,
   gradeSubmission,
   listAssignments,
   submitSocraticStep,
 } from '@/lib/api';
+import type { Template } from '@/lib/templates';
 import { useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
 import type {
@@ -39,6 +41,12 @@ export default function TrainerPage() {
   const [grade, setGrade] = useState<GradeResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showLibrary, setShowLibrary] = useState(false);
+
+  function handleLoadTemplate(t: Template) {
+    loadGraph(t.entities, t.relationships, t.paradigm);
+    setShowLibrary(false);
+  }
 
   useEffect(() => setMounted(true), []);
 
@@ -189,6 +197,22 @@ export default function TrainerPage() {
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={() => setShowLibrary(true)}
+          style={{
+            padding: '6px 12px',
+            borderRadius: 6,
+            border: '1px solid #7c3aed',
+            background: '#f5f3ff',
+            color: '#7c3aed',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          📚 Library
+        </button>
         <button
           type="button"
           onClick={handleGrade}
@@ -391,6 +415,13 @@ export default function TrainerPage() {
         >
           {error}
         </p>
+      )}
+
+      {showLibrary && (
+        <TemplateLibraryModal
+          onClose={() => setShowLibrary(false)}
+          onLoadGraph={handleLoadTemplate}
+        />
       )}
     </div>
   );
