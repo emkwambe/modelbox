@@ -894,35 +894,27 @@ def _odcs(fixture: Fixture) -> dict[str, Any]:
     return yaml.safe_load(files["datacontract.yaml"])
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    f"H2: apiVersion is stamped v0.9.3; the current ODCS line is "
-    f"{ODCS_API_VERSION}."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_odcs_apiversion_is_current(gid: str) -> None:
     assert _odcs(GOLD[gid])["apiVersion"] == ODCS_API_VERSION
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "H2-ext: the contract is a hybrid of two standards. ODCS v3 requires "
-    "top-level `version` and `status`, neither of which is emitted, and the "
-    "`info:` block it does emit belongs to the rival Data Contract "
-    "Specification. The audit under-called this as a bad version stamp."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_odcs_conforms_to_v3_fundamentals(gid: str) -> None:
     doc = _odcs(GOLD[gid])
     assert doc.get("kind") == "DataContract"
-    missing = [key for key in ("id", "version", "status") if key not in doc]
-    assert not missing, f"ODCS v3 requires top-level {missing}"
+    missing = [
+        key
+        for key in ("apiVersion", "kind", "id", "version", "status")
+        if key not in doc
+    ]
+    assert not missing, f"ODCS v3.1.0 requires top-level {missing}"
     assert "info" not in doc, (
         "`info:` is a Data Contract Specification key, not ODCS v3"
     )
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "H2/H4: `required` is emitted as a restatement of is_primary_key, so every "
-    "non-PK column is declared optional — including Data Vault load_dts and "
-    "record_source. Needs ColumnSchema.is_nullable from Sprint 2."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_odcs_required_reflects_nullability(gid: str) -> None:
     """`required` must derive from declared nullability, not from the PK flag.
 
@@ -1020,6 +1012,64 @@ def test_odcs_quality_entries_use_v3_vocabulary() -> None:
         if not any(k == "mustBe" or k.startswith("mustBe") for k in entry):
             offending.append(f"{where}: no mustBe* comparator ({entry})")
     assert not offending, offending
+
+
+@pytest.mark.parametrize("gid", GOLD_IDS)
+def test_odcs_declares_foreign_keys_as_relationships(gid: str) -> None:
+    """A column-level FK target reaches the contract (register C7).
+
+    ODCS v3.1.0 expresses this at property level as ``relationships: [{to}]``
+    with ``from`` implicit; ``type: foreignKey`` is the schema-level construct
+    and needs explicit ``from`` and ``to``. Correction C7-a — C3 named the
+    property-level construct wrongly, and Sprint 2's decision to keep
+    ``ColumnSchema.references`` rested on that name.
+
+    The gold graphs carry no ``references`` values, so this asserts the
+    round-trip on a model that does: absence here would otherwise look like
+    conformance.
+    """
+    fixture = GOLD[gid]
+    model = fixture.model.model_copy(deep=True)
+
+    # Give each FK column the qualified target its relationship already implies.
+    expected: dict[tuple[str, str], str] = {}
+    by_entity = {e.entity_name: e for e in model.entities}
+    for rel in model.relationships:
+        child, child_col = rel.from_ref.split(".", 1)
+        if not child_col or child not in by_entity:
+            continue
+        column = next(
+            (c for c in by_entity[child].columns if c.name == child_col), None
+        )
+        if column is None:
+            continue
+        column.references = rel.to_ref
+        expected[(child, child_col)] = rel.to_ref
+    if not expected:
+        pytest.skip("single-entity model declares no foreign keys")
+
+    contract = yaml.safe_load(
+        exporter().export_data_contract(model, "odcs", fixture.dataset_name)[
+            "datacontract.yaml"
+        ]
+    )
+    for table in contract["schema"]:
+        for prop in table["properties"]:
+            target = expected.get((table["name"], prop["name"]))
+            if target is None:
+                assert "relationships" not in prop, (
+                    f"{table['name']}.{prop['name']} claims a relationship it "
+                    f"does not have"
+                )
+                continue
+            assert prop.get("relationships") == [{"to": target}], (
+                f"{table['name']}.{prop['name']} should declare "
+                f"relationships: [{{to: {target}}}], got "
+                f"{prop.get('relationships')!r}"
+            )
+            assert "foreignKey" not in prop, (
+                "foreignKey is the schema-level construct, not a property key"
+            )
 
 
 # ===========================================================================

@@ -205,7 +205,11 @@ def test_governance_metadata_propagates_to_exports() -> None:
         ]
     )
     table = odcs["schema"][0]
-    assert table["tier"] == "TIER_1_CRITICAL"
+    # `tier` is not an ODCS v3.1.0 schema key, so it travels as a custom
+    # property rather than as invented vocabulary. slaProperties is standard.
+    assert {"property": "tier", "value": "TIER_1_CRITICAL"} in table[
+        "customProperties"
+    ]
     assert table["slaProperties"] == [{"property": "freshness", "value": "< 1h"}]
 
     # dbt schema.yml: meta block.

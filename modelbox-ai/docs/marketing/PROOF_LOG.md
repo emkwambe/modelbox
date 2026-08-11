@@ -221,6 +221,42 @@ once Sprint 3 consumes the field, "the fix that recreates the bug" post.
 
 ---
 
+## PL-007 — Generated dbt projects run as-is, with nothing added
+
+**Claim:** "Export a dbt project and it runs. You supply your warehouse
+connection; we supply everything else — models, tests, sources, package
+dependencies. No hand-editing to make it parse."
+
+**Evidence:** `test_artifact_fidelity.py::test_dbt_project_is_self_contained`,
+5/5 reference models. The project handed to `dbt parse` contains **only**
+exporter output plus `dbt_project.yml` and `profiles.yml` — the two files that
+are genuinely the consumer's, because only they know their warehouse.
+
+**Why it is stronger than it looks:** the harness previously synthesised a
+sources file, because the exporter emitted none and every other dbt defect
+would have been masked behind that single failure. When the exporter began
+emitting its own, dbt raised `DuplicateResourceNameError` — proving the
+scaffolding had been *conflicting*, not merely redundant, and forcing its
+deletion rather than its retirement. The property is therefore the strong form:
+self-contained because nothing else is present, not because an extra file
+happened to agree.
+
+That is also the clearest demonstration of why this suite verifies against real
+toolchains rather than assertions. No assertion we could have written would
+have distinguished those two cases; dbt distinguished them immediately.
+
+**Honest limit:** `dbt parse` proves the project resolves — models, sources,
+tests, dependencies. It does not execute against a warehouse, so it does not
+prove the SQL returns what you expect. `dbt build` on generated seed data is
+Sprint 4 (register B13).
+
+**Verified:** 2026-08-11 · **Sprint:** 3 · **Version:** unreleased
+**Expires:** on any change to `generate_dbt_project`, or if the harness ever
+writes a file into the project that the exporter did not emit.
+**Usable in:** landing page, export UI, "why we test against tools not strings".
+
+---
+
 ## Claims explicitly NOT yet provable
 
 Recorded so nobody reaches for them early. Each becomes an entry when its test

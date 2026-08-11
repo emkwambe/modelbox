@@ -184,6 +184,17 @@ the reason it claimed to test. Stated once here rather than rediscovered again:
    schedule dependency). Split into the first two, each stating its scope. The
    same shape produced the sprint's stale 76 → 0 target.
 
+7. **When fixing a defect found through tool output, check whether the tool
+   reported the whole class or only its loudest instance.** Evidence can look
+   complete merely because it is the only evidence visible.
+
+   Sprint 3: the audit recorded M11 as "generic-test arguments must nest under
+   `arguments:`", because that is what dbt warned about on every parse. dbt had
+   *also* renamed the block key from `tests:` to `data_tests:` in 1.8, but
+   deprecated it far more quietly. A fix addressing only the loud half would
+   have shipped and kept warning. Same shape as a non-discriminating test: the
+   visible evidence was a partial description of the defect.
+
 A criterion whose evidence violates any of these is NOT MET, whatever the test
 reports.
 

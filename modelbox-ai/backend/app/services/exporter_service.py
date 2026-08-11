@@ -55,6 +55,13 @@ _SQLGLOT_DIALECTS: dict[str, str] = {
 }
 
 
+# Open Data Contract Standard version this emitter targets. Bitol, verified via
+# context7 on 2026-08-11. Bump only alongside a re-read of the spec — the
+# previous value claimed v0.9.3 while the body used v3 vocabulary, so the
+# artifact conformed to neither.
+_ODCS_API_VERSION = "v3.1.0"
+
+
 class ExporterError(ValueError):
     """Raised for unsupported dialects or malformed export input."""
 
@@ -408,7 +415,24 @@ class ExporterService:
         raise ExporterError(f"Unsupported contract format: {contract_format}")
 
     def _odcs_contract(self, model: SynthesizedModel, dataset_name: str) -> str:
-        """Open Data Contract Standard (v0.9.x) YAML."""
+        """Open Data Contract Standard v3.1.0 (Bitol).
+
+        Spec: https://github.com/bitol-io/open-data-contract-standard
+        Verified via context7 on 2026-08-11 — this emitter had previously been
+        a hybrid of two standards, so the shape is asserted against the
+        published one rather than remembered.
+
+        * Required at the top level: ``apiVersion``, ``kind``, ``id``,
+          ``version``, ``status``. ``name`` is optional; ``dataProduct`` is
+          deprecated since v3.1.0.
+        * There is **no** ``info:`` block. That belongs to the Data Contract
+          Specification (datacontract.com), a different standard, and emitting
+          it made the artifact conform to neither.
+        * A foreign key at property level is ``relationships: [{to: ...}]``
+          with ``from`` implicit. ``type: foreignKey`` is the *schema*-level
+          construct and requires explicit ``from`` and ``to`` — correction
+          C7-a, after C3 named this wrongly.
+        """
         schema: list[dict[str, object]] = []
         for entity in model.entities:
             properties: list[dict[str, object]] = []
@@ -417,27 +441,46 @@ class ExporterService:
                     "name": col.name,
                     "logicalType": self._logical_type(col.data_type),
                     "physicalType": col.data_type,
-                    "required": col.is_primary_key,
+                    # Derived from declared nullability, not restated from the
+                    # key flag. Under the old rule every non-key column was
+                    # declared optional — including Data Vault load_dts and
+                    # record_source, which are structurally mandatory.
+                    "required": not col.is_nullable,
                     "primaryKey": col.is_primary_key,
                 }
+                if col.is_unique:
+                    prop["unique"] = True
                 if col.description:
                     prop["description"] = col.description
                 if col.is_pii:
                     prop["classification"] = "PII"
+                if col.references:
+                    # Shorthand notation, <object>.<property>, which is exactly
+                    # the shape ColumnSchema.references already stores.
+                    prop["relationships"] = [{"to": col.references}]
                 quality = self._odcs_quality(col)
                 if quality:
                     prop["quality"] = quality
                 properties.append(prop)
+
             table_doc: dict[str, object] = {
                 "name": entity.entity_name,
+                "logicalType": "object",
                 "physicalType": "table",
                 "properties": properties,
             }
             if entity.description:
                 table_doc["description"] = entity.description
+            custom: list[dict[str, object]] = []
             tier = self._tier_value(entity)
             if tier:
-                table_doc["tier"] = tier
+                # `tier` is not an ODCS schema key; carrying it as a custom
+                # property keeps the information without inventing vocabulary.
+                custom.append({"property": "tier", "value": tier})
+            if entity.grain:
+                custom.append({"property": "grain", "value": entity.grain})
+            if custom:
+                table_doc["customProperties"] = custom
             if entity.freshness_sla:
                 table_doc["slaProperties"] = [
                     {"property": "freshness", "value": entity.freshness_sla}
@@ -445,14 +488,12 @@ class ExporterService:
             schema.append(table_doc)
 
         contract = {
-            "apiVersion": "v0.9.3",
+            "apiVersion": _ODCS_API_VERSION,
             "kind": "DataContract",
-            "id": dataset_name,
-            "info": {
-                "title": dataset_name,
-                "version": "1.0.0",
-                "owner": "modelbox",
-            },
+            "id": self._safe_identifier(dataset_name),
+            "name": dataset_name,
+            "version": "1.0.0",
+            "status": "draft",
             "schema": schema,
         }
         return yaml.safe_dump(contract, sort_keys=False, default_flow_style=False)
