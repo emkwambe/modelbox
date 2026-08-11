@@ -16,7 +16,7 @@ below needs re-deriving — every decision here has already been ruled.
 | 1 — consolidate persistence (Q8, C6) | **done** | `a273dc3` |
 | — amend `test_odcs_required_reflects_nullability` (C7) | **done** | this commit |
 | 2 — `stable_id` (Q6, C3) | **schema+ORM+repo done**, tests pending | this commit |
-| 3 — constraint fields (H4, C2 capability half) | **schema+ORM+repo done**, introspection pending | this commit |
+| 3 — constraint fields (H4, C2 capability half) | **DONE** — introspection reads all four | Task 3 commit |
 | 4 — `agg_time_column` (B1's fourth defect) | **schema+ORM+repo done**, gold graphs pending | this commit |
 | 5 — migration + populated-DB verification (C8) | **DONE** — 3/3, byte-identity held | `31443a6` + Task 5 commit |
 | 6 — `references` populate/persist (M6, C7 partial) | not started | |
@@ -206,16 +206,31 @@ logic* is the same hazard one step earlier: everything built on top of it would
 appear to work while resting on an unverified invariant. Verify the invariant,
 then build on it.
 
-### Still to do on these tasks
+### Still to do
 
-- Introspection does not yet populate `is_nullable`/`default_value` (all four
-  engines) or `is_unique`/`check_expression` (where the catalog supports it).
-- The five gold graphs do not yet set `agg_time_column`; 9 of 15 entities can.
-- Round-trip tests (Task 9) are not written. The properties to assert are listed
-  in `SPRINT_2_PROMPT.md`.
-- The populated-database migration verification (Task 5) is not run; the plan is
-  at the end of this file.
-- Canvas (Task 7) and synthesis prompt (Task 8) untouched.
+- Task 4: the five gold graphs do not yet set `agg_time_column`; 9 of 15
+  entities can.
+- Task 6: `references` population from introspection/synthesis.
+- Task 7: canvas controls in `ColumnSemanticEditor.tsx`.
+- Task 8: synthesis prompt and response schema — new fields **optional** with
+  server-side defaults, and a model omitting all three must still synthesise.
+
+Then: PR out of draft, appliance smoke, tag.
+
+## Introspection scope as built (Task 3)
+
+| Engine | `is_nullable` | `default_value` | `is_unique` | `check_expression` |
+| :-- | :-- | :-- | :-- | :-- |
+| PostgreSQL | yes | yes | yes | yes |
+| MySQL | yes | yes | yes | yes (8.0.16+) |
+| Snowflake | yes | yes | yes (declared, unenforced) | no such feature |
+| BigQuery | yes | yes | no such feature | no such feature |
+
+Single-column `UNIQUE` only — a composite constraint says nothing about any one
+column. Postgres `CHECK` excludes the `IS NOT NULL` clauses it materialises for
+every NOT NULL, since `is_nullable` already carries that. MySQL does not report
+which column a `CHECK` belongs to, so a clause is attributed only when exactly
+one of the table's columns is named in it. Everything else stays absent.
 
 ## Hard constraints
 

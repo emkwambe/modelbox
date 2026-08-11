@@ -149,6 +149,31 @@ def _map_type(data_type: str, type_map: dict[str, str] | None = None) -> str:
     return (type_map or _PG_TYPE_MAP).get(data_type.lower(), data_type.upper())
 
 
+def _as_nullable(value: Any) -> bool:
+    """Normalise an engine's nullability answer to a bool.
+
+    ``information_schema.columns.is_nullable`` is the string ``'YES'``/``'NO'``
+    in every engine we introspect, but drivers differ on case and some return a
+    real bool. ``None`` means the engine did not say, and the SQL default —
+    nullable — applies rather than a fabricated NOT NULL.
+    """
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().upper() not in {"NO", "N", "FALSE", "0"}
+
+
+def _as_default(value: Any) -> str | None:
+    """Normalise a column default, discarding the engine's 'no default' forms."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.upper() == "NULL":
+        return None
+    return text[:512]
+
+
 class IntrospectionService:
     """Introspects physical schemas into ModelBox graphs."""
 
@@ -159,13 +184,28 @@ class IntrospectionService:
         primary_keys: set[tuple[str, str]],
         foreign_keys: list[dict[str, str]],
         type_map: dict[str, str] | None = None,
+        unique_columns: set[tuple[str, str]] | None = None,
+        check_expressions: dict[tuple[str, str], str] | None = None,
     ) -> SynthesizedModel:
         """Pure mapping of DB metadata -> a 3NF ``SynthesizedModel``.
 
         Entity type is inferred from FK topology: >=2 outgoing FKs -> FACT;
         referenced with <=1 outgoing -> DIMENSION; otherwise TABLE. ``type_map``
         selects the engine's data-type normalization (defaults to PostgreSQL).
+
+        Physical constraints (Sprint 2, H4) are read from the source system
+        rather than assumed. A column dict may carry ``is_nullable`` and
+        ``default``; ``unique_columns`` and ``check_expressions`` come from the
+        engine's constraint catalogue where it has one.
+
+        **An unknown is left absent, never asserted as false.** A brownfield
+        model must not claim a constraint the warehouse never stated — that
+        claim would be exported into a data contract as fact. Where a column
+        dict omits ``is_nullable`` the IR default (nullable) applies, which is
+        also the SQL default.
         """
+        unique_columns = unique_columns or set()
+        check_expressions = check_expressions or {}
         cols_by_table: dict[str, list[dict[str, Any]]] = {}
         for col in columns:
             cols_by_table.setdefault(col["table"], []).append(col)
@@ -191,6 +231,12 @@ class IntrospectionService:
                     is_primary_key=(table, col["column"]) in primary_keys,
                     is_foreign_key=(table, col["column"]) in fk_cols,
                     ordinal_position=col.get("ordinal"),
+                    # `is_nullable` absent means the engine did not tell us;
+                    # fall back to the SQL default rather than inventing NOT NULL.
+                    is_nullable=_as_nullable(col.get("is_nullable")),
+                    is_unique=(table, col["column"]) in unique_columns,
+                    default_value=_as_default(col.get("default")),
+                    check_expression=check_expressions.get((table, col["column"])),
                 )
                 for col in table_cols
             ]
@@ -255,9 +301,12 @@ class IntrospectionService:
                     "column": r["column_name"],
                     "data_type": r["data_type"],
                     "ordinal": r["ordinal_position"],
+                    "is_nullable": r["is_nullable"],
+                    "default": r["column_default"],
                 }
                 for r in await conn.fetch(
-                    "SELECT table_name, column_name, data_type, ordinal_position "
+                    "SELECT table_name, column_name, data_type, ordinal_position, "
+                    "is_nullable, column_default "
                     "FROM information_schema.columns WHERE table_schema=$1 "
                     "ORDER BY table_name, ordinal_position",
                     schema_name,
@@ -273,6 +322,39 @@ class IntrospectionService:
                     "  AND tc.table_schema=kcu.table_schema "
                     "WHERE tc.constraint_type='PRIMARY KEY' "
                     "  AND tc.table_schema=$1",
+                    schema_name,
+                )
+            }
+            # Single-column UNIQUE only: a composite constraint says nothing
+            # about any one column, and claiming otherwise would export a
+            # constraint the source system never made.
+            unique_columns = {
+                (r["table_name"], r["column_name"])
+                for r in await conn.fetch(
+                    "SELECT tc.table_name, MIN(kcu.column_name) AS column_name "
+                    "FROM information_schema.table_constraints tc "
+                    "JOIN information_schema.key_column_usage kcu "
+                    "  ON tc.constraint_name=kcu.constraint_name "
+                    "  AND tc.table_schema=kcu.table_schema "
+                    "WHERE tc.constraint_type='UNIQUE' AND tc.table_schema=$1 "
+                    "GROUP BY tc.table_name, tc.constraint_name "
+                    "HAVING COUNT(*)=1",
+                    schema_name,
+                )
+            }
+            check_expressions = {
+                (r["table_name"], r["column_name"]): r["check_clause"]
+                for r in await conn.fetch(
+                    "SELECT ccu.table_name, ccu.column_name, cc.check_clause "
+                    "FROM information_schema.check_constraints cc "
+                    "JOIN information_schema.constraint_column_usage ccu "
+                    "  ON cc.constraint_name=ccu.constraint_name "
+                    "  AND cc.constraint_schema=ccu.constraint_schema "
+                    "WHERE ccu.table_schema=$1 "
+                    # Postgres materialises every NOT NULL as a check
+                    # constraint; is_nullable already carries that, so echoing
+                    # it into check_expression would duplicate the same fact.
+                    "  AND cc.check_clause NOT LIKE '%IS NOT NULL'",
                     schema_name,
                 )
             }
@@ -304,7 +386,12 @@ class IntrospectionService:
             await conn.close()
 
         return IntrospectionService.build_graph(
-            tables, columns, primary_keys, foreign_keys
+            tables,
+            columns,
+            primary_keys,
+            foreign_keys,
+            unique_columns=unique_columns,
+            check_expressions=check_expressions,
         )
 
     # -----------------------------------------------------------------------
@@ -378,6 +465,7 @@ class IntrospectionService:
             list[dict[str, Any]],
             set[tuple[str, str]],
             list[dict[str, str]],
+            set[tuple[str, str]],
         ]:
             conn = sf.connect(**params)
             try:
@@ -397,10 +485,13 @@ class IntrospectionService:
                         "column": lr["column_name"],
                         "data_type": lr["data_type"],
                         "ordinal": lr["ordinal_position"],
+                        "is_nullable": lr.get("is_nullable"),
+                        "default": lr.get("column_default"),
                     }
                     for r in cur.execute(
                         "SELECT table_name, column_name, data_type, "
-                        "ordinal_position FROM information_schema.columns "
+                        "ordinal_position, is_nullable, column_default "
+                        "FROM information_schema.columns "
                         "WHERE table_schema = %s "
                         "ORDER BY table_name, ordinal_position",
                         (schema_name,),
@@ -412,6 +503,18 @@ class IntrospectionService:
                 # does not enforce constraints).
                 primary_keys: set[tuple[str, str]] = set()
                 foreign_keys: list[dict[str, str]] = []
+                unique_columns: set[tuple[str, str]] = set()
+                try:
+                    # Snowflake declares but does not enforce UNIQUE. It is
+                    # still the modeller's stated intent, so it is read and
+                    # carried; what Snowflake will not do is police it.
+                    for r in cur.execute(
+                        f"SHOW UNIQUE KEYS IN SCHEMA {schema_name}"
+                    ):
+                        lr = _lower_keys(r)
+                        unique_columns.add((lr["table_name"], lr["column_name"]))
+                except Exception:  # noqa: BLE001 - constraints are best-effort
+                    unique_columns = set()
                 try:
                     for r in cur.execute(f"SHOW PRIMARY KEYS IN SCHEMA {schema_name}"):
                         lr = _lower_keys(r)
@@ -429,13 +532,30 @@ class IntrospectionService:
                 except Exception:  # noqa: BLE001 - keys are best-effort
                     pass
 
-                return tables, columns, primary_keys, foreign_keys
+                return (
+                    tables,
+                    columns,
+                    primary_keys,
+                    foreign_keys,
+                    unique_columns,
+                )
             finally:
                 conn.close()
 
-        tables, columns, primary_keys, foreign_keys = await asyncio.to_thread(_run)
+        (
+            tables,
+            columns,
+            primary_keys,
+            foreign_keys,
+            unique_columns,
+        ) = await asyncio.to_thread(_run)
         return IntrospectionService.build_graph(
-            tables, columns, primary_keys, foreign_keys, type_map=_SNOWFLAKE_TYPE_MAP
+            tables,
+            columns,
+            primary_keys,
+            foreign_keys,
+            type_map=_SNOWFLAKE_TYPE_MAP,
+            unique_columns=unique_columns,
         )
 
     # -----------------------------------------------------------------------
@@ -496,9 +616,12 @@ class IntrospectionService:
                     "column": row["column_name"],
                     "data_type": row["data_type"],
                     "ordinal": row["ordinal_position"],
+                    "is_nullable": row["is_nullable"],
+                    "default": row["column_default"],
                 }
                 for row in client.query(
-                    "SELECT table_name, column_name, data_type, ordinal_position "
+                    "SELECT table_name, column_name, data_type, ordinal_position, "
+                    "is_nullable, column_default "
                     f"FROM {base}.COLUMNS ORDER BY table_name, ordinal_position"
                 ).result()
             ]
@@ -588,7 +711,8 @@ class IntrospectionService:
 
             await cur.execute(
                 "SELECT table_name, column_name, data_type, column_type, "
-                "ordinal_position FROM information_schema.columns "
+                "ordinal_position, is_nullable, column_default "
+                "FROM information_schema.columns "
                 "WHERE table_schema = %s ORDER BY table_name, ordinal_position",
                 (schema,),
             )
@@ -603,6 +727,8 @@ class IntrospectionService:
                             lr["data_type"], lr.get("column_type", "")
                         ),
                         "ordinal": lr["ordinal_position"],
+                        "is_nullable": lr.get("is_nullable"),
+                        "default": lr.get("column_default"),
                     }
                 )
 
@@ -634,9 +760,74 @@ class IntrospectionService:
                 for r in await cur.fetchall()
                 for lr in (_lower(r),)
             ]
+            # Single-column UNIQUE only; a composite says nothing about one
+            # column. PRIMARY is excluded — it is already carried as the PK.
+            await cur.execute(
+                "SELECT table_name, MIN(column_name) AS column_name FROM "
+                "information_schema.key_column_usage kcu "
+                "WHERE table_schema = %s AND constraint_name <> 'PRIMARY' "
+                "GROUP BY table_name, constraint_name HAVING COUNT(*) = 1",
+                (schema,),
+            )
+            candidate_unique = {
+                (lr["table_name"], lr["column_name"])
+                for r in await cur.fetchall()
+                for lr in (_lower(r),)
+            }
+            # key_column_usage cannot distinguish UNIQUE from FOREIGN KEY, so
+            # confirm against table_constraints rather than over-claiming.
+            await cur.execute(
+                "SELECT table_name, constraint_name FROM "
+                "information_schema.table_constraints "
+                "WHERE table_schema = %s AND constraint_type = 'UNIQUE'",
+                (schema,),
+            )
+            unique_tables = {
+                _lower(r)["table_name"] for r in await cur.fetchall()
+            }
+            unique_columns = {
+                (table, column)
+                for table, column in candidate_unique
+                if table in unique_tables
+            }
+
+            check_expressions: dict[tuple[str, str], str] = {}
+            try:
+                await cur.execute(
+                    "SELECT tc.table_name, cc.constraint_name, cc.check_clause "
+                    "FROM information_schema.check_constraints cc "
+                    "JOIN information_schema.table_constraints tc "
+                    "  ON tc.constraint_name = cc.constraint_name "
+                    "  AND tc.constraint_schema = cc.constraint_schema "
+                    "WHERE tc.constraint_schema = %s",
+                    (schema,),
+                )
+                rows = [_lower(r) for r in await cur.fetchall()]
+                columns_by_table: dict[str, list[str]] = {}
+                for col in columns:
+                    columns_by_table.setdefault(col["table"], []).append(col["column"])
+                for row in rows:
+                    clause = row.get("check_clause") or ""
+                    # MySQL does not report the column, so attribute the clause
+                    # only when exactly one of the table's columns appears in it.
+                    named = [
+                        name
+                        for name in columns_by_table.get(row["table_name"], [])
+                        if f"`{name}`" in clause
+                    ]
+                    if len(named) == 1:
+                        check_expressions[(row["table_name"], named[0])] = clause
+            except Exception:  # noqa: BLE001 - MySQL < 8.0.16 has no CHECK support
+                check_expressions = {}
         finally:
             conn.close()
 
         return IntrospectionService.build_graph(
-            tables, columns, primary_keys, foreign_keys, type_map=_MYSQL_TYPE_MAP
+            tables,
+            columns,
+            primary_keys,
+            foreign_keys,
+            type_map=_MYSQL_TYPE_MAP,
+            unique_columns=unique_columns,
+            check_expressions=check_expressions,
         )
