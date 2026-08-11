@@ -93,17 +93,27 @@ cd backend && MODELBOX_FIDELITY_STRICT=1 pytest tests/test_artifact_fidelity.py 
 
 | ID | Defect | Test | Count |
 | :-- | :-- | :-- | --: |
-| **B1** | MetricFlow output does not parse in dbt — missing metric `label`; model ref targets `{name}` where dbt emits `stg_{name}`; `avg` is not a MetricFlow aggregation; no `defaults.agg_time_dimension` | `test_metricflow_*` | 24 |
-| **H6** | Protobuf field tags are positional, so inserting a column renumbers every later field and breaks wire compatibility; `NUMERIC` maps to `double` | `test_protobuf_tags_stable_on_insert`, `test_protobuf_decimal_is_not_double` | 10 |
-| **H2** | ODCS is stamped `v0.9.3` while the current line is v3.1.0, omits required top-level `version` and `status`, and carries an `info:` block belonging to a different specification | `test_odcs_*` | 15 |
-| **M3** | Cube emits `SUM()` over surrogate and foreign keys, and types `BOOLEAN` columns as `string` | `test_cube_no_measure_over_key`, `test_cube_boolean_dimensions_are_boolean` | 6 |
+| **B1** | MetricFlow output does not parse in dbt — missing metric `label`; model ref targets `{name}` where dbt emits `stg_{name}`; `avg` is not a MetricFlow aggregation; no `defaults.agg_time_dimension`; a satellite with no PK gets no primary entity; `month` collides with a reserved granularity keyword | `test_metricflow_parses_in_dbt`, `test_metricflow_metrics_have_label`, `test_metricflow_ref_matches_dbt_model_name`, `test_metricflow_declares_agg_time_dimension`, `test_metricflow_agg_vocabulary_is_valid`, `test_metricflow_semantic_model_has_primary_entity`, `test_metricflow_names_avoid_reserved_granularity`, `test_metricflow_foreign_entity_names_parent_primary` | 24 |
+| **H6** | Protobuf field tags are positional, so inserting a column renumbers every later field and breaks wire compatibility with deployed consumers; `NUMERIC` maps to `double`; the emitted filename is not sanitised | `test_protobuf_tags_stable_on_insert` (5), `test_protobuf_decimal_is_not_double` (4), `test_protobuf_filename_is_a_safe_identifier` (1) | 10 |
+| **M3** | Cube emits `SUM()` over surrogate and foreign keys, and types `BOOLEAN` columns as `string` | `test_cube_no_measure_over_key` (4), `test_cube_boolean_dimensions_are_boolean` (2) | 6 |
+| **H2** | ODCS is stamped `apiVersion: v0.9.3` while the current standard line is v3.1.0 | `test_odcs_apiversion_is_current` | 5 |
+| **H2-ext** | The ODCS document is a hybrid of two standards: it omits v3.1.0's required top-level `version` and `status`, and carries an `info:` block belonging to the Data Contract Specification | `test_odcs_conforms_to_v3_fundamentals` | 5 |
+| **H2/H4** | ODCS `required` restates the primary-key flag rather than deriving from declared nullability, so every non-key column is declared optional | `test_odcs_required_reflects_nullability` | 5 |
 | **H9** | A generated dbt project does not declare the sources its own models reference, so it cannot parse standalone | `test_dbt_project_is_self_contained` | 5 |
-| **H4** | No `NOT NULL` is emitted; the IR cannot express nullability, so ODCS `required` restates the primary-key flag | `test_ddl_primary_key_columns_are_not_null`, `test_odcs_required_reflects_nullability` | 10 |
+| **H4/H3** | No `NOT NULL` is emitted anywhere; a primary key is non-nullable by definition and Databricks rejects a PK on a nullable column | `test_ddl_primary_key_columns_are_not_null` | 5 |
+| **M11** | dbt generic tests are emitted with top-level arguments; dbt 1.11 requires them nested under `arguments:` | `test_dbt_no_deprecations` | 4 |
 | **H5** | DDL is emitted in declaration order, not topological order, so a model not authored parent-first produces DDL that aborts on its first statement | `test_ddl_order_is_topological` | 4 |
-| **M11** | dbt generic tests use deprecated top-level arguments | `test_dbt_no_deprecations` | 4 |
-| **H1** | Generated seed data ignores declared lengths and quality rules, so it violates the contract the same model exports | `test_seed_respects_*` | 2 |
+| **H1** | Generated seed data ignores declared lengths and quality rules, so it violates the contract the same model exports | `test_seed_respects_declared_length` (1), `test_seed_respects_quality_rules` (1) | 2 |
 | **M7** | A dbt project using quality rules emits `dbt_expectations` tests without declaring the package | `test_dbt_declares_packages_yml` | 1 |
 | | | **Total** | **76** |
+
+Counts are per parameterised case, so a defect affecting four of the five
+reference models contributes four. Reproduce the table with:
+
+```bash
+MODELBOX_FIDELITY_STRICT=1 pytest tests/test_artifact_fidelity.py \
+  -m "not preview" -rx --tb=no -q
+```
 
 Separately, **18** expected failures are marked `@preview` — the three Preview
 dialects and LookML. These are labelled rather than scheduled, and are not
@@ -111,10 +121,29 @@ counted as debt. Inspect them with `pytest -m preview`.
 
 ### Not defects, but known limits
 
-- LookML has no offline parser, so its output is structurally asserted only and
-  is unverifiable in the harness by construction.
-- ODCS has no offline schema validator installed; conformance is asserted
-  against the specification's documented fundamentals, not by a validator.
+State these before a reviewer finds them. Two concern the gate itself:
+
+- **A repository administrator can still bypass the required checks.**
+  `enforce_admins` is deliberately off: a solo maintainer locked out of his own
+  `main` is a worse failure mode than the theoretical bypass. The accurate claim
+  is "changes are gated," not "changes cannot be forced." No reviewer approval
+  is required either.
+- **The published image has not yet been pulled on a machine that never built
+  it.** Register criterion **A9** is therefore NOT MET at the time of writing.
+  The appliance was verified locally — `/health` reporting 1.6.0, UI and `/docs`
+  both 200, backend healthy in ~5s — but a clean-machine pull of the GHCR image
+  is a different test and has not been run.
+
+And two concern coverage:
+
+- **LookML has no offline parser**, so its output is structurally asserted only
+  and is unverifiable in the harness by construction. This is why it is Preview.
+- **No ODCS schema validator is installed.** Conformance is asserted against the
+  specification's documented fundamentals (Bitol v3.1.0), not by a validator, so
+  the ODCS findings above are spec-reading rather than tool output.
+
+Everything else in this release is asserted by the tool that consumes the
+artifact.
 
 ---
 

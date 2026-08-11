@@ -33,7 +33,7 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | A4 | The lock is generated on Linux, carries environment markers, and contains no Windows-only packages | `requirements.lock` inspection | 1 |
 | A5 ◆ | Every known defect has a named failing test carrying its finding ID | `pytest -m "not preview"`: 76 xfail, each carrying a finding ID | 1 |
 | A6 ◆ | No non-preview xfail remains at Phase I exit; each flipped test is `strict=True` | `pytest` output: 0 xfail outside `@preview` | 3 |
-| A7 | Preview failures — the three Preview dialects and LookML — are reported separately and never counted as debt | `pytest -m preview`: 18 xfail, 2 pass | 1 |
+| A7 | Preview failures — the three Preview dialects (15) and LookML (3) — are reported separately and never counted as debt | `pytest -m preview`: 18 xfail, 2 pass | 1 |
 | A8 | Version is consistent across `package.json`, `/health`, compose tags, release notes, enforced in CI | Version-check job passes | 1 |
 | A9 | A tagged release builds a GHCR image that pulls and starts clean on a machine that never built it | Pull-and-run transcript | 1 |
 
