@@ -429,6 +429,11 @@ def test_gold_mirror_matches_templates_ts(tmp_path: Path) -> None:
         [str(NODE), "--experimental-strip-types", str(_EXTRACTOR), str(staging)],
         capture_output=True, text=True,
     )
+    if "bad option: --experimental-strip-types" in proc.stderr:
+        # Node < 22.6 cannot import a TypeScript module. Fail rather than skip
+        # under strict mode: silently losing the drift guard is how the mirror
+        # would fall behind templates.ts unnoticed.
+        _need(False, "node >= 22.6 (--experimental-strip-types)")
     assert proc.returncode == 0, f"extractor failed: {proc.stderr[-2000:]}"
 
     for regenerated in sorted(staging.glob("*.json")):

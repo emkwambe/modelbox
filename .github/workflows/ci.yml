@@ -54,12 +54,15 @@ jobs:
           cache: "pip"
           cache-dependency-path: modelbox-ai/backend/requirements-dev.txt
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js 22
         # Cube.js schemas are executed rather than regex-matched, and the gold
-        # graph mirror is re-extracted from templates.ts to prove it has not drifted.
+        # graph mirror is re-extracted from templates.ts to prove it has not
+        # drifted. That extraction imports a TypeScript module directly, which
+        # requires --experimental-strip-types: Node >= 22.6. The frontend jobs
+        # stay on 20, matching the app's own engines constraint.
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install protoc
         run: |
