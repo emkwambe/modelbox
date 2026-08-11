@@ -26,6 +26,7 @@ from app.schemas.data_model import (
     EntitySchema,
     RelationshipSchema,
     SynthesizedModel,
+    _is_temporal_type,
 )
 
 if TYPE_CHECKING:
@@ -52,6 +53,13 @@ _SQLGLOT_DIALECTS: dict[str, str] = {
     "redshift": "redshift",
     "clickhouse": "clickhouse",
 }
+
+
+# Open Data Contract Standard version this emitter targets. Bitol, verified via
+# context7 on 2026-08-11. Bump only alongside a re-read of the spec — the
+# previous value claimed v0.9.3 while the body used v3 vocabulary, so the
+# artifact conformed to neither.
+_ODCS_API_VERSION = "v3.1.0"
 
 
 class ExporterError(ValueError):
@@ -100,7 +108,7 @@ class ExporterService:
         # TABLE individually (otherwise it falls back to opaque passthrough).
         script = ";\n".join(
             self._entity_create_table(entity, model.relationships)
-            for entity in model.entities
+            for entity in self._emission_order(model)
         )
         statements = sqlglot.transpile(
             script,
@@ -110,12 +118,54 @@ class ExporterService:
         )
         return ";\n\n".join(statements) + ";\n"
 
+    @staticmethod
+    def _emission_order(model: SynthesizedModel) -> list[EntitySchema]:
+        """Order entities so a referenced table is always created first (H5).
+
+        Emission previously followed declaration order, which is only correct
+        when the model happens to have been authored parent-first. A model that
+        was not — anything an LLM produced, or a canvas reordered — emitted a
+        child table whose ``FOREIGN KEY`` named a table that did not exist yet,
+        and psql aborted on the first statement.
+
+        ``GraphEngine.topological_order`` has always existed for this; the
+        module docstring claimed it was used here when it never was, which is
+        the reason the defect went unnoticed. A cyclic graph has no topological
+        order, so it falls back to declaration order — the same fallback the
+        seed generator uses, and the cycle itself is already reported as
+        ``CYCLIC_FK``.
+        """
+        from app.services.graph_engine import GraphEngine
+
+        by_name = {entity.entity_name: entity for entity in model.entities}
+        try:
+            graph = GraphEngine.build_graph(model.entities, model.relationships)
+            ordered = GraphEngine.topological_order(graph)
+        except Exception:  # noqa: BLE001 - NetworkXUnfeasible on a cyclic graph
+            return list(model.entities)
+        # `ordered` covers only entities the graph knows about; anything else
+        # keeps its declared position rather than being dropped.
+        seen = set()
+        out: list[EntitySchema] = []
+        for name in ordered:
+            entity = by_name.get(name)
+            if entity is not None and name not in seen:
+                seen.add(name)
+                out.append(entity)
+        out.extend(e for e in model.entities if e.entity_name not in seen)
+        return out
+
     def _entity_create_table(
         self, entity: EntitySchema, relationships: list[RelationshipSchema]
     ) -> str:
         """Build a single ANSI ``CREATE TABLE`` string for an entity."""
         lines: list[str] = [
-            f"    {col.name} {col.data_type}" for col in entity.columns
+            # NOT NULL from the declared constraint (H4). Emitting nothing made
+            # every column implicitly nullable, which is also why Databricks
+            # rejected the emitted primary keys outright.
+            f"    {col.name} {col.data_type}"
+            + ("" if col.is_nullable else " NOT NULL")
+            for col in entity.columns
         ]
 
         pk_cols = [c.name for c in entity.columns if c.is_primary_key]
@@ -140,15 +190,80 @@ class ExporterService:
     def generate_dbt_project(
         self, model: SynthesizedModel, source_name: str = "raw"
     ) -> dict[str, str]:
-        """Return a map of dbt file paths -> file contents."""
+        """Return a map of dbt file paths -> file contents.
+
+        The project must parse standalone (B14). It previously emitted staging
+        models referencing ``{{ source(...) }}`` without ever declaring those
+        sources, so ``dbt parse`` failed on the first model with "depends on a
+        source named 'raw.x' which was not found" — every consumer had to
+        hand-write the sources file before the artifact was usable.
+        """
         files: dict[str, str] = {}
 
         for entity in model.entities:
             path = f"models/staging/stg_{entity.entity_name}.sql"
             files[path] = self._dbt_staging_sql(entity, source_name)
 
+        files["models/staging/_sources.yml"] = self._dbt_sources_yml(
+            model, source_name
+        )
         files["models/staging/schema.yml"] = self._dbt_schema_yml(model)
+
+        # Only emitted when something actually depends on it — a packages.yml
+        # naming an unused package is its own kind of noise.
+        packages = self._dbt_packages_yml(model)
+        if packages is not None:
+            files["packages.yml"] = packages
         return files
+
+    def _dbt_sources_yml(self, model: SynthesizedModel, source_name: str) -> str:
+        """Declare the raw sources the staging models select from (B14)."""
+        return yaml.safe_dump(
+            {
+                "version": 2,
+                "sources": [
+                    {
+                        "name": source_name,
+                        "description": (
+                            "Raw tables the staging models read from. Point "
+                            "`schema` at wherever these land in your warehouse."
+                        ),
+                        "schema": source_name,
+                        "tables": [
+                            {"name": entity.entity_name}
+                            for entity in model.entities
+                        ],
+                    }
+                ],
+            },
+            sort_keys=False,
+            default_flow_style=False,
+        )
+
+    def _dbt_packages_yml(self, model: SynthesizedModel) -> str | None:
+        """Declare dbt_expectations when a quality rule makes us depend on it.
+
+        Emitting the tests without the dependency produced a project that could
+        not resolve its own tests (M7).
+        """
+        needs_expectations = any(
+            self._dbt_quality_tests(col)
+            for entity in model.entities
+            for col in entity.columns
+        )
+        if not needs_expectations:
+            return None
+        return yaml.safe_dump(
+            {
+                "packages": [
+                    {"package": "calogica/dbt_expectations", "version": [
+                        {">=": "0.10.0"}, {"<": "0.11.0"}
+                    ]}
+                ]
+            },
+            sort_keys=False,
+            default_flow_style=False,
+        )
 
     def _dbt_staging_sql(self, entity: EntitySchema, source_name: str) -> str:
         casts = ",\n".join(
@@ -192,6 +307,9 @@ class ExporterService:
                 if col.description:
                     col_doc["description"] = col.description
 
+                # A generic test's arguments nest under `arguments:` (M11).
+                # Passing them at the top level is deprecated in dbt 1.11 and
+                # warned on every parse.
                 tests: list[object] = []
                 if col.is_primary_key:
                     tests.extend(["unique", "not_null"])
@@ -201,17 +319,21 @@ class ExporterService:
                     tests.append(
                         {
                             "relationships": {
-                                "to": f"ref('stg_{parent_entity}')",
-                                "field": parent_col,
+                                "arguments": {
+                                    "to": f"ref('stg_{parent_entity}')",
+                                    "field": parent_col,
+                                }
                             }
                         }
                     )
                 accepted = self._accepted_values(col)
                 if accepted:
-                    tests.append({"accepted_values": {"values": accepted}})
+                    tests.append(
+                        {"accepted_values": {"arguments": {"values": accepted}}}
+                    )
                 tests.extend(self._dbt_quality_tests(col))
                 if tests:
-                    col_doc["tests"] = tests
+                    col_doc["data_tests"] = tests
                 columns.append(col_doc)
 
             model_doc: dict[str, object] = {
@@ -282,6 +404,14 @@ class ExporterService:
             "    count: {\n      type: `count`\n    }",
         ]
         for col in entity.columns:
+            # A key is an identifier that happens to be stored as a number.
+            # SUM(customer_sk) and SUM(order_line_sk) are arithmetic on
+            # identifiers — numerically valid, semantically meaningless, and
+            # offered to every BI user as though they meant something (M3).
+            # Both halves matter: excluding only foreign keys would still sum
+            # a surrogate primary key that nothing references.
+            if col.is_primary_key or col.is_foreign_key:
+                continue
             if col.is_metric or self._is_numeric(col):
                 agg = (col.aggregation or "sum").lower()
                 measures.append(
@@ -331,11 +461,34 @@ class ExporterService:
                 for entity in model.entities
             }
         if fmt in ("protobuf", "proto", "proto3"):
-            return {f"{dataset_name}.proto": self._protobuf_schema(model, dataset_name)}
+            # The filename is sanitised as well as the package name. dataset_name
+            # is the model title, so an untitled model produced
+            # "Untitled Model.proto" — a filename protoc will not import.
+            return {
+                f"{self._safe_identifier(dataset_name)}.proto":
+                    self._protobuf_schema(model, dataset_name)
+            }
         raise ExporterError(f"Unsupported contract format: {contract_format}")
 
     def _odcs_contract(self, model: SynthesizedModel, dataset_name: str) -> str:
-        """Open Data Contract Standard (v0.9.x) YAML."""
+        """Open Data Contract Standard v3.1.0 (Bitol).
+
+        Spec: https://github.com/bitol-io/open-data-contract-standard
+        Verified via context7 on 2026-08-11 — this emitter had previously been
+        a hybrid of two standards, so the shape is asserted against the
+        published one rather than remembered.
+
+        * Required at the top level: ``apiVersion``, ``kind``, ``id``,
+          ``version``, ``status``. ``name`` is optional; ``dataProduct`` is
+          deprecated since v3.1.0.
+        * There is **no** ``info:`` block. That belongs to the Data Contract
+          Specification (datacontract.com), a different standard, and emitting
+          it made the artifact conform to neither.
+        * A foreign key at property level is ``relationships: [{to: ...}]``
+          with ``from`` implicit. ``type: foreignKey`` is the *schema*-level
+          construct and requires explicit ``from`` and ``to`` — correction
+          C7-a, after C3 named this wrongly.
+        """
         schema: list[dict[str, object]] = []
         for entity in model.entities:
             properties: list[dict[str, object]] = []
@@ -344,27 +497,46 @@ class ExporterService:
                     "name": col.name,
                     "logicalType": self._logical_type(col.data_type),
                     "physicalType": col.data_type,
-                    "required": col.is_primary_key,
+                    # Derived from declared nullability, not restated from the
+                    # key flag. Under the old rule every non-key column was
+                    # declared optional — including Data Vault load_dts and
+                    # record_source, which are structurally mandatory.
+                    "required": not col.is_nullable,
                     "primaryKey": col.is_primary_key,
                 }
+                if col.is_unique:
+                    prop["unique"] = True
                 if col.description:
                     prop["description"] = col.description
                 if col.is_pii:
                     prop["classification"] = "PII"
+                if col.references:
+                    # Shorthand notation, <object>.<property>, which is exactly
+                    # the shape ColumnSchema.references already stores.
+                    prop["relationships"] = [{"to": col.references}]
                 quality = self._odcs_quality(col)
                 if quality:
                     prop["quality"] = quality
                 properties.append(prop)
+
             table_doc: dict[str, object] = {
                 "name": entity.entity_name,
+                "logicalType": "object",
                 "physicalType": "table",
                 "properties": properties,
             }
             if entity.description:
                 table_doc["description"] = entity.description
+            custom: list[dict[str, object]] = []
             tier = self._tier_value(entity)
             if tier:
-                table_doc["tier"] = tier
+                # `tier` is not an ODCS schema key; carrying it as a custom
+                # property keeps the information without inventing vocabulary.
+                custom.append({"property": "tier", "value": tier})
+            if entity.grain:
+                custom.append({"property": "grain", "value": entity.grain})
+            if custom:
+                table_doc["customProperties"] = custom
             if entity.freshness_sla:
                 table_doc["slaProperties"] = [
                     {"property": "freshness", "value": entity.freshness_sla}
@@ -372,14 +544,12 @@ class ExporterService:
             schema.append(table_doc)
 
         contract = {
-            "apiVersion": "v0.9.3",
+            "apiVersion": _ODCS_API_VERSION,
             "kind": "DataContract",
-            "id": dataset_name,
-            "info": {
-                "title": dataset_name,
-                "version": "1.0.0",
-                "owner": "modelbox",
-            },
+            "id": self._safe_identifier(dataset_name),
+            "name": dataset_name,
+            "version": "1.0.0",
+            "status": "draft",
             "schema": schema,
         }
         return yaml.safe_dump(contract, sort_keys=False, default_flow_style=False)
@@ -412,14 +582,34 @@ class ExporterService:
         return json.dumps(record, indent=2)
 
     def _protobuf_schema(self, model: SynthesizedModel, package: str) -> str:
-        """Protobuf proto3 message definitions for the whole model."""
+        """Protobuf proto3 message definitions for the whole model.
+
+        **Field tags come from ``ColumnSchema.stable_id``, never from position.**
+        A tag is a wire-format contract: a deployed consumer decodes field 3 as
+        whatever field 3 meant when it was generated. Numbering by list position
+        meant inserting a column silently renumbered every later field, so an
+        existing consumer misparsed every one of them — finding H6, and the
+        reason ``stable_id`` exists at all.
+
+        The identity is allocated once at first persist and never reused, and
+        the allocator already skips protoc's reserved 19000-19999, so nothing
+        needs special-casing here.
+
+        A model that has never been persisted has no identities yet. It falls
+        back to position, which is honest: an unsaved draft has no wire contract
+        to keep. Anything exported through the API has been persisted, so the
+        guarantee holds wherever it can meaningfully be claimed.
+        """
         # proto3 package names must be valid identifiers (no spaces/punctuation).
         safe_package = self._safe_identifier(package)
         lines = ['syntax = "proto3";', "", f"package {safe_package};", ""]
         for entity in model.entities:
             lines.append(f"message {self._to_pascal_case(entity.entity_name)} {{")
-            for tag, col in enumerate(entity.columns, start=1):
-                lines.append(f"  {self._proto_type(col.data_type)} {col.name} = {tag};")
+            for position, col in enumerate(entity.columns, start=1):
+                tag = col.stable_id if col.stable_id is not None else position
+                lines.append(
+                    f"  {self._proto_type(col.data_type)} {col.name} = {tag};"
+                )
             lines.append("}")
             lines.append("")
         return "\n".join(lines)
@@ -446,7 +636,7 @@ class ExporterService:
     def _lookml_view(self, entity: EntitySchema) -> str:
         lines = [f"view: {entity.entity_name} {{", f"  sql_table_name: {entity.entity_name} ;;", ""]
         for col in entity.columns:
-            if self._is_temporal(col.data_type):
+            if _is_temporal_type(col.data_type):
                 lines.append(f"  dimension_group: {col.name} {{")
                 lines.append("    type: time")
                 lines.append("    timeframes: [raw, date, week, month, quarter, year]")
@@ -477,91 +667,203 @@ class ExporterService:
         return "\n".join(lines)
 
     def _metricflow(self, model: SynthesizedModel) -> str:
-        # Map (entity, column) -> parent for foreign-key entity declarations.
-        fk_refs: dict[tuple[str, str], str] = {}
+        """Emit a dbt semantic layer that ``dbt parse`` accepts (B1).
+
+        Seven defects were fixed together here because none of them is visible
+        on its own: ``dbt parse`` fails on the first, so nothing downstream can
+        be observed until all of the blocking ones are correct.
+
+        The load-bearing rules:
+
+        * A measure needs a time axis. An entity with no ``agg_time_column``
+          therefore declares **no measures** and is dimension-only, rather than
+          being given an invented one. Six of the fifteen reference entities
+          have no temporal column at all.
+        * A foreign entity is named after the **parent's primary entity**, with
+          ``expr`` carrying the local column. MetricFlow resolves joins by
+          entity name, so naming it after the local FK column only worked when
+          that name coincidentally equalled the parent's key.
+        * A name colliding with a reserved granularity keyword is suffixed —
+          and ``defaults.agg_time_dimension`` must then reference the
+          **renamed** dimension. Renaming without that would fix one defect and
+          silently reintroduce another.
+        """
+        # (child entity, child column) -> parent entity, for foreign entities.
+        fk_parent: dict[tuple[str, str], str] = {}
         for rel in model.relationships:
             from_entity, from_col = self._split_ref(rel.from_ref)
             to_entity, _ = self._split_ref(rel.to_ref)
             if from_col:
-                fk_refs[(from_entity, from_col)] = to_entity
+                fk_parent[(from_entity, from_col)] = to_entity
+
+        # Each entity's primary-entity name, which is its primary-key column.
+        # A foreign entity must reuse the parent's, or the join does not exist.
+        primary_entity_name: dict[str, str] = {}
+        for entity in model.entities:
+            pk = next((c.name for c in entity.columns if c.is_primary_key), None)
+            if pk is not None:
+                primary_entity_name[entity.entity_name] = self._safe_semantic_name(pk)
 
         semantic_models: list[dict[str, object]] = []
         metrics: list[dict[str, object]] = []
+
         for entity in model.entities:
             entities_block: list[dict[str, object]] = []
             dimensions: list[dict[str, object]] = []
             measures: list[dict[str, object]] = []
-            measure_names: list[str] = []
+
+            # A measure without a time axis is unemittable, so the entity's
+            # declared aggregation time dimension decides whether it has any.
+            agg_time_dimension: str | None = None
+            if entity.agg_time_column:
+                agg_time_dimension = self._safe_semantic_name(entity.agg_time_column)
 
             for col in entity.columns:
+                safe_name = self._safe_semantic_name(col.name)
+                parent = fk_parent.get((entity.entity_name, col.name))
+
                 if col.is_primary_key:
                     entities_block.append(
-                        {"name": col.name, "type": "primary", "expr": col.name}
+                        {"name": safe_name, "type": "primary", "expr": col.name}
                     )
-                elif (entity.entity_name, col.name) in fk_refs:
+                elif parent is not None:
                     entities_block.append(
-                        {"name": col.name, "type": "foreign", "expr": col.name}
+                        {
+                            # The parent's primary entity, not the local column.
+                            "name": primary_entity_name.get(parent, safe_name),
+                            "type": "foreign",
+                            "expr": col.name,
+                        }
                     )
-                elif self._is_temporal(col.data_type):
+                elif _is_temporal_type(col.data_type):
                     dimensions.append(
                         {
-                            "name": col.name,
+                            "name": safe_name,
                             "type": "time",
                             "type_params": {"time_granularity": "day"},
                             "expr": col.name,
                         }
                     )
                 elif col.is_metric or self._is_numeric(col):
-                    # Explicit measure declaration wins over the numeric heuristic.
+                    if agg_time_dimension is None:
+                        # No time axis: express it as a dimension rather than
+                        # dropping the column from the semantic model entirely.
+                        dimensions.append(
+                            {"name": safe_name, "type": "categorical", "expr": col.name}
+                        )
+                        continue
                     measure_name = f"total_{col.name}"
                     measures.append(
                         {
                             "name": measure_name,
-                            "agg": (col.aggregation or "sum").lower(),
+                            "agg": self._metricflow_agg(col.aggregation),
                             "expr": col.name,
                         }
                     )
-                    measure_names.append(measure_name)
                 else:
                     dimensions.append(
-                        {"name": col.name, "type": "categorical", "expr": col.name}
+                        {"name": safe_name, "type": "categorical", "expr": col.name}
                     )
 
-            # A simple metric per declared measure, so the layer is usable.
-            for measure_name in measure_names:
+            if agg_time_dimension is not None:
+                count_measure = f"{entity.entity_name}_count"
+                measures.append({"name": count_measure, "agg": "count", "expr": "1"})
+
+            for measure in measures:
+                name = str(measure["name"])
                 metrics.append(
                     {
-                        "name": measure_name,
+                        "name": name,
+                        # dbt requires a label on every metric.
+                        "label": name.replace("_", " ").strip().title(),
                         "type": "simple",
-                        "type_params": {"measure": measure_name},
+                        "type_params": {"measure": name},
                     }
                 )
 
-            count_measure = f"{entity.entity_name}_count"
-            measures.append({"name": count_measure, "agg": "count", "expr": "1"})
-            metrics.append(
-                {
-                    "name": count_measure,
-                    "type": "simple",
-                    "type_params": {"measure": count_measure},
-                }
-            )
-
             model_doc: dict[str, object] = {
                 "name": entity.entity_name,
-                "model": f"ref('{entity.entity_name}')",
+                # The dbt exporter names its models stg_<entity>; referencing
+                # the bare entity pointed at a node that does not exist.
+                "model": f"ref('stg_{entity.entity_name}')",
                 "entities": entities_block,
             }
+            if entity.entity_name not in primary_entity_name and dimensions:
+                # A satellite or bridge with no single-column key still needs a
+                # primary entity once it declares dimensions.
+                model_doc["primary_entity"] = entity.entity_name
+            if measures:
+                model_doc["defaults"] = {"agg_time_dimension": agg_time_dimension}
             if dimensions:
                 model_doc["dimensions"] = dimensions
-            model_doc["measures"] = measures
+            if measures:
+                model_doc["measures"] = measures
             semantic_models.append(model_doc)
 
-        return yaml.safe_dump(
-            {"semantic_models": semantic_models, "metrics": metrics},
-            sort_keys=False,
-            default_flow_style=False,
-        )
+        document: dict[str, object] = {"semantic_models": semantic_models}
+        if metrics:
+            document["metrics"] = metrics
+        return yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
+
+    # MetricFlow's AggregationType. Mapped explicitly rather than lower-cased
+    # through, because `avg` — the obvious spelling, and what the canvas offers
+    # — is not a member and made dbt exit with a traceback rather than a parse
+    # error.
+    _METRICFLOW_AGGREGATIONS: dict[str, str] = {
+        "sum": "sum",
+        "min": "min",
+        "max": "max",
+        "count": "count",
+        "count_distinct": "count_distinct",
+        "distinct_count": "count_distinct",
+        "avg": "average",
+        "average": "average",
+        "mean": "average",
+        "median": "median",
+        "percentile": "percentile",
+        "sum_boolean": "sum_boolean",
+    }
+
+    @classmethod
+    def _metricflow_agg(cls, aggregation: str | None) -> str:
+        """Translate a declared aggregation into MetricFlow's vocabulary.
+
+        Raises rather than passing an unknown value through: a refused export
+        names the problem, whereas an unmapped aggregation surfaces as a
+        traceback from inside ``dbt parse`` pointing at a generated file.
+        """
+        if not aggregation:
+            return "sum"
+        key = aggregation.strip().lower()
+        try:
+            return cls._METRICFLOW_AGGREGATIONS[key]
+        except KeyError:
+            raise ExporterError(
+                f"Aggregation {aggregation!r} has no MetricFlow equivalent. "
+                f"Supported: "
+                f"{', '.join(sorted(set(cls._METRICFLOW_AGGREGATIONS.values())))}."
+            ) from None
+
+    # MetricFlow rejects any name equal to a time-granularity keyword.
+    _RESERVED_GRANULARITIES = frozenset(
+        {
+            "nanosecond", "microsecond", "millisecond", "second", "minute",
+            "hour", "day", "week", "month", "quarter", "year",
+        }
+    )
+
+    @classmethod
+    def _safe_semantic_name(cls, name: str) -> str:
+        """Suffix a name that collides with a reserved granularity keyword.
+
+        ``expr`` carries the real column, so the identifier is free to differ.
+        Every producer of a semantic name goes through here, including the one
+        that builds ``defaults.agg_time_dimension`` — the two must agree or the
+        default points at a dimension that was renamed out from under it.
+        """
+        if name.lower() in cls._RESERVED_GRANULARITIES:
+            return f"{name}_dim"
+        return name
 
     # ---------------------------------------------------------------------
     # 7. Data dictionary & business glossary (Phase 3, Pick 2)
@@ -825,10 +1127,6 @@ class ExporterService:
             return "date"
         return "string"
 
-    @staticmethod
-    def _is_temporal(data_type: str) -> bool:
-        t = data_type.upper()
-        return any(tok in t for tok in ("TIMESTAMP", "DATETIME", "DATE", "TIME"))
 
     def _avro_type(self, data_type: str) -> object:
         t = data_type.upper()
@@ -861,7 +1159,17 @@ class ExporterService:
             return "bool"
         if any(tok in t for tok in ("BIGINT", "BIGSERIAL")):
             return "int64"
-        if any(tok in t for tok in ("FLOAT", "DOUBLE", "REAL", "NUMERIC", "DECIMAL", "NUMBER")):
+        if any(tok in t for tok in ("NUMERIC", "DECIMAL", "NUMBER")):
+            # Exact numerics carry as `string`, not `double`. A ledger balance
+            # declared NUMERIC(18,2) is exact by definition, and proto3 has no
+            # fixed-point scalar — mapping it to a binary float silently makes
+            # money approximate. That is a correctness defect, not a style one:
+            # Avro already emits a decimal logical type with precision and
+            # scale from the same column, so the two contracts disagreed about
+            # the same value. A decimal string round-trips exactly and is what
+            # google.type.Decimal and most financial schemas do.
+            return "string"
+        if any(tok in t for tok in ("FLOAT", "DOUBLE", "REAL")):
             return "double"
         if any(tok in t for tok in ("INT", "SERIAL")):
             return "int32"
@@ -997,9 +1305,15 @@ class ExporterService:
         return None
 
     def _cube_type(self, col: ColumnSchema) -> str:
-        upper = col.data_type.upper()
-        if any(tok in upper for tok in ("DATE", "TIME", "TIMESTAMP")):
+        if _is_temporal_type(col.data_type):
             return "time"
+        if "BOOL" in col.data_type.upper():
+            # Cube has a boolean dimension type. Omitting this branch typed
+            # every BOOLEAN column as `string` (M3), while _logical_type and
+            # _lookml_type both handled booleans — the disagreement between
+            # three private copies of the same predicate that the shared
+            # _is_temporal_type now prevents.
+            return "boolean"
         if self._is_numeric(col):
             return "number"
         return "string"

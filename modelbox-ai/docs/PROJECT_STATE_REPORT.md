@@ -147,6 +147,82 @@ Generalised as stop condition 4 in the Acceptance Criteria register: a criterion
 met by a test that cannot distinguish the correct implementation from the
 current one is NOT MET.
 
+### C7-a — the ODCS foreign-key construct was named wrongly in C3
+
+*Added 2026-08-11 during Sprint 3.*
+
+Correction C3 stated that ODCS v3.1.0 has "native property-level `foreignKey`",
+and Sprint 2's M6 ruling ("wire it, don't delete it") rested on that. **The
+ruling holds — `ColumnSchema.references` does have a real downstream consumer —
+but the construct was named wrongly.**
+
+Verified against Bitol's `references.md` via context7:
+
+* **Property level** uses `relationships`, with `from` implicit:
+  `relationships: [{to: <object>.<property>}]`.
+* `type: foreignKey` is the **schema-level** construct, and there both `from`
+  and `to` are required.
+
+The shorthand notation `<object>.<property>` happens to be exactly the shape
+`ColumnSchema.references` already stores, so it maps across with no
+transformation. That is a lucky outcome rather than a designed one — the field
+predates the ruling and was never shaped against this spec.
+
+Also recorded, because Sprint 3's task list had it incomplete: the **required
+top-level set is `apiVersion`, `kind`, `id`, `version`, `status`**. `name` is
+optional and `dataProduct` is deprecated since v3.1.0. The task list named only
+`version` and `status`.
+
+### H10 — ODCS quality blocks are not valid v3.1.0
+
+*Added 2026-08-11 during Sprint 3, found while verifying C7-a.*
+
+`_odcs_quality` (`exporter_service.py:969-982`) emits
+`{"rule": "range", "mustBeGreaterThanOrEqualTo": …}` and
+`{"rule": "regex", "pattern": …}`. **`rule` is not an ODCS key.** A v3.1.0
+property-level quality entry is `{id, metric, mustBe*, arguments, unit,
+description}` with an optional `type` of `library`, `sql` or `custom`.
+
+No gold graph declares a quality rule, so this is reachable only through the
+synthetic `quality-rules` fixture — which is why the audit's ODCS work never
+surfaced it.
+
+Severity high, not blocker: the surrounding contract is valid and a consumer
+ignoring an unrecognised block still gets a usable document. **Assigned to
+Sprint 4**, entered into the inventory now as an xfail so it is a test rather
+than a paragraph.
+
+### Scope of the ODCS re-read (Sprint 3)
+
+The v3.1.0 conformance work read the specification **for the constructs this
+emitter produces** — fundamentals, schema objects, properties, relationships,
+quality. It was not an audit of the whole standard.
+
+Within that scope, one further gap was found beyond H10 (`id` missing from the
+required top-level set) and fixed. Anything outside it is unexamined rather
+than confirmed clean, and the distinction should survive: a scoped check and an
+audit look identical in a changelog.
+
+### M12 — the UI and the backend disagreed about which dialects exist
+
+*Added 2026-08-11 during Sprint 3, and fixed in the same commit.*
+
+`ExportPanel.tsx` offered five dialects; the exporter accepts seven.
+**`redshift` was certified and unreachable from the UI**, and **`clickhouse`
+was preview and offered without qualification.**
+
+The class matters more than the instance. The fidelity programme verified what
+the *emitters produce*; it never checked what the *UI lets you ask for*. So it
+was certifying a surface users could not fully reach, while users could reach a
+surface it had not verified. Neither the audit nor the harness was wrong about
+its own subject — the gap was between them, which is why nothing caught it.
+
+The rule: every capability the backend exposes should be reachable from the UI,
+and every capability the UI offers should be one the backend certifies. Closed
+by `test_export_ui_offers_exactly_the_dialects_the_backend_supports`, which
+compares the panel's two lists against the harness's and against
+`_SQLGLOT_DIALECTS`, so an eighth dialect cannot drift in on one side only.
+
 ### Findings closed since the audit
 
 | Finding | Status |

@@ -55,7 +55,12 @@ from typing import Any
 import pytest
 import yaml
 
-from app.schemas.data_model import ColumnSchema, SynthesizedModel
+from app.schemas.data_model import (
+    ColumnSchema,
+    EntitySchema,
+    RelationshipSchema,
+    SynthesizedModel,
+)
 from app.services.exporter_service import ExporterService
 from app.services.seed_generator import SyntheticSeedGenerator
 
@@ -252,40 +257,22 @@ _TIME_SPINE_YML = """models:
         granularity: day
 """
 
-_SOURCE_RE = re.compile(r"source\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)")
-
-
-def _synthesise_sources(staging_sql: dict[str, str]) -> str:
-    """Declare exactly the sources the exporter's own SQL references.
-
-    The exporter emits ``{{ source('raw', 'x') }}`` but no sources file, so a
-    generated project cannot parse standalone — finding H9, asserted by
-    ``test_dbt_project_is_self_contained``. Every *other* dbt and MetricFlow
-    defect would be masked behind that single failure, so the harness supplies
-    the declaration here in order to isolate them.
-
-    Derived from the emitted SQL rather than from the model, so a naming bug in
-    the exporter cannot be papered over by this scaffolding.
-    """
-    found: dict[str, set[str]] = {}
-    for sql in staging_sql.values():
-        for source_name, table in _SOURCE_RE.findall(sql):
-            found.setdefault(source_name, set()).add(table)
-    doc = {
-        "version": 2,
-        "sources": [
-            {"name": name, "schema": "public",
-             "tables": [{"name": t} for t in sorted(tables)]}
-            for name, tables in sorted(found.items())
-        ],
-    }
-    return yaml.safe_dump(doc, sort_keys=False)
-
-
 def _write_dbt_project(
-    root: Path, fixture: Fixture, *, with_semantic: bool, with_sources: bool = True
+    root: Path, fixture: Fixture, *, with_semantic: bool
 ) -> Path:
-    """Materialise a dbt project from the exporter's output."""
+    """Materialise a dbt project from the exporter's output.
+
+    **No sources scaffolding.** The harness used to synthesise a sources file
+    from the emitted SQL, because the exporter declared none and every other
+    dbt and MetricFlow defect would otherwise have been masked behind that one
+    failure (H9/B14). The exporter now emits its own, and the scaffolding is
+    gone rather than merely unused — leaving it would make
+    ``test_dbt_project_is_self_contained`` pass for the wrong reason, and dbt
+    in fact rejects the duplicate outright.
+
+    What reaches dbt is therefore the exporter's output plus only
+    ``dbt_project.yml`` and ``profiles.yml``, which are the consumer's to write.
+    """
     staging = root / "models" / "staging"
     staging.mkdir(parents=True, exist_ok=True)
 
@@ -301,12 +288,6 @@ def _write_dbt_project(
         encoding="utf-8",
     )
     (root / "profiles.yml").write_text(_DBT_PROFILE, encoding="utf-8")
-
-    if with_sources:
-        sql_only = {k: v for k, v in files.items() if k.endswith(".sql")}
-        (staging / "_fidelity_sources.yml").write_text(
-            _synthesise_sources(sql_only), encoding="utf-8"
-        )
 
     if with_semantic:
         for path, content in exporter().export_semantic_layer(
@@ -389,21 +370,19 @@ def _run_dbt_parse(project: Path) -> DbtResult:
     )
 
 
-_DBT_CACHE: dict[tuple[str, bool, bool], DbtResult] = {}
+_DBT_CACHE: dict[tuple[str, bool], DbtResult] = {}
 
 
 def dbt_parse(
     fixture: Fixture, tmp_path_factory: pytest.TempPathFactory,
-    *, with_semantic: bool, with_sources: bool = True,
+    *, with_semantic: bool,
 ) -> DbtResult:
     """Cached `dbt parse` — each project is built and parsed at most once."""
-    key = (fixture.id, with_semantic, with_sources)
+    key = (fixture.id, with_semantic)
     if key not in _DBT_CACHE:
-        suffix = ("sem" if with_semantic else "base") + ("" if with_sources else "-bare")
+        suffix = "sem" if with_semantic else "base"
         root = tmp_path_factory.mktemp(f"dbt-{fixture.id[:12]}-{suffix}")
-        _write_dbt_project(
-            root, fixture, with_semantic=with_semantic, with_sources=with_sources
-        )
+        _write_dbt_project(root, fixture, with_semantic=with_semantic)
         _DBT_CACHE[key] = _run_dbt_parse(root)
     return _DBT_CACHE[key]
 
@@ -453,6 +432,50 @@ def test_templates_ts_is_the_only_gold_source() -> None:
     index = json.loads((_GOLD_DIR / "index.json").read_text(encoding="utf-8"))
     assert set(index) == set(GOLD_IDS)
     assert len(GOLD_IDS) == 5, "the Requirements Library is five gold graphs"
+
+
+_EXPORT_PANEL = (
+    Path(__file__).resolve().parents[2]
+    / "frontend" / "src" / "components" / "editor" / "ExportPanel.tsx"
+)
+
+
+def test_export_ui_offers_exactly_the_dialects_the_backend_supports() -> None:
+    """The UI's dialect list must match the backend's, certification included.
+
+    Finding M12. The export panel offered five dialects while the backend
+    accepted seven: `redshift` was **certified and unreachable**, and
+    `clickhouse` was **preview and offered without qualification**. The whole
+    fidelity programme was therefore verifying a surface users could not fully
+    reach, while users could reach a surface it had not verified.
+
+    That is a gap between the harness and the product rather than a bug in
+    either, which is exactly why neither caught it — the audit checked what the
+    emitters produce, never what the UI lets you ask for. This test closes the
+    seam so an eighth dialect cannot drift in on one side only.
+    """
+    source = _EXPORT_PANEL.read_text(encoding="utf-8")
+
+    def declared(name: str) -> list[str]:
+        match = re.search(rf"const {name} = \[(.*?)\];", source, re.S)
+        assert match, f"{name} not found in ExportPanel.tsx"
+        return re.findall(r"'([^']+)'", match.group(1))
+
+    assert declared("CERTIFIED_DIALECTS") == list(CERTIFIED_DIALECTS), (
+        "the UI's certified dialects differ from the ones this harness verifies"
+    )
+    assert declared("PREVIEW_DIALECTS") == list(PREVIEW_DIALECTS), (
+        "the UI's preview dialects differ from the ones this harness labels"
+    )
+
+    # And both must agree with what the exporter will actually accept.
+    from app.services.exporter_service import _SQLGLOT_DIALECTS
+
+    backend = set(_SQLGLOT_DIALECTS) - {"postgresql"}  # an alias, not a dialect
+    assert set(ALL_DIALECTS) == backend, (
+        f"harness covers {sorted(ALL_DIALECTS)} but the exporter accepts "
+        f"{sorted(backend)}"
+    )
 
 
 # ===========================================================================
@@ -537,11 +560,7 @@ def test_ddl_executes_on_duckdb(gid: str) -> None:
     assert created == {e.entity_name for e in GOLD[gid].model.entities}
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "H4/H3: no NOT NULL is emitted anywhere. A primary key is non-nullable by "
-    "definition and Databricks rejects a PK on a nullable column; the general "
-    "case needs ColumnSchema.is_nullable from Sprint 2."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_ddl_primary_key_columns_are_not_null(gid: str) -> None:
     """PK columns must be emitted NOT NULL."""
     model = GOLD[gid].model
@@ -557,13 +576,103 @@ def test_ddl_primary_key_columns_are_not_null(gid: str) -> None:
             )
 
 
+@pytest.mark.parametrize("gid", GOLD_IDS)
+def test_ddl_not_null_follows_declared_nullability(gid: str) -> None:
+    """NOT NULL comes from `is_nullable`, not from the primary-key flag.
+
+    Asserted against a mutated copy, for the same reason the ODCS `required`
+    check is: on the graphs as authored, `is_nullable` is false exactly where
+    `is_primary_key` is true, so emitting NOT NULL from either rule produces
+    byte-identical DDL. `test_ddl_primary_key_columns_are_not_null` therefore
+    passes under the wrong implementation — it asserts a consequence, not the
+    property (register verification standard 9).
+
+    One non-key column per entity is forced non-nullable here, which is the
+    counterexample a correct model rarely contains.
+    """
+    model = GOLD[gid].model.model_copy(deep=True)
+    forced: list[str] = []
+    for entity in model.entities:
+        for column in entity.columns:
+            if not column.is_primary_key:
+                column.is_nullable = False
+                forced.append(column.name)
+                break
+    assert forced, "fixture sanity: no entity has a non-key column"
+
+    ddl = exporter().generate_ddl(model, "postgres")
+    for entity in model.entities:
+        # Scoped to this table's own CREATE block. A column name is not unique
+        # across a model — `plan_sk` is a nullable foreign key on the fact and
+        # the non-nullable primary key of `dim_plan` — so an unscoped search
+        # reads one table's constraint as another's.
+        block = re.search(
+            rf"CREATE TABLE {re.escape(entity.entity_name)} \((.*?)\n\);",
+            ddl,
+            re.S,
+        )
+        assert block, f"no CREATE TABLE emitted for {entity.entity_name}"
+        for column in entity.columns:
+            pattern = rf"^\s*{re.escape(column.name)}\s+\S.*$"
+            line = re.search(pattern, block.group(1), re.M)
+            assert line, f"{entity.entity_name}.{column.name} not emitted"
+            emitted = "NOT NULL" in line.group(0).upper()
+            assert emitted is (not column.is_nullable), (
+                f"{entity.entity_name}.{column.name}: is_nullable="
+                f"{column.is_nullable} but NOT NULL "
+                f"{'was' if emitted else 'was not'} emitted — {line.group(0).strip()!r}"
+            )
+
+
+def test_ddl_order_defeats_both_plausible_wrong_orderings() -> None:
+    """Emission order is a dependency sort, not declaration or alphabetical.
+
+    The gold graphs catch alphabetical ordering only by accident — one of the
+    five happens to have a child whose name sorts before its parent. Relying on
+    that is fragile: rename an entity and the mutant survives. This model is
+    adversarial to both plausible wrong implementations at once, so the
+    discrimination is deliberate rather than incidental.
+
+    `a_child` references `z_parent`, and is declared first. Declaration order
+    is wrong. Alphabetical order is wrong. Only a dependency sort is right.
+    """
+    model = SynthesizedModel(
+        paradigm="3NF",  # type: ignore[arg-type]
+        entities=[
+            EntitySchema(
+                entity_name="a_child",
+                entity_type="TABLE",  # type: ignore[arg-type]
+                columns=[
+                    ColumnSchema(name="a_child_id", data_type="INTEGER",
+                                 is_primary_key=True),
+                    ColumnSchema(name="z_parent_id", data_type="INTEGER",
+                                 is_foreign_key=True),
+                ],
+            ),
+            EntitySchema(
+                entity_name="z_parent",
+                entity_type="TABLE",  # type: ignore[arg-type]
+                columns=[
+                    ColumnSchema(name="z_parent_id", data_type="INTEGER",
+                                 is_primary_key=True),
+                ],
+            ),
+        ],
+        relationships=[
+            RelationshipSchema.model_validate(
+                {"from": "a_child.z_parent_id", "to": "z_parent.z_parent_id",
+                 "cardinality": "N:1"}
+            )
+        ],
+    )
+    ddl = exporter().generate_ddl(model, "postgres")
+    order = re.findall(r"CREATE TABLE (\w+)", ddl)
+    assert order == ["z_parent", "a_child"], (
+        f"emitted {order}; the referenced table must be created first"
+    )
+
+
 @pytest.mark.parametrize("gid", gold_params(
-    {
-        gid: "H5: generate_ddl iterates model.entities in declaration order and "
-             "never calls GraphEngine.topological_order, so a child table can be "
-             "created before the parent it references."
-        for gid in GOLD_IDS
-    },
     skips={"marketing-attribution": "single-entity OBT model has no FK ordering"},
 ))
 def test_ddl_order_is_topological(gid: str) -> None:
@@ -601,28 +710,28 @@ def test_dbt_parses(gid: str, tmp_path_factory: pytest.TempPathFactory) -> None:
     assert result.success, result.error
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "H9: generate_dbt_project emits staging models referencing "
-    "{{ source('raw', ...) }} but never emits a sources declaration, so the "
-    "project cannot parse standalone. Not recorded in the audit — §4.2 reported "
-    "dbt as parsing because the audit harness supplied a sources file itself."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_dbt_project_is_self_contained(
     gid: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    """Exporter output alone, plus only project/profile scaffolding, must parse."""
+    """The exporter must declare the sources its own models reference (B14).
+
+    The harness supplies only `dbt_project.yml` and `profiles.yml`, which are
+    the consumer's to write. Everything else in the project is the exporter's
+    output, so this passing means the artifact is genuinely self-contained
+    rather than completed by scaffolding — the sources file the harness used to
+    synthesise has been deleted, not merely left unused.
+    """
     _need(HAVE_DBT, "dbt-core")
-    result = dbt_parse(
-        GOLD[gid], tmp_path_factory, with_semantic=False, with_sources=False
+    files = exporter().generate_dbt_project(GOLD[gid].model)
+    assert any(p.endswith("_sources.yml") for p in files), (
+        "no sources declaration emitted; the project cannot stand alone"
     )
+    result = dbt_parse(GOLD[gid], tmp_path_factory, with_semantic=False)
     assert result.success, result.error
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    gid: "M11: generic tests are emitted with top-level arguments; dbt 1.11 "
-         "requires them nested under `arguments:`."
-    for gid in GOLD_IDS if gid != "marketing-attribution"
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_dbt_no_deprecations(
     gid: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
@@ -633,12 +742,6 @@ def test_dbt_no_deprecations(
     assert not deprecations, f"dbt reported {deprecations}"
 
 
-@pytest.mark.xfail(
-    reason="M7: _dbt_quality_tests emits dbt_expectations.* tests but "
-           "generate_dbt_project never emits a packages.yml declaring the "
-           "dependency, so the project cannot resolve its own tests.",
-    strict=True,
-)
 def test_dbt_declares_packages_yml() -> None:
     """A project using dbt_expectations must declare it in packages.yml."""
     files = exporter().generate_dbt_project(SYNTHETIC["quality-rules"].model)
@@ -657,12 +760,7 @@ def _metricflow_doc(fixture: Fixture) -> dict[str, Any]:
     return yaml.safe_load(files["semantic_models.yml"])
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "B1: MetricFlow output does not parse in dbt. Four independent defects — "
-    "missing metric `label`; model ref points at '{name}' where the dbt "
-    "exporter emits 'stg_{name}'; `avg` is not a MetricFlow AggregationType; "
-    "no defaults.agg_time_dimension."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_parses_in_dbt(
     gid: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
@@ -673,20 +771,14 @@ def test_metricflow_parses_in_dbt(
     assert result.success, f"{result.error} {detail}"
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "B1: metrics are emitted without `label`, which dbt requires."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_metrics_have_label(gid: str) -> None:
     doc = _metricflow_doc(GOLD[gid])
     missing = [m["name"] for m in doc.get("metrics", []) if not m.get("label")]
     assert not missing, f"metrics without a label: {missing}"
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "B1: semantic models reference ref('{entity}') but generate_dbt_project "
-    "names its models stg_{entity} — the two exporters disagree about their "
-    "own naming convention."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_ref_matches_dbt_model_name(gid: str) -> None:
     fixture = GOLD[gid]
     dbt_models = {
@@ -711,12 +803,7 @@ _METRICFLOW_AGGREGATIONS = {
 }
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    "saas-subscription":
-        "B1: dim_plan.list_price declares aggregation 'avg', which is not a "
-        "MetricFlow AggregationType ('average'); dbt exits with a traceback "
-        "rather than a parse error.",
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_agg_vocabulary_is_valid(gid: str) -> None:
     for semantic_model in _metricflow_doc(GOLD[gid]).get("semantic_models", []):
         for measure in semantic_model.get("measures", []):
@@ -726,10 +813,7 @@ def test_metricflow_agg_vocabulary_is_valid(gid: str) -> None:
             )
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "B1: no `defaults.agg_time_dimension` is emitted, so every measure fails "
-    "semantic-manifest validation. Needs the Sprint 2 IR field."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_declares_agg_time_dimension(gid: str) -> None:
     for semantic_model in _metricflow_doc(GOLD[gid]).get("semantic_models", []):
         if not semantic_model.get("measures"):
@@ -741,12 +825,7 @@ def test_metricflow_declares_agg_time_dimension(gid: str) -> None:
         )
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    "banking-datavault":
-        "B1: sat_account_details has no primary-key column, so no primary "
-        "entity is emitted and the manifest is rejected. Satellites "
-        "legitimately have no single-column PK.",
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_semantic_model_has_primary_entity(gid: str) -> None:
     for semantic_model in _metricflow_doc(GOLD[gid]).get("semantic_models", []):
         if not semantic_model.get("dimensions"):
@@ -764,11 +843,7 @@ _RESERVED_GRANULARITIES = {
 }
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    "saas-subscription":
-        "B1: fact_subscription_monthly.month collides with a reserved "
-        "MetricFlow time-granularity keyword; the emitter has no name guard.",
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_names_avoid_reserved_granularity(gid: str) -> None:
     for semantic_model in _metricflow_doc(GOLD[gid]).get("semantic_models", []):
         for block in ("entities", "dimensions", "measures"):
@@ -779,13 +854,39 @@ def test_metricflow_names_avoid_reserved_granularity(gid: str) -> None:
                 )
 
 
-@pytest.mark.xfail(
-    reason="B1: foreign entities are named after the local FK column, so a "
-           "role-playing dimension (ship_to_/bill_to_) has no counterpart on "
-           "the parent and the join silently does not exist. Latent on the gold "
-           "graphs, where every FK name equals its parent's PK name.",
-    strict=True,
-)
+@pytest.mark.parametrize("gid", GOLD_IDS)
+def test_metricflow_measures_require_an_aggregation_time_axis(gid: str) -> None:
+    """A semantic model with no `agg_time_column` declares no measures.
+
+    Ruled behaviour, asserted so the rule is verifiable rather than incidental.
+    Six of the fifteen reference entities have no temporal column and cannot
+    acquire one honestly, so they are dimension-only rather than being given an
+    invented time axis.
+
+    The inverse is asserted in the same place, and it is the more fragile half:
+    a model that *does* declare measures must carry the default, and the default
+    must name a dimension that exists in the emitted block. Reserved-granularity
+    names are renamed (`month` -> `month_dim`), so a default built from the raw
+    column would point at a dimension that no longer exists — one fix silently
+    undoing another inside the same emitter.
+    """
+    for semantic_model in _metricflow_doc(GOLD[gid]).get("semantic_models", []):
+        default = semantic_model.get("defaults", {}).get("agg_time_dimension")
+        measures = semantic_model.get("measures", [])
+        if default is None:
+            assert not measures, (
+                f"'{semantic_model['name']}' has no aggregation time axis but "
+                f"declares measures {[m['name'] for m in measures]}"
+            )
+            continue
+        emitted = {d["name"] for d in semantic_model.get("dimensions", [])}
+        assert default in emitted, (
+            f"'{semantic_model['name']}' aggregates over {default!r}, which is "
+            f"not among its dimensions {sorted(emitted)} — a renamed dimension "
+            f"orphaned by its own default"
+        )
+
+
 def test_metricflow_foreign_entity_names_parent_primary() -> None:
     """Foreign entity names must match the parent's primary entity name."""
     fixture = SYNTHETIC["role-playing-dimension"]
@@ -840,12 +941,7 @@ def test_cube_is_valid_js(gid: str, tmp_path: Path) -> None:
         assert cube.get("sql_table"), f"{cube['name']} has no sql_table"
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    gid: "M3: every numeric column becomes a measure, so surrogate and foreign "
-         "keys are emitted as SUM(). LookML excludes the PK but not FKs; Cube "
-         "excludes neither."
-    for gid in GOLD_IDS if gid != "banking-datavault"
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_cube_no_measure_over_key(gid: str, tmp_path: Path) -> None:
     """SUM() over a surrogate or foreign key is never a meaningful measure."""
     _need(NODE, "node")
@@ -861,12 +957,6 @@ def test_cube_no_measure_over_key(gid: str, tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("gid", gold_params(
-    {
-        gid: "M3: _cube_type has no boolean branch, so BOOLEAN columns are "
-             "typed `string`, though _logical_type and _lookml_type both "
-             "handle booleans."
-        for gid in ("saas-subscription", "marketing-attribution")
-    },
     skips={
         gid: "graph declares no BOOLEAN column"
         for gid in ("ecommerce-orders", "banking-datavault", "healthcare-ehr")
@@ -934,35 +1024,27 @@ def _odcs(fixture: Fixture) -> dict[str, Any]:
     return yaml.safe_load(files["datacontract.yaml"])
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    f"H2: apiVersion is stamped v0.9.3; the current ODCS line is "
-    f"{ODCS_API_VERSION}."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_odcs_apiversion_is_current(gid: str) -> None:
     assert _odcs(GOLD[gid])["apiVersion"] == ODCS_API_VERSION
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "H2-ext: the contract is a hybrid of two standards. ODCS v3 requires "
-    "top-level `version` and `status`, neither of which is emitted, and the "
-    "`info:` block it does emit belongs to the rival Data Contract "
-    "Specification. The audit under-called this as a bad version stamp."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_odcs_conforms_to_v3_fundamentals(gid: str) -> None:
     doc = _odcs(GOLD[gid])
     assert doc.get("kind") == "DataContract"
-    missing = [key for key in ("id", "version", "status") if key not in doc]
-    assert not missing, f"ODCS v3 requires top-level {missing}"
+    missing = [
+        key
+        for key in ("apiVersion", "kind", "id", "version", "status")
+        if key not in doc
+    ]
+    assert not missing, f"ODCS v3.1.0 requires top-level {missing}"
     assert "info" not in doc, (
         "`info:` is a Data Contract Specification key, not ODCS v3"
     )
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "H2/H4: `required` is emitted as a restatement of is_primary_key, so every "
-    "non-PK column is declared optional — including Data Vault load_dts and "
-    "record_source. Needs ColumnSchema.is_nullable from Sprint 2."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_odcs_required_reflects_nullability(gid: str) -> None:
     """`required` must derive from declared nullability, not from the PK flag.
 
@@ -1010,6 +1092,113 @@ def test_odcs_required_reflects_nullability(gid: str) -> None:
                 f"{table['name']}.{prop['name']}: required={prop['required']} "
                 f"but is_nullable={column.is_nullable} — `required` is "
                 f"restating is_primary_key ({column.is_primary_key})"
+            )
+
+
+@pytest.mark.xfail(
+    reason="H10: quality entries are emitted as {'rule': 'range', "
+           "'mustBeGreaterThanOrEqualTo': ...}. `rule` is not an ODCS key. A "
+           "v3.1.0 property-level entry is {id, metric, mustBe*, arguments, "
+           "unit, description} with an optional type of library|sql|custom. "
+           "Reachable only through the synthetic fixture, since no gold graph "
+           "declares a quality rule — which is why the audit missed it. "
+           "Assigned to Sprint 4.",
+    strict=True,
+)
+def test_odcs_quality_entries_use_v3_vocabulary() -> None:
+    """Quality blocks must speak ODCS, not an invented dialect.
+
+    Spec: https://github.com/bitol-io/open-data-contract-standard/blob/main/docs/data-quality.md
+    Confirmed via context7 on 2026-08-11. A library rule carries `metric` and a
+    `mustBe*` comparator; a SQL rule carries `type: sql` and `query`. There is
+    no `rule` key at any level.
+    """
+    fixture = SYNTHETIC["quality-rules"]
+    contract = yaml.safe_load(
+        exporter().export_data_contract(fixture.model, "odcs", fixture.dataset_name)[
+            "datacontract.yaml"
+        ]
+    )
+    entries = [
+        (table["name"], prop["name"], entry)
+        for table in contract["schema"]
+        for prop in table["properties"]
+        for entry in prop.get("quality", [])
+    ]
+    assert entries, "fixture no longer exercises H10"
+
+    offending: list[str] = []
+    for table, prop, entry in entries:
+        where = f"{table}.{prop}"
+        if "rule" in entry:
+            offending.append(f"{where}: 'rule' is not an ODCS key ({entry})")
+            continue
+        kind = entry.get("type", "library")
+        if kind == "sql":
+            if "query" not in entry:
+                offending.append(f"{where}: a sql rule needs a query")
+        elif "metric" not in entry:
+            offending.append(f"{where}: a library rule needs a metric ({entry})")
+        if not any(k == "mustBe" or k.startswith("mustBe") for k in entry):
+            offending.append(f"{where}: no mustBe* comparator ({entry})")
+    assert not offending, offending
+
+
+@pytest.mark.parametrize("gid", GOLD_IDS)
+def test_odcs_declares_foreign_keys_as_relationships(gid: str) -> None:
+    """A column-level FK target reaches the contract (register C7).
+
+    ODCS v3.1.0 expresses this at property level as ``relationships: [{to}]``
+    with ``from`` implicit; ``type: foreignKey`` is the schema-level construct
+    and needs explicit ``from`` and ``to``. Correction C7-a — C3 named the
+    property-level construct wrongly, and Sprint 2's decision to keep
+    ``ColumnSchema.references`` rested on that name.
+
+    The gold graphs carry no ``references`` values, so this asserts the
+    round-trip on a model that does: absence here would otherwise look like
+    conformance.
+    """
+    fixture = GOLD[gid]
+    model = fixture.model.model_copy(deep=True)
+
+    # Give each FK column the qualified target its relationship already implies.
+    expected: dict[tuple[str, str], str] = {}
+    by_entity = {e.entity_name: e for e in model.entities}
+    for rel in model.relationships:
+        child, child_col = rel.from_ref.split(".", 1)
+        if not child_col or child not in by_entity:
+            continue
+        column = next(
+            (c for c in by_entity[child].columns if c.name == child_col), None
+        )
+        if column is None:
+            continue
+        column.references = rel.to_ref
+        expected[(child, child_col)] = rel.to_ref
+    if not expected:
+        pytest.skip("single-entity model declares no foreign keys")
+
+    contract = yaml.safe_load(
+        exporter().export_data_contract(model, "odcs", fixture.dataset_name)[
+            "datacontract.yaml"
+        ]
+    )
+    for table in contract["schema"]:
+        for prop in table["properties"]:
+            target = expected.get((table["name"], prop["name"]))
+            if target is None:
+                assert "relationships" not in prop, (
+                    f"{table['name']}.{prop['name']} claims a relationship it "
+                    f"does not have"
+                )
+                continue
+            assert prop.get("relationships") == [{"to": target}], (
+                f"{table['name']}.{prop['name']} should declare "
+                f"relationships: [{{to: {target}}}], got "
+                f"{prop.get('relationships')!r}"
+            )
+            assert "foreignKey" not in prop, (
+                "foreignKey is the schema-level construct, not a property key"
             )
 
 
@@ -1068,24 +1257,61 @@ def test_protobuf_compiles(gid: str, tmp_path: Path) -> None:
         assert proc.returncode == 0, proc.stderr[-1500:]
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "H6: field tags come from enumerate() over the column list, so inserting a "
-    "column renumbers every later field and breaks wire compatibility with "
-    "deployed consumers. ordinal_position is ignored; needs stable_id (Q6)."
-))
+def _persisted(fixture: Fixture, *, gap_after: int = 2) -> Fixture:
+    """A copy whose columns carry stable ids, as a saved model's would.
+
+    The gold graphs are loaded straight from JSON and never persisted, so every
+    ``stable_id`` is ``None`` — and a tag-stability test over them would prove
+    nothing about a field the emitter only reads when it is set (register
+    verification standard 8).
+
+    Ids are assigned **with a gap**, which is the whole point. A model that has
+    ever had a column deleted has non-contiguous ids, and that is precisely the
+    case the plausible wrong implementation gets wrong: sorting the columns by
+    ``stable_id`` and then numbering by loop index looks correct, is stable
+    under reorder, and quietly re-compacts the gap — reissuing a tag a deployed
+    consumer still holds.
+    """
+    model = fixture.model.model_copy(deep=True)
+    for entity in model.entities:
+        next_id = 1
+        for index, column in enumerate(entity.columns):
+            column.stable_id = next_id
+            # Simulate one previously-deleted column part-way along.
+            next_id += 2 if index == gap_after else 1
+    return Fixture(fixture.id, model, fixture.dataset_name, fixture.raw)
+
+
+def _proto_name(fixture: Fixture) -> str:
+    return f"{ExporterService._safe_identifier(fixture.dataset_name)}.proto"
+
+
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_protobuf_tags_stable_on_insert(gid: str) -> None:
-    """Inserting a column must not move any existing field tag."""
-    fixture = GOLD[gid]
-    before = _proto_files(fixture)[f"{fixture.dataset_name}.proto"]
+    """Inserting a column must not move any existing field tag.
+
+    The criterion the whole ``stable_id`` design exists for. A tag is a wire
+    contract: a deployed consumer decodes field 3 as whatever field 3 meant
+    when its copy of the schema was generated.
+    """
+    fixture = _persisted(GOLD[gid])
+    before = _proto_files(fixture)[_proto_name(fixture)]
 
     mutated = fixture.model.model_copy(deep=True)
     target = mutated.entities[0]
+    highest = max(c.stable_id or 0 for c in target.columns)
     target.columns.insert(
-        1, ColumnSchema(name="inserted_column", data_type="VARCHAR(80)")
+        1,
+        ColumnSchema(
+            name="inserted_column",
+            data_type="VARCHAR(80)",
+            # A newly allocated id: past the high-water mark, never reused.
+            stable_id=highest + 1,
+        ),
     )
     after = _proto_files(
         Fixture(fixture.id, mutated, fixture.dataset_name, fixture.raw)
-    )[f"{fixture.dataset_name}.proto"]
+    )[_proto_name(fixture)]
 
     message = ExporterService._to_pascal_case(target.entity_name)
     original = _proto_tags(before, message)
@@ -1094,18 +1320,37 @@ def test_protobuf_tags_stable_on_insert(gid: str) -> None:
         name: (tag, updated.get(name))
         for name, tag in original.items() if updated.get(name) != tag
     }
-    assert not moved, f"field tags moved after an insertion: {moved}"
+    assert not moved, (
+        f"field tags moved after an insertion: {moved}. A deployed consumer "
+        f"would misparse every one of them."
+    )
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    gid: "H6: NUMERIC/DECIMAL maps to proto `double`, making money a "
-         "floating-point field. Avro emits a decimal logical type with "
-         "precision and scale from the same column and is the reference."
-    for gid in GOLD_IDS if gid != "healthcare-ehr"
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
+def test_protobuf_tags_are_the_stable_ids(gid: str) -> None:
+    """Tags are the identities themselves, gaps included, not a renumbering."""
+    fixture = _persisted(GOLD[gid])
+    proto = _proto_files(fixture)[_proto_name(fixture)]
+    for entity in fixture.model.entities:
+        message = ExporterService._to_pascal_case(entity.entity_name)
+        emitted = _proto_tags(proto, message)
+        expected = {c.name: c.stable_id for c in entity.columns}
+        assert emitted == expected, (
+            f"{message}: tags {emitted} are not the stable ids {expected} — a "
+            f"gap has been compacted, which reissues a retired tag"
+        )
+
+
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_protobuf_decimal_is_not_double(gid: str) -> None:
+    """Exact numerics must not become binary floats.
+
+    A NUMERIC(18,2) ledger balance is exact by definition. Avro emits a decimal
+    logical type with precision and scale from the same column, so mapping the
+    same value to `double` made the two contracts disagree about it.
+    """
     fixture = GOLD[gid]
-    proto = _proto_files(fixture)[f"{fixture.dataset_name}.proto"]
+    proto = _proto_files(fixture)[_proto_name(fixture)]
     offending = [
         f"{e.entity_name}.{c.name}({c.data_type})"
         for e in fixture.model.entities for c in e.columns
@@ -1115,12 +1360,6 @@ def test_protobuf_decimal_is_not_double(gid: str) -> None:
     assert not offending, f"fixed-point columns emitted as double: {offending}"
 
 
-@pytest.mark.xfail(
-    reason="H6: the proto package name is sanitised via _safe_identifier but "
-           "the emitted filename is not, so a model titled 'Untitled Model' "
-           "yields 'Untitled Model.proto'.",
-    strict=True,
-)
 def test_protobuf_filename_is_a_safe_identifier() -> None:
     fixture = SYNTHETIC["spaced-title"]
     assert " " in fixture.dataset_name, "fixture no longer exercises H6"

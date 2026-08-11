@@ -109,6 +109,55 @@ async def export_persisted(session: AsyncSession) -> dict[str, dict[str, str]]:
     return out
 
 
+async def project_models(session: AsyncSession) -> dict:
+    """A structural projection of every persisted model.
+
+    Deliberately limited to what *both* the previous release and the current
+    tree can express, so it is comparable across a code boundary: entity and
+    column names, declared types, key flags, ordinal position, and the
+    relationship edges. New IR fields are excluded here and asserted separately
+    by the backfill test — mixing them in would make the comparison impossible
+    rather than meaningful.
+    """
+    engine = SynthesisEngine(session, None)
+    out: dict[str, dict] = {}
+    rows = (await session.execute(select(DataModel).order_by(DataModel.title))).scalars().all()
+    for row in rows:
+        response = await engine.get_model(row.model_id)
+        out[row.title] = {
+            "paradigm": str(response.paradigm),
+            "entities": [
+                {
+                    "entity_name": e.entity_name,
+                    "entity_type": str(e.entity_type),
+                    "description": e.description,
+                    "grain": e.grain,
+                    "columns": [
+                        {
+                            "name": c.name,
+                            "data_type": c.data_type,
+                            "is_primary_key": c.is_primary_key,
+                            "is_foreign_key": c.is_foreign_key,
+                            "is_pii": c.is_pii,
+                            "pii_type": str(c.pii_type) if c.pii_type else None,
+                            "description": c.description,
+                            "is_metric": c.is_metric,
+                            "aggregation": c.aggregation,
+                            "ordinal_position": c.ordinal_position,
+                        }
+                        for c in e.columns
+                    ],
+                }
+                for e in sorted(response.entities, key=lambda e: e.entity_name)
+            ],
+            "relationships": sorted(
+                f"{r.from_ref}->{r.to_ref}:{r.cardinality}"
+                for r in response.relationships
+            ),
+        }
+    return out
+
+
 async def inspect_backfill(session: AsyncSession) -> dict:
     """Dump stable_id state straight from SQL, independent of the ORM."""
     rows = (await session.execute(text(
@@ -152,6 +201,8 @@ async def main() -> None:
                 result = {"models": await export_persisted(session)}
             elif mode == "export-only":
                 result = {"models": await export_persisted(session)}
+            elif mode == "project-model":
+                result = {"models": await project_models(session)}
             elif mode == "inspect-backfill":
                 result = await inspect_backfill(session)
             else:

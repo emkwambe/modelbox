@@ -148,14 +148,20 @@ def test_protobuf_proto3() -> None:
     assert "message Customers {" in proto
     assert "int32 id = 1;" in proto
     assert "string email = 2;" in proto
-    assert "double total = 3;" in proto  # NUMERIC -> double
+    # NUMERIC is exact; proto3 has no fixed-point scalar, so it carries as a
+    # decimal string rather than a binary float. Avro emits a decimal logical
+    # type for the same column, and the two contracts must agree about it.
+    assert "string total = 3;" in proto
 
 
 def test_identifiers_are_sanitized_for_spaced_titles() -> None:
     # A human title with spaces must not leak into proto/Avro identifiers.
     exporter = ExporterService()
     proto = exporter.export_data_contract(_model(), "protobuf", "Untitled Model")
-    proto_text = proto["Untitled Model.proto"]
+    # The filename is sanitised too, not just the package: protoc cannot
+    # import "Untitled Model.proto".
+    assert "Untitled Model.proto" not in proto
+    proto_text = proto["untitled_model.proto"]
     assert "package untitled_model;" in proto_text
     assert "package Untitled Model;" not in proto_text
 
@@ -195,10 +201,11 @@ def test_metricflow_yaml() -> None:
     customers = next(m for m in doc["semantic_models"] if m["name"] == "customers")
     entity_types = {e["name"]: e["type"] for e in customers["entities"]}
     assert entity_types["id"] == "primary"
-    measure_names = {m["name"] for m in customers["measures"]}
-    assert "customers_count" in measure_names
-    metric_names = {m["name"] for m in doc["metrics"]}
-    assert "customers_count" in metric_names
+    # `customers` declares no agg_time_column, so it is dimension-only: a
+    # measure with no time axis is unemittable, and MetricFlow rejects a
+    # semantic model that declares one without defaults.agg_time_dimension.
+    assert "measures" not in customers
+    assert doc["semantic_models"][0]["model"].startswith("ref('stg_")
 
 
 def test_semantic_cube_dispatch_and_unknown_raises() -> None:

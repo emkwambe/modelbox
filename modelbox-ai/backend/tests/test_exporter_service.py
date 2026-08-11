@@ -133,14 +133,18 @@ def test_generate_dbt_project() -> None:
     # PK column carries unique + not_null tests.
     dim = next(m for m in schema["models"] if m["name"] == "stg_dim_customer")
     pk_col = next(c for c in dim["columns"] if c["name"] == "customer_hk")
-    assert "unique" in pk_col["tests"] and "not_null" in pk_col["tests"]
+    # dbt 1.8+ renamed `tests:` to `data_tests:`.
+    assert "unique" in pk_col["data_tests"]
+    assert "not_null" in pk_col["data_tests"]
 
     # FK column carries a relationships test to the parent staging model.
     fact = next(m for m in schema["models"] if m["name"] == "stg_fact_orders")
     fk_col = next(c for c in fact["columns"] if c["name"] == "customer_hk")
-    rel_test = next(t for t in fk_col["tests"] if isinstance(t, dict))
-    assert rel_test["relationships"]["to"] == "ref('stg_dim_customer')"
-    assert rel_test["relationships"]["field"] == "customer_hk"
+    rel_test = next(t for t in fk_col["data_tests"] if isinstance(t, dict))
+    # Generic-test arguments nest under `arguments:` in dbt 1.11.
+    args = rel_test["relationships"]["arguments"]
+    assert args["to"] == "ref('stg_dim_customer')"
+    assert args["field"] == "customer_hk"
 
 
 def test_dbt_accepted_values_for_categorical_columns() -> None:
@@ -164,16 +168,16 @@ def test_dbt_accepted_values_for_categorical_columns() -> None:
     )
     cols = {c["name"]: c for c in schema["models"][0]["columns"]}
 
-    status_tests = cols["order_status"].get("tests", [])
+    status_tests = cols["order_status"].get("data_tests", [])
     accepted = next(
         (t["accepted_values"] for t in status_tests if isinstance(t, dict) and "accepted_values" in t),
         None,
     )
-    assert accepted == {"values": ["ACTIVE", "INACTIVE", "PENDING"]}
+    assert accepted == {"arguments": {"values": ["ACTIVE", "INACTIVE", "PENDING"]}}
 
     # Numeric and free-text columns get no accepted_values test.
     for other in ("amount", "note"):
-        tests = cols[other].get("tests", [])
+        tests = cols[other].get("data_tests", [])
         assert not any(
             isinstance(t, dict) and "accepted_values" in t for t in tests
         )
@@ -201,7 +205,11 @@ def test_governance_metadata_propagates_to_exports() -> None:
         ]
     )
     table = odcs["schema"][0]
-    assert table["tier"] == "TIER_1_CRITICAL"
+    # `tier` is not an ODCS v3.1.0 schema key, so it travels as a custom
+    # property rather than as invented vocabulary. slaProperties is standard.
+    assert {"property": "tier", "value": "TIER_1_CRITICAL"} in table[
+        "customProperties"
+    ]
     assert table["slaProperties"] == [{"property": "freshness", "value": "< 1h"}]
 
     # dbt schema.yml: meta block.
@@ -235,7 +243,7 @@ def test_quality_rules_propagate_to_exports() -> None:
         ExporterService().generate_dbt_project(model)["models/staging/schema.yml"]
     )
     cols = {c["name"]: c for c in dbt["models"][0]["columns"]}
-    score_tests = cols["score"]["tests"]
+    score_tests = cols["score"]["data_tests"]
     between = next(
         t["dbt_expectations.expect_column_values_to_be_between"]
         for t in score_tests
@@ -243,7 +251,7 @@ def test_quality_rules_propagate_to_exports() -> None:
         and "dbt_expectations.expect_column_values_to_be_between" in t
     )
     assert between == {"min_value": 0, "max_value": 100}
-    email_tests = cols["email"]["tests"]
+    email_tests = cols["email"]["data_tests"]
     regex = next(
         t["dbt_expectations.expect_column_values_to_match_regex"]
         for t in email_tests
@@ -277,8 +285,13 @@ def test_metricflow_declared_measure_becomes_metric() -> None:
                 entity_name="fact_orders",
                 entity_type="FACT",  # type: ignore[arg-type]
                 grain="per order",
+                # A measure needs a time axis: MetricFlow requires
+                # defaults.agg_time_dimension on any semantic model declaring
+                # measures, so an entity without one is dimension-only.
+                agg_time_column="ordered_at",
                 columns=[
                     _col("order_id", "INTEGER", pk=True),
+                    _col("ordered_at", "TIMESTAMP"),
                     _col("rating", "VARCHAR(8)", metric=True, agg="avg"),  # declared
                     _col("amount", "NUMERIC(12,2)"),  # numeric heuristic
                 ],
@@ -293,7 +306,8 @@ def test_metricflow_declared_measure_becomes_metric() -> None:
     fo = doc["semantic_models"][0]
     measures = {m["name"]: m for m in fo["measures"]}
     assert "total_rating" in measures  # declared measure emitted despite VARCHAR
-    assert measures["total_rating"]["agg"] == "avg"
+    # 'avg' is not a MetricFlow AggregationType; it is mapped to 'average'.
+    assert measures["total_rating"]["agg"] == "average"
     assert "total_amount" in measures
     metric_names = {m["name"] for m in doc["metrics"]}
     assert {"total_rating", "total_amount"} <= metric_names  # a metric per measure

@@ -45,13 +45,14 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | B2 ◆ | MetricFlow output passes `dbt parse` on 5/5 graphs | `test_metricflow_parses_in_dbt` | 3 |
 | B3 ◆ | Emitted DDL **executes** on at least one certified engine, not merely parses | `test_ddl_executes_on_duckdb`, 5/5 | 1 (locked), 3 (held) |
 | B4 ◆ | All four certified dialects pass sqlfluff dialect grammar with zero unparsable segments | `test_ddl_dialect_grammar`, 20/20 | 3 |
-| B5 ◆ | Preview dialects are visibly labelled in the export UI and docs — no silent downgrade | Screenshot; docs section | 3 |
-| B6 ◆ | Protobuf tags do not move when a column is inserted | `test_protobuf_tags_stable_on_insert`, 5/5 | 3 |
+| B5 ◆ | Preview dialects are visibly labelled **before** export — grouped in the picker, with a standing warning while selected — and in the docs | `ExportPanel.tsx` picker optgroups + preview banner; README dialect section | 3 |
+| B6 ◆ | Protobuf tags **are** the stable identities, gaps included; and do not move when a column is inserted | `test_protobuf_tags_are_the_stable_ids` (primary), `test_protobuf_tags_stable_on_insert`, 5/5 each | 3 |
 | B7 ◆ | ODCS output validates as ODCS v3.1.0 — correct `apiVersion`, required `version` and `status` present, no foreign-spec `info:` block | `test_odcs_*`, 5/5 | 3 |
 | B8 ◆ | `required` in ODCS reflects declared nullability, not primary-key status | `test_odcs_required_reflects_nullability` | 3 |
 | B9 ◆ | DDL emits in topological order; a deliberately non-parent-first model still deploys | `test_ddl_order_is_topological` | 3 |
-| B10 | No Cube measure aggregates a key column, and BOOLEAN columns are typed boolean | `test_cube_no_measure_over_key`, `test_cube_boolean_dimensions_are_boolean` | 3 |
+| B10 | No Cube measure aggregates a key column — primary **or** foreign — and BOOLEAN columns are typed boolean. LookML is Preview and out of scope | `test_cube_no_measure_over_key`, `test_cube_boolean_dimensions_are_boolean` | 3 |
 | B11 | A dbt project emitted with quality rules resolves — `packages.yml` present | `test_dbt_declares_packages_yml` | 3 |
+| M12 | Every dialect the backend accepts is reachable from the export UI, and every dialect the UI offers is one the backend certifies | `test_export_ui_offers_exactly_the_dialects_the_backend_supports` | 3 |
 | B14 | A dbt project emitted with no hand-written scaffolding parses standalone — the exporter declares the sources its own models reference | `test_dbt_project_is_self_contained`, 5/5 (H9) | 3 |
 | B12 | dbt output raises zero deprecation warnings | `test_dbt_no_deprecations`, 5/5 (M11) | 3 |
 | B13 ◆ | Generated seed data passes the contract the same model exports — `dbt build` succeeds on own fixtures | `test_seed_respects_*`, 5/5 | 4 |
@@ -170,6 +171,65 @@ the reason it claimed to test. Stated once here rather than rediscovered again:
    freshly synthesised primary key stayed nullable and Sprint 3 would have
    emitted no `NOT NULL` for it — silently defeating H4, the whole purpose of
    the sprint that introduced the field.
+
+6. **A gate asserting a relationship to a previous release must state the
+   condition under which that relationship holds.** Otherwise its premise
+   expires and the gate becomes a schedule dependency rather than a property.
+
+   Sprint 3 found the pattern twice. The migration test asserted every artifact
+   was byte-identical to the previous release's output — true only while no
+   emitter changes, which was Sprint 2 by design and false in Sprint 3 by
+   design. It fused three properties with different lifetimes: *the migration
+   preserves the persisted model* (permanent), *emitters are deterministic*
+   (permanent), and *emitters match the previous release byte for byte* (a
+   schedule dependency). Split into the first two, each stating its scope. The
+   same shape produced the sprint's stale 76 → 0 target.
+
+7. **When fixing a defect found through tool output, check whether the tool
+   reported the whole class or only its loudest instance.** Evidence can look
+   complete merely because it is the only evidence visible.
+
+   Sprint 3: the audit recorded M11 as "generic-test arguments must nest under
+   `arguments:`", because that is what dbt warned about on every parse. dbt had
+   *also* renamed the block key from `tests:` to `data_tests:` in 1.8, but
+   deprecated it far more quietly. A fix addressing only the loud half would
+   have shipped and kept warning. Same shape as a non-discriminating test: the
+   visible evidence was a partial description of the defect.
+
+8. **A test over fixtures that do not exercise the feature passes vacuously.**
+   Distinct from a non-discriminating test, and it wears the same green: there,
+   two rules produce identical output; here, the feature is never reached at
+   all.
+
+   Sprint 3: the gold graphs carry no `references` values, so a test asserting
+   that foreign keys reach the ODCS contract would have passed on five models
+   declaring zero foreign keys. The remedy is the general pattern — mutate the
+   fixture to populate the field from information the graph already contains
+   (there, the relationship edges), then assert the round-trip. Check that the
+   fixture *can* fail before trusting that it didn't.
+
+9. **A test can pass on a *consequence* of the property rather than the
+   property itself.** The correct implementation implies the consequence, so
+   the assertion looks like the thing you care about — but a wrong
+   implementation can satisfy it too. The subtlest of the three ways a green
+   test means nothing, because unlike vacuous passing (8) and
+   non-discriminating passing (1) the assertion reads as exactly right.
+
+   Sprint 3, and it indicted a criterion in this register. B6 named
+   "inserting a column moves no existing tag" as the proof of Protobuf wire
+   stability. The realistic wrong implementation — sort columns by
+   `stable_id`, then number by loop index — honours the field, is stable under
+   reorder, and **passes that test on 5/5**, because the inserted column sorts
+   last and every existing index is unchanged. It silently re-compacts the gap
+   a deleted column leaves, reissuing a retired tag. The property is *tags are
+   the identities, gaps included*; no-movement-on-insert is a weaker
+   consequence of it. B6 now cites both, property first.
+
+   Note also what the mutation needed before it could discriminate: the fixture
+   had to be persisted so `stable_id` was not null throughout (8), and had to
+   carry a deliberate gap (1). Two independent fixture properties, either of
+   which alone would have made the check meaningless. A suite can be one
+   fixture property away from proving nothing.
 
 A criterion whose evidence violates any of these is NOT MET, whatever the test
 reports.
