@@ -252,40 +252,22 @@ _TIME_SPINE_YML = """models:
         granularity: day
 """
 
-_SOURCE_RE = re.compile(r"source\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)")
-
-
-def _synthesise_sources(staging_sql: dict[str, str]) -> str:
-    """Declare exactly the sources the exporter's own SQL references.
-
-    The exporter emits ``{{ source('raw', 'x') }}`` but no sources file, so a
-    generated project cannot parse standalone — finding H9, asserted by
-    ``test_dbt_project_is_self_contained``. Every *other* dbt and MetricFlow
-    defect would be masked behind that single failure, so the harness supplies
-    the declaration here in order to isolate them.
-
-    Derived from the emitted SQL rather than from the model, so a naming bug in
-    the exporter cannot be papered over by this scaffolding.
-    """
-    found: dict[str, set[str]] = {}
-    for sql in staging_sql.values():
-        for source_name, table in _SOURCE_RE.findall(sql):
-            found.setdefault(source_name, set()).add(table)
-    doc = {
-        "version": 2,
-        "sources": [
-            {"name": name, "schema": "public",
-             "tables": [{"name": t} for t in sorted(tables)]}
-            for name, tables in sorted(found.items())
-        ],
-    }
-    return yaml.safe_dump(doc, sort_keys=False)
-
-
 def _write_dbt_project(
-    root: Path, fixture: Fixture, *, with_semantic: bool, with_sources: bool = True
+    root: Path, fixture: Fixture, *, with_semantic: bool
 ) -> Path:
-    """Materialise a dbt project from the exporter's output."""
+    """Materialise a dbt project from the exporter's output.
+
+    **No sources scaffolding.** The harness used to synthesise a sources file
+    from the emitted SQL, because the exporter declared none and every other
+    dbt and MetricFlow defect would otherwise have been masked behind that one
+    failure (H9/B14). The exporter now emits its own, and the scaffolding is
+    gone rather than merely unused — leaving it would make
+    ``test_dbt_project_is_self_contained`` pass for the wrong reason, and dbt
+    in fact rejects the duplicate outright.
+
+    What reaches dbt is therefore the exporter's output plus only
+    ``dbt_project.yml`` and ``profiles.yml``, which are the consumer's to write.
+    """
     staging = root / "models" / "staging"
     staging.mkdir(parents=True, exist_ok=True)
 
@@ -301,12 +283,6 @@ def _write_dbt_project(
         encoding="utf-8",
     )
     (root / "profiles.yml").write_text(_DBT_PROFILE, encoding="utf-8")
-
-    if with_sources:
-        sql_only = {k: v for k, v in files.items() if k.endswith(".sql")}
-        (staging / "_fidelity_sources.yml").write_text(
-            _synthesise_sources(sql_only), encoding="utf-8"
-        )
 
     if with_semantic:
         for path, content in exporter().export_semantic_layer(
@@ -389,21 +365,19 @@ def _run_dbt_parse(project: Path) -> DbtResult:
     )
 
 
-_DBT_CACHE: dict[tuple[str, bool, bool], DbtResult] = {}
+_DBT_CACHE: dict[tuple[str, bool], DbtResult] = {}
 
 
 def dbt_parse(
     fixture: Fixture, tmp_path_factory: pytest.TempPathFactory,
-    *, with_semantic: bool, with_sources: bool = True,
+    *, with_semantic: bool,
 ) -> DbtResult:
     """Cached `dbt parse` — each project is built and parsed at most once."""
-    key = (fixture.id, with_semantic, with_sources)
+    key = (fixture.id, with_semantic)
     if key not in _DBT_CACHE:
-        suffix = ("sem" if with_semantic else "base") + ("" if with_sources else "-bare")
+        suffix = "sem" if with_semantic else "base"
         root = tmp_path_factory.mktemp(f"dbt-{fixture.id[:12]}-{suffix}")
-        _write_dbt_project(
-            root, fixture, with_semantic=with_semantic, with_sources=with_sources
-        )
+        _write_dbt_project(root, fixture, with_semantic=with_semantic)
         _DBT_CACHE[key] = _run_dbt_parse(root)
     return _DBT_CACHE[key]
 
@@ -601,28 +575,28 @@ def test_dbt_parses(gid: str, tmp_path_factory: pytest.TempPathFactory) -> None:
     assert result.success, result.error
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "H9: generate_dbt_project emits staging models referencing "
-    "{{ source('raw', ...) }} but never emits a sources declaration, so the "
-    "project cannot parse standalone. Not recorded in the audit — §4.2 reported "
-    "dbt as parsing because the audit harness supplied a sources file itself."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_dbt_project_is_self_contained(
     gid: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    """Exporter output alone, plus only project/profile scaffolding, must parse."""
+    """The exporter must declare the sources its own models reference (B14).
+
+    The harness supplies only `dbt_project.yml` and `profiles.yml`, which are
+    the consumer's to write. Everything else in the project is the exporter's
+    output, so this passing means the artifact is genuinely self-contained
+    rather than completed by scaffolding — the sources file the harness used to
+    synthesise has been deleted, not merely left unused.
+    """
     _need(HAVE_DBT, "dbt-core")
-    result = dbt_parse(
-        GOLD[gid], tmp_path_factory, with_semantic=False, with_sources=False
+    files = exporter().generate_dbt_project(GOLD[gid].model)
+    assert any(p.endswith("_sources.yml") for p in files), (
+        "no sources declaration emitted; the project cannot stand alone"
     )
+    result = dbt_parse(GOLD[gid], tmp_path_factory, with_semantic=False)
     assert result.success, result.error
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    gid: "M11: generic tests are emitted with top-level arguments; dbt 1.11 "
-         "requires them nested under `arguments:`."
-    for gid in GOLD_IDS if gid != "marketing-attribution"
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_dbt_no_deprecations(
     gid: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
@@ -633,12 +607,6 @@ def test_dbt_no_deprecations(
     assert not deprecations, f"dbt reported {deprecations}"
 
 
-@pytest.mark.xfail(
-    reason="M7: _dbt_quality_tests emits dbt_expectations.* tests but "
-           "generate_dbt_project never emits a packages.yml declaring the "
-           "dependency, so the project cannot resolve its own tests.",
-    strict=True,
-)
 def test_dbt_declares_packages_yml() -> None:
     """A project using dbt_expectations must declare it in packages.yml."""
     files = exporter().generate_dbt_project(SYNTHETIC["quality-rules"].model)

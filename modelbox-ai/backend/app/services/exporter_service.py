@@ -141,15 +141,80 @@ class ExporterService:
     def generate_dbt_project(
         self, model: SynthesizedModel, source_name: str = "raw"
     ) -> dict[str, str]:
-        """Return a map of dbt file paths -> file contents."""
+        """Return a map of dbt file paths -> file contents.
+
+        The project must parse standalone (B14). It previously emitted staging
+        models referencing ``{{ source(...) }}`` without ever declaring those
+        sources, so ``dbt parse`` failed on the first model with "depends on a
+        source named 'raw.x' which was not found" — every consumer had to
+        hand-write the sources file before the artifact was usable.
+        """
         files: dict[str, str] = {}
 
         for entity in model.entities:
             path = f"models/staging/stg_{entity.entity_name}.sql"
             files[path] = self._dbt_staging_sql(entity, source_name)
 
+        files["models/staging/_sources.yml"] = self._dbt_sources_yml(
+            model, source_name
+        )
         files["models/staging/schema.yml"] = self._dbt_schema_yml(model)
+
+        # Only emitted when something actually depends on it — a packages.yml
+        # naming an unused package is its own kind of noise.
+        packages = self._dbt_packages_yml(model)
+        if packages is not None:
+            files["packages.yml"] = packages
         return files
+
+    def _dbt_sources_yml(self, model: SynthesizedModel, source_name: str) -> str:
+        """Declare the raw sources the staging models select from (B14)."""
+        return yaml.safe_dump(
+            {
+                "version": 2,
+                "sources": [
+                    {
+                        "name": source_name,
+                        "description": (
+                            "Raw tables the staging models read from. Point "
+                            "`schema` at wherever these land in your warehouse."
+                        ),
+                        "schema": source_name,
+                        "tables": [
+                            {"name": entity.entity_name}
+                            for entity in model.entities
+                        ],
+                    }
+                ],
+            },
+            sort_keys=False,
+            default_flow_style=False,
+        )
+
+    def _dbt_packages_yml(self, model: SynthesizedModel) -> str | None:
+        """Declare dbt_expectations when a quality rule makes us depend on it.
+
+        Emitting the tests without the dependency produced a project that could
+        not resolve its own tests (M7).
+        """
+        needs_expectations = any(
+            self._dbt_quality_tests(col)
+            for entity in model.entities
+            for col in entity.columns
+        )
+        if not needs_expectations:
+            return None
+        return yaml.safe_dump(
+            {
+                "packages": [
+                    {"package": "calogica/dbt_expectations", "version": [
+                        {">=": "0.10.0"}, {"<": "0.11.0"}
+                    ]}
+                ]
+            },
+            sort_keys=False,
+            default_flow_style=False,
+        )
 
     def _dbt_staging_sql(self, entity: EntitySchema, source_name: str) -> str:
         casts = ",\n".join(
@@ -193,6 +258,9 @@ class ExporterService:
                 if col.description:
                     col_doc["description"] = col.description
 
+                # A generic test's arguments nest under `arguments:` (M11).
+                # Passing them at the top level is deprecated in dbt 1.11 and
+                # warned on every parse.
                 tests: list[object] = []
                 if col.is_primary_key:
                     tests.extend(["unique", "not_null"])
@@ -202,17 +270,21 @@ class ExporterService:
                     tests.append(
                         {
                             "relationships": {
-                                "to": f"ref('stg_{parent_entity}')",
-                                "field": parent_col,
+                                "arguments": {
+                                    "to": f"ref('stg_{parent_entity}')",
+                                    "field": parent_col,
+                                }
                             }
                         }
                     )
                 accepted = self._accepted_values(col)
                 if accepted:
-                    tests.append({"accepted_values": {"values": accepted}})
+                    tests.append(
+                        {"accepted_values": {"arguments": {"values": accepted}}}
+                    )
                 tests.extend(self._dbt_quality_tests(col))
                 if tests:
-                    col_doc["tests"] = tests
+                    col_doc["data_tests"] = tests
                 columns.append(col_doc)
 
             model_doc: dict[str, object] = {

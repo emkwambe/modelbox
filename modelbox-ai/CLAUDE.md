@@ -54,12 +54,26 @@ it with raw SQL. Checking an emitter rule against data where two rules produce
 the same output proves nothing; supply a case where they differ. Register
 verification standard.
 
-**Prefer a direct file edit to a shell heredoc for source changes.** Escapes in
-`
-`-bearing string literals get mangled going through bash, which cost three
-retries in one sprint. When a scripted multi-file edit really is the right tool,
-validate every anchor against the file *before* writing anything, so a late
-mismatch cannot leave a file half-edited.
+**Never edit source through a bash heredoc, and never with a regex spanning
+multiple constructs.** A hard constraint, not a preference — the preference was
+overridden for convenience twice and cost four incidents in one sprint:
+
+- A newline escape inside a Python string literal is mangled in transit,
+  producing an unterminated literal. Three times, including in the paragraph
+  that previously stood here, which is why it read as a stray backtick.
+- A regex anchored across constructs matched far more than intended and deleted
+  161 lines, taking two whole test sections and a helper the rest of the file
+  depended on.
+
+What the four have in common is that **the reasoning was correct and the
+transport corrupted it.** More care is therefore not the fix; removing the
+transport is. Use direct `Edit` calls. Where a genuinely mechanical multi-site
+change is unavoidable, use line-addressed replacement and validate **every**
+block against the file before writing **anything**, so a late mismatch cannot
+leave a file half-edited.
+
+What made both serious incidents cheap was the file being committed, not the
+guidance. Commit before a mechanical edit.
 
 ## Environments
 
