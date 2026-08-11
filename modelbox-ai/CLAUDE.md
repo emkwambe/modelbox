@@ -18,6 +18,16 @@ fact: the audit's dbt projects parsed only because the harness supplied a
 never executed. Every register criterion and every Proof Log entry rests on the
 claim that stated evidence was actually produced.
 
+**After a multi-step edit, verify the resulting file state directly.** Do not
+trust the edit's own report. Twice now a scripted edit reported success for
+work it did not do: a pipe swallowed a failed `cd` so a commit landed on a test
+run that never happened, and a batch whose last assertion failed silently
+discarded the earlier substitutions, leaving a call site referencing queries
+that were never written. Both times a tool caught it — `pytest`, then Ruff's
+F821 — rather than the author. Read back what the file now contains, or run the
+check that would fail if it did not. Same shape as `_upgrade_to` reading back
+`alembic current`.
+
 **A test must verify its own preconditions.** An exit code says a command
 ran, not that it achieved its purpose. `alembic upgrade` returning 0 does not
 mean the database reached that revision — read back `alembic current` and

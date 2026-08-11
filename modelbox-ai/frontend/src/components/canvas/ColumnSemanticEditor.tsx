@@ -3,6 +3,11 @@
 /**
  * ColumnSemanticEditor — the Visual Semantic Metric Builder popover.
  *
+ * Carries the Sprint 2 physical constraints — nullability, uniqueness, default
+ * and check — plus the column-level foreign-key target. `stable_id` is shown
+ * read-only: it is server-assigned and never reused, and a field that can be
+ * edited is not stable.
+ *
  * When a column is selected on the canvas, this floating editor lets the user
  * declare its semantic role: a MEASURE (with an aggregation) or a DIMENSION.
  * Edits set `is_metric` / `aggregation` on the column; Save (in the toolbar)
@@ -27,6 +32,14 @@ export default function ColumnSemanticEditor() {
     (c) => c.name === selectedColumn.columnName,
   );
   if (!node || !column) return null;
+
+  // Qualified targets a foreign key can point at: any column on another
+  // entity. Self-references are excluded — legal SQL, but almost always a
+  // modelling mistake on a canvas.
+  const referenceTargets = nodes
+    .filter((n) => n.id !== selectedColumn.entityName)
+    .flatMap((n) => n.data.columns.map((c) => `${n.id}.${c.name}`))
+    .sort();
 
   const isMeasure = column.is_metric;
   const agg = (column.aggregation ?? 'SUM').toUpperCase();
@@ -53,7 +66,15 @@ export default function ColumnSemanticEditor() {
           <div style={{ fontSize: 12, color: '#64748b' }}>
             <code>
               {selectedColumn.entityName}.{selectedColumn.columnName}
-            </code>{' '}
+            </code>
+            {column.stable_id != null && (
+              <span
+                style={{ marginLeft: 6 }}
+                title="Server-assigned stable identity. Never reused, never editable."
+              >
+                #{column.stable_id}
+              </span>
+            )}{' '}
             · {column.data_type}
           </div>
         </div>
@@ -272,6 +293,105 @@ export default function ColumnSemanticEditor() {
         </label>
       </div>
 
+      <div style={qualityBox}>
+        <div style={{ ...qualityLabel, marginBottom: 6 }}>Physical constraints</div>
+
+        <label style={checkRow}>
+          <input
+            type="checkbox"
+            checked={column.is_nullable === false}
+            disabled={Boolean(column.is_primary_key)}
+            onChange={(e) =>
+              updateColumn(
+                selectedColumn!.entityName,
+                selectedColumn!.columnName,
+                { is_nullable: !e.target.checked },
+              )
+            }
+          />
+          NOT NULL
+          {column.is_primary_key && (
+            <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>
+              (implied by the key)
+            </span>
+          )}
+        </label>
+
+        <label style={checkRow}>
+          <input
+            type="checkbox"
+            checked={Boolean(column.is_unique)}
+            onChange={(e) =>
+              updateColumn(
+                selectedColumn!.entityName,
+                selectedColumn!.columnName,
+                { is_unique: e.target.checked },
+              )
+            }
+          />
+          UNIQUE
+        </label>
+
+        <label style={fieldRow}>
+          <span style={qualityLabel}>Default</span>
+          <input
+            type="text"
+            value={column.default_value ?? ''}
+            placeholder="e.g. 0, CURRENT_TIMESTAMP"
+            onChange={(e) =>
+              updateColumn(
+                selectedColumn!.entityName,
+                selectedColumn!.columnName,
+                { default_value: e.target.value === '' ? null : e.target.value },
+              )
+            }
+            style={select}
+          />
+        </label>
+
+        <label style={fieldRow}>
+          <span style={qualityLabel}>Check expression</span>
+          <input
+            type="text"
+            value={column.check_expression ?? ''}
+            placeholder="e.g. amount >= 0"
+            onChange={(e) =>
+              updateColumn(
+                selectedColumn!.entityName,
+                selectedColumn!.columnName,
+                {
+                  check_expression:
+                    e.target.value === '' ? null : e.target.value,
+                },
+              )
+            }
+            style={select}
+          />
+        </label>
+
+        <label style={fieldRow}>
+          <span style={qualityLabel}>References</span>
+          <select
+            value={column.references ?? ''}
+            onChange={(e) =>
+              updateColumn(
+                selectedColumn!.entityName,
+                selectedColumn!.columnName,
+                { references: e.target.value === '' ? null : e.target.value },
+              )
+            }
+            style={select}
+          >
+            <option value="">— none —</option>
+            {referenceTargets.map((target) => (
+              <option key={target} value={target}>
+                {target}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <p style={{ fontSize: 11, color: '#94a3b8', margin: '10px 0 0' }}>
         Save the model to persist. Declared measures drive the exports; classified
         PII clears the exposure warning; quality rules export as dbt / ODCS tests.
@@ -334,6 +454,23 @@ const qualityBox: React.CSSProperties = {
   marginTop: 12,
   paddingTop: 10,
   borderTop: '1px solid #f1f5f9',
+};
+
+const checkRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  marginTop: 6,
+  fontSize: 13,
+  fontWeight: 600,
+  color: '#334155',
+};
+
+const fieldRow: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 3,
+  marginTop: 6,
 };
 
 const qualityLabel: React.CSSProperties = {

@@ -284,7 +284,12 @@ export const TEMPLATES: Template[] = [
         pii('full_name', 'VARCHAR(200)', 'NAME'),
         pii('ssn', 'CHAR(11)', 'SSN'),
         col('date_of_birth', 'DATE'),
-      ], { agg_time_column: 'date_of_birth' }),
+        // No agg_time_column: date_of_birth is this entity's only temporal
+        // column, but a birth date is not a default aggregation axis.
+        // Cohort-by-birth-year is a legitimate query, not the default time
+        // grain of a patient dimension — and a gold graph teaches whatever it
+        // shows. patient is dimension-only.
+      ]),
       ent('provider', 'TABLE', [
         pk('provider_id'),
         pii('full_name', 'VARCHAR(200)', 'NAME'),

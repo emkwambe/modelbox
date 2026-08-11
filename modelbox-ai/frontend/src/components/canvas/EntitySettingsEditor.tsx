@@ -118,6 +118,33 @@ export default function EntitySettingsEditor() {
         />
       </label>
 
+      <label style={field}>
+        <span style={lbl}>Aggregation time dimension</span>
+        <select
+          value={d.agg_time_column ?? ''}
+          onChange={(e) =>
+            updateEntity(selectedNodeId, {
+              agg_time_column: e.target.value || null,
+            })
+          }
+          style={input}
+        >
+          <option value="">— none —</option>
+          {d.columns
+            .filter((c) => isTemporal(c.data_type))
+            .map((c) => (
+              <option key={c.name} value={c.name}>
+                {c.name}
+              </option>
+            ))}
+        </select>
+        <span style={{ fontSize: 11, color: '#94a3b8' }}>
+          {d.columns.some((c) => isTemporal(c.data_type))
+            ? 'The default time axis for this entity’s measures.'
+            : 'No date or time column, so this entity has no time axis.'}
+        </span>
+      </label>
+
       <p style={{ fontSize: 11, color: '#94a3b8', margin: '8px 0 0' }}>
         Save to persist. Tier &amp; SLA flow into ODCS + dbt exports; a Tier 1/2
         asset without an SLA is flagged.
@@ -148,6 +175,14 @@ const header: React.CSSProperties = {
   justifyContent: 'space-between',
   gap: 8,
 };
+
+// A column is a candidate time axis when its declared type is a date or time.
+// Mirrors _is_temporal_type in app/schemas/data_model.py; the server rejects an
+// agg_time_column that is not temporal, so offering only these avoids inviting
+// a save the API will refuse.
+const TEMPORAL_TOKENS = ['TIMESTAMP', 'DATETIME', 'DATE', 'TIME'];
+const isTemporal = (dataType: string) =>
+  TEMPORAL_TOKENS.some((token) => dataType.toUpperCase().includes(token));
 
 const field: React.CSSProperties = {
   display: 'flex',

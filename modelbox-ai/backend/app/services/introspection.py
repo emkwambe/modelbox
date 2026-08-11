@@ -213,10 +213,17 @@ class IntrospectionService:
         out_fk: dict[str, int] = {}
         in_ref: dict[str, int] = {}
         fk_cols: set[tuple[str, str]] = set()
+        # Column-level FK target (M6). The relationship list already carries the
+        # edge; `references` records it on the column itself, which is the shape
+        # ODCS v3.1.0's property-level foreignKey needs (Sprint 3, C7).
+        fk_targets: dict[tuple[str, str], str] = {}
         for fk in foreign_keys:
             out_fk[fk["from_table"]] = out_fk.get(fk["from_table"], 0) + 1
             in_ref[fk["to_table"]] = in_ref.get(fk["to_table"], 0) + 1
             fk_cols.add((fk["from_table"], fk["from_column"]))
+            fk_targets[(fk["from_table"], fk["from_column"])] = (
+                f"{fk['to_table']}.{fk['to_column']}"
+            )
 
         entities: list[EntitySchema] = []
         for table in tables:
@@ -230,6 +237,7 @@ class IntrospectionService:
                     data_type=_map_type(col["data_type"], type_map),
                     is_primary_key=(table, col["column"]) in primary_keys,
                     is_foreign_key=(table, col["column"]) in fk_cols,
+                    references=fk_targets.get((table, col["column"])),
                     ordinal_position=col.get("ordinal"),
                     # `is_nullable` absent means the engine did not tell us;
                     # fall back to the SQL default rather than inventing NOT NULL.

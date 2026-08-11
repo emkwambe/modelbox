@@ -161,3 +161,65 @@ def test_existing_introspection_behaviour_is_unchanged() -> None:
     assert orders.columns[0].is_primary_key is True
     assert orders.columns[1].is_foreign_key is True
     assert model.relationships[0].cardinality == "N:1"
+
+
+# ---------------------------------------------------------------------------
+# references — the column-level FK target (M6)
+# ---------------------------------------------------------------------------
+def test_foreign_key_columns_carry_a_qualified_reference() -> None:
+    """`references` records the FK target on the column, not only as an edge.
+
+    The relationship list already describes the edge. ODCS v3.1.0's
+    property-level `foreignKey` needs it on the property, which is why M6 was
+    ruled "wire it" rather than "delete it" (correction C3).
+    """
+    model = IntrospectionService.build_graph(
+        ["orders", "customers"],
+        [
+            {"table": "orders", "column": "id", "data_type": "integer", "ordinal": 1},
+            {"table": "orders", "column": "buyer_id", "data_type": "integer",
+             "ordinal": 2},
+            {"table": "customers", "column": "id", "data_type": "integer",
+             "ordinal": 1},
+        ],
+        {("orders", "id"), ("customers", "id")},
+        [{"from_table": "orders", "from_column": "buyer_id",
+          "to_table": "customers", "to_column": "id"}],
+    )
+    orders = next(e for e in model.entities if e.entity_name == "orders")
+    by_name = {c.name: c for c in orders.columns}
+    assert by_name["buyer_id"].references == "customers.id"
+    assert by_name["id"].references is None, "a primary key is not a reference"
+
+    customers = next(e for e in model.entities if e.entity_name == "customers")
+    assert customers.columns[0].references is None, (
+        "the referenced column must not claim a reference of its own"
+    )
+
+
+def test_reference_target_names_the_parent_column_not_the_local_one() -> None:
+    """Role-playing FKs point at the parent's column, whatever they are called."""
+    model = IntrospectionService.build_graph(
+        ["shipments", "customers"],
+        [
+            {"table": "shipments", "column": "ship_to_id", "data_type": "integer",
+             "ordinal": 1},
+            {"table": "shipments", "column": "bill_to_id", "data_type": "integer",
+             "ordinal": 2},
+            {"table": "customers", "column": "customer_id", "data_type": "integer",
+             "ordinal": 1},
+        ],
+        {("customers", "customer_id")},
+        [
+            {"from_table": "shipments", "from_column": "ship_to_id",
+             "to_table": "customers", "to_column": "customer_id"},
+            {"from_table": "shipments", "from_column": "bill_to_id",
+             "to_table": "customers", "to_column": "customer_id"},
+        ],
+    )
+    shipments = next(e for e in model.entities if e.entity_name == "shipments")
+    assert [c.references for c in shipments.columns] == [
+        "customers.customer_id",
+        "customers.customer_id",
+    ]
+
