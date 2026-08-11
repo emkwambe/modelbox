@@ -16,6 +16,7 @@ zero-data-egress options for regulated industries.
 | :---- | :---- |
 | **Frontend** | Next.js 14 (App Router), React 18, TypeScript, `@xyflow/react`, Zustand, Monaco, Tailwind |
 | **Backend** | Python 3.11+, FastAPI, Pydantic v2, SQLGlot, NetworkX, Instructor, LiteLLM |
+| **Verified against** | `dbt parse`, `protoc`, `fastavro`, `sqlfluff`, DuckDB execution — see `backend/tests/test_artifact_fidelity.py` |
 | **Data** | PostgreSQL 16 (SQLAlchemy 2.0 async + asyncpg), Redis 7 |
 | **LLM** | OpenAI · Anthropic · Gemini · Mistral (EU) · Ollama · vLLM — via a LiteLLM routing gateway |
 
@@ -101,7 +102,27 @@ New providers are pure config — any OpenAI-compatible endpoint uses
 > metadata to any third-party cloud has residency/compliance implications —
 > for zero-egress guarantees use `AIRGAPPED=true` with local open-weights.
 
+## SQL dialects
+
+**Certified** — verified on every push by two independent dialect grammars, and
+for DuckDB by executing the emitted DDL against the engine itself:
+`postgres`, `snowflake`, `redshift`, `duckdb`.
+
+**Preview — not deployment-verified:** `bigquery`, `databricks`, `clickhouse`.
+These transpile, but the emitted DDL is not accepted by those engines as
+written (BigQuery requires `NOT ENFORCED` on key constraints; Databricks
+requires `NOT NULL` on primary keys; ClickHouse requires an `ENGINE` clause and
+forbids `Nullable` in a key). LookML is Preview for the same reason — no
+offline parser exists, so we cannot verify it. Promotion out of Preview is
+gated on the fidelity harness proving deployability.
+
 ## Governance & air-gap
+
+Prompt masking (`MASK_METADATA_IN_PROMPTS`) was **retired in v1.6.0**. It was
+documented but never implemented, and is not being built: obfuscating column
+names while the same request carries the source requirements document verbatim
+leaks the same semantics. Setting the flag now fails startup. Use air-gapped
+mode, which is a real control.
 
 Set `AIRGAPPED=true` to enforce **zero data egress** (FR-6.2): the LLM gateway
 strips every cloud provider from each task's routing chain and pins execution to
@@ -113,7 +134,12 @@ classification in `config/model_router.yaml` (any non-`local` egress — includi
 
 Tagging a commit with a semver tag publishes versioned images to GHCR via the
 `Release Images` workflow (`.github/workflows/release.yml`). Cut tags from a
-green `main` — CI gates every push.
+green `main`.
+
+CI (`.github/workflows/ci.yml`) runs on every branch and pull request, and six
+checks are required before merging to `main`: backend `pytest`, the artifact
+fidelity harness, `tsc --noEmit`, `next build`, `next lint`, and an Alembic
+single-head check — plus a version-consistency gate.
 
 ```bash
 git tag v1.2.0

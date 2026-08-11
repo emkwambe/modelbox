@@ -1,4 +1,16 @@
 # Data Quality Engineering: A Comprehensive Breakdown
+
+> **Status: research input — NOT IMPLEMENTED.**
+>
+> This document is an input to planning, not a description of shipped
+> behaviour, and nothing in it should be read as a specification or a
+> commitment. Promoting any part of it to the roadmap requires an ADR.
+>
+> Quarantined here on 2026-08-11 (Sprint 1, finding M10). Four unimplemented
+> research documents sitting alongside the PRD is how the claim drift catalogued
+> in `../PROJECT_STATE_REPORT.md` §2 arose. `README.md`, `PRD_TRD_v2.md` and the
+> release notes are reserved for promises the code keeps.
+
 ## Including Modern Best Practices for ModelBox AI Product Strategy & Course Development
 
 **Research Context:** Based on deep analysis of 43+ data modeling job postings (July–August 2026), data quality engineering appeared as a secondary responsibility in **~55% of roles** and is described as **inseparable from modern data modeling**. It is the implementation layer beneath governance — where policies become automated tests and contracts become enforceable guarantees.

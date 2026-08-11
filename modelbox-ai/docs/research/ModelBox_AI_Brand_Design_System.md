@@ -1,4 +1,16 @@
 # ModelBox AI: Brand Design System
+
+> **Status: research input — NOT IMPLEMENTED.**
+>
+> This document is an input to planning, not a description of shipped
+> behaviour, and nothing in it should be read as a specification or a
+> commitment. Promoting any part of it to the roadmap requires an ADR.
+>
+> Quarantined here on 2026-08-11 (Sprint 1, finding M10). Four unimplemented
+> research documents sitting alongside the PRD is how the claim drift catalogued
+> in `../PROJECT_STATE_REPORT.md` §2 arose. `README.md`, `PRD_TRD_v2.md` and the
+> release notes are reserved for promises the code keeps.
+
 ## Visual Identity, Color, Typography, and Application Guidelines
 
 **Version:** 1.0  

@@ -11,6 +11,128 @@ have never been validated by a real consumer toolchain and are broken in ways
 no current test can see**, and **the governance story, which is sold in the
 README but is a `return prompt` stub with no audit record whatsoever.** There is
 also **no CI at all**, despite README and release notes both asserting there is.
+*(That last clause is wrong — see Corrections, C1.)*
+
+---
+
+## CORRECTIONS
+
+*Added 2026-08-11 during Sprint 1. The report is the source of truth for finding
+IDs cited by the Blueprint, Sprint Plan, Acceptance Criteria register and the
+fidelity harness, so errors are corrected in place with a dated note rather than
+silently rewritten. Section bodies below are left as originally written; where a
+correction applies, it is flagged from here.*
+
+### C1 — §2, §6, §8, §9: **CI existed. Finding B2 as written is wrong.** *(auditor error)*
+
+The report states that `.github/` does not exist and that README, ROADMAP and the
+v1.5.0 release notes assert a CI pipeline that does not. **All of that is false.**
+
+`ls .github` was run from `modelbox-ai/`, the project subdirectory. The git
+repository root is one level above, at `modelbox/`, where
+`.github/workflows/ci.yml` and `.github/workflows/release.yml` are both present
+and tracked. `git rev-parse --show-toplevel` would have shown this, and the
+`modelbox-ai/…` prefixes already visible in `git status` output were a signal
+that was not followed up.
+
+At the time of the audit the CI workflow had run **59 times and was green on
+every recent `main` push**. `release.yml` is named "Release Images" and does
+exactly what `README.md:112-124` describes.
+
+Consequently these three §2/§8 rows were wrong, and are withdrawn:
+
+| Claim | Report said | Actually |
+| :-- | :-- | :-- |
+| README:112-124 — GHCR release via `.github/workflows/release.yml` | CLAIMED-BUT-ABSENT | **True** |
+| ROADMAP:16 — "CI on every push, GHCR release on tags" | CLAIMED-BUT-ABSENT | **Substantially true** |
+| RELEASE_NOTES_v1.5.0:3 — "CI: green" | False claim | **True and verifiable** |
+
+**What was actually true, and survives as the revised B2 (high, not blocker):**
+CI gated three of the six jobs the product needs — `pytest`, `tsc --noEmit`,
+`next build` — with no fidelity harness, no `next lint`, no alembic-head check
+and no version check. It triggered on `main` and PRs into `main` only, so
+feature branches were unguarded. And `main` carried **no branch protection**, so
+nothing *required* a green run to merge.
+
+The sprint's premise is unaffected and arguably sharpened: every exporter defect
+in §4 reached `main` *through* a green CI run, because the suite CI ran asserted
+exporter output by substring.
+
+**Closed in v1.6.0:** six required checks, triggers widened to all branches,
+branch protection enabled.
+
+### C2 — §4.2: **the dbt exporter does not produce a self-contained project.** *(auditor error)*
+
+§4.2 reports dbt output as parsing on 5/5 gold graphs "with two real defects."
+It does not parse at all. `generate_dbt_project` emits staging models
+referencing `{{ source('raw', …) }}` (`exporter_service.py:160`) but never emits
+a sources declaration, so `dbt parse` fails:
+
+```
+Compilation Error
+  Model 'model.pure.stg_dim_customer' depends on a source named
+  'raw.dim_customer' which was not found
+```
+
+The audit's dbt projects parsed only because the audit harness supplied a
+`_sources.yml` written by the auditor. §4.2 therefore verified the auditor's
+scaffolding, not the product — the same class of error the harness in
+`test_artifact_fidelity.py` exists to prevent.
+
+Recorded as **H9** (high) / register **B14**, Sprint 3, paired with M7 under
+"the emitted dbt project is self-contained." Asserted by
+`test_dbt_project_is_self_contained` (5 xfails).
+
+### C3 — §4.6 and DISAGREEMENT (e): **H2 was under-called.**
+
+The report describes ODCS output as "v3-shaped with a v0.9.3 stamp." Confirmed
+against the specification (Bitol, via context7, 2026-08-10): the current line is
+**v3.1.0**, and the emitted contract is a **hybrid of two standards missing two
+required fields**, not merely mis-stamped:
+
+- ODCS v3 requires top-level `version` and `status`; neither is emitted.
+- The emitted `info:` block belongs to the Data Contract Specification
+  (datacontract.com), a different standard.
+
+Split out as **H2-ext** / register **B7**, asserted by
+`test_odcs_conforms_to_v3_fundamentals`.
+
+### C4 — §5 and B3: the README never carried a masking claim.
+
+§5 and finding B3 are correct that masking was a no-op and that the flag was
+advertised in `config/model_router.yaml:20-21` and `.env.example`. But
+`README.md` contains no reference to masking at all — `README.md:106` is the
+AIRGAPPED zero-egress statement, which is accurate. Sprint 1's spec inherited the
+mis-citation. The claim was removed from the four surfaces that did carry it.
+
+**Closed in v1.6.0:** the flag now fails startup; `_maybe_mask` is deleted.
+
+### C5 — §6: the suite was 143 tests, not 129.
+
+Noted in §6 as written; restated here because the figure appears in planning
+documents. As of v1.6.0 the backend suite is **246 passed, 30 skipped, 80
+xfailed** in the app venv.
+
+### C6 — §4.5: LookML is Preview, not a repair target.
+
+§4.5 records LookML as UNVERIFIED-by-toolchain and lists its defects under M3.
+Ruled 2026-08-11: LookML drops to **Preview** alongside the three preview
+dialects — proprietary, no offline parser so permanently unverifiable here, and
+the install base does not justify the effort. M3 narrows to Cube only. The
+LookML assertions carry `@pytest.mark.preview` and are excluded from the Sprint 3
+burn-down.
+
+### Findings closed since the audit
+
+| Finding | Status |
+| :-- | :-- |
+| B2 | **Revised** (C1) and closed in v1.6.0 — six required checks, `main` protected |
+| B3 | Masking half closed in v1.6.0 (retired, fails startup, logging configured); egress ledger remains open for Sprint 5 |
+| H8 | Closed in v1.6.0 — `requirements.lock`, Linux-generated, reproduces byte-identically |
+| M5 | Closed in v1.6.0 — single canonical version, enforced in CI |
+| M9 | Partially closed — ESLint config added and `next lint` is a blocking CI job; the canvas smoke test remains Sprint 6 |
+| M10 | Closed in v1.6.0 — see the section below and `docs/research/` |
+| H9, M11 | **New**, found by the fidelity harness; scheduled for Sprint 3 |
 
 ---
 

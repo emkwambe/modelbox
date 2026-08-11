@@ -13,10 +13,21 @@
 | Canvas | React Flow, linter overlay, PII/grain badges, export panel, rename/delete |
 | Exporters | Multi-dialect DDL (SQLGlot), dbt staging + schema.yml, Cube.js, ZIP |
 | Platform | JWT auth, self-registration, workspace multi-tenancy, RBAC (OWNER/ADMIN/MEMBER) |
-| Infra | Docker appliance, Alembic migrations, CI on every push, GHCR release on tags |
+| Infra | Docker appliance, Alembic migrations, CI on every push and PR (six required checks, `main` protected), GHCR release on tags |
 | Providers | US (OpenAI/Anthropic/Gemini) · EU (Mistral) · APAC (DeepSeek/Kimi) · local (Ollama/vLLM) |
 
-**Honest gaps** (things the PRD implies but that are NOT built yet): reverse-engineering existing DBs, saving manual canvas edits back to the model, async (non-blocking) synthesis, schema diff/versioning, LookML/MetricFlow export, data contracts, audit trail, SSO/OIDC.
+**Honest gaps** *(revised 2026-08-11, Sprint 1)*. The previous list named six
+things as unbuilt that had since shipped — reverse-engineering, canvas
+persistence, async synthesis, schema diff, LookML/MetricFlow export, and data
+contracts all exist. What is genuinely missing:
+
+- **Egress audit trail** — no ledger records what left the box (B3, Sprint 5).
+- **SSO/OIDC hardening** — RS256 verifies, but `aud`/`iss` are unchecked (H7, Sprint 4).
+- **Exporter correctness** — MetricFlow does not parse in dbt, ODCS is not valid
+  v3.1.0, Protobuf tags are wire-unstable. See `PROJECT_STATE_REPORT.md` §9 and
+  the 76-item burn-down in `test_artifact_fidelity.py` (Sprint 3).
+- **IR completeness** — nullability, uniqueness, defaults and checks are not
+  expressible, so four exporters guess and guess differently (H4, Sprint 2).
 
 ---
 
@@ -80,8 +91,12 @@ Ranked by **leverage ÷ effort**. Effort: S ≈ days, M ≈ 1–2 wks, L ≈ 3+ 
 
 ## 3. Production hardening (parallel track)
 
-- **Secrets**: move API keys to Vault / AWS Secrets Manager (`hvac` already in deps) — currently plain `.env`.
-- **Observability**: structured JSON logs + request tracing + LLM token/cost metrics (gateway `_maybe_mask` / routing is the natural instrumentation point).
+- **Secrets**: move API keys to Vault / AWS Secrets Manager — currently plain `.env`.
+  *(Corrected 2026-08-11: `hvac` is **not** a dependency; this previously claimed it was.)*
+- **Observability**: request tracing + LLM token/cost metrics. Structured JSON logging
+  landed in v1.6.0 (`app/core/logging_config.py`); the gateway's routing call is the
+  instrumentation point, and the Sprint 5 egress ledger attaches there.
+  *(Corrected 2026-08-11: `_maybe_mask` was a no-op and has been deleted.)*
 - **Deploy story**: turn the GHCR images into a **Helm chart** / one-click cloud template (the appliance is compose-only today).
 - **Test depth**: add tests for the exporters against real dialect execution (Snowflake/Postgres containers) — TS-03 in the PRD QA matrix is currently unproven end-to-end.
 - **Frontend session**: consider `httpOnly` cookies over `localStorage` for JWT (audit F4) if the threat model tightens.
