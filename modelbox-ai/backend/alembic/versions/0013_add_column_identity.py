@@ -12,7 +12,12 @@ this migration are byte-identical to the ones emitted before it — which is the
 whole point of a field whose purpose is wire stability. ``column_id`` breaks
 ties because ``ordinal_position`` carries no uniqueness constraint.
 
-Revision ID: 0013_add_column_identity_and_constraints
+Revision ID: 0013_add_column_identity
+
+Note: alembic_version.version_num is VARCHAR(32). A longer revision id
+raises StringDataRightTruncation at the *end* of an otherwise successful
+upgrade, on a real database only — an empty-database test would not catch
+it, because the failure is in stamping the version, not in the DDL.
 Revises: 0012_add_column_quality_rules
 """
 
@@ -21,7 +26,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0013_add_column_identity_and_constraints"
+revision: str = "0013_add_column_identity"
 down_revision: str | None = "0012_add_column_quality_rules"
 branch_labels: str | None = None
 depends_on: str | None = None

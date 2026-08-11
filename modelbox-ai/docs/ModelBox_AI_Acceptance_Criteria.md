@@ -130,6 +130,24 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 
 ---
 
+## Verification standard
+
+Three times in Sprint 2 an assertion was written that could not have failed for
+the reason it claimed to test. Stated once here rather than rediscovered again:
+
+1. **Verify from outside the layer under test.** A backfill checked through the
+   ORM can be satisfied by a mapping bug; check it with raw SQL. An emitter rule
+   checked on data where the old and new rules agree proves nothing; supply a
+   discriminating case (correction C7).
+2. **A test must verify its own preconditions.** An exit code means a command
+   ran, not that it achieved its purpose.
+3. **Compare against the previous release, not against the current tree.** The
+   "before" side of a migration or compatibility test is produced from a git
+   worktree at the last tag, so new fields left unset cannot mask a difference.
+
+A criterion whose evidence violates any of these is NOT MET, whatever the test
+reports.
+
 ## Stop conditions
 
 If any of these becomes true, halt the sprint and escalate rather than working around it.

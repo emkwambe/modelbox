@@ -18,6 +18,20 @@ fact: the audit's dbt projects parsed only because the harness supplied a
 never executed. Every register criterion and every Proof Log entry rests on the
 claim that stated evidence was actually produced.
 
+**A test must verify its own preconditions.** An exit code says a command
+ran, not that it achieved its purpose. `alembic upgrade` returning 0 does not
+mean the database reached that revision — read back `alembic current` and
+assert it. Three harness bugs in Sprint 2 were all this same shape: a fixed
+port that bound to a previous run's container, an exit code taken for arrival,
+and a SQL `GROUP BY` on a non-unique name. Each produced a confident wrong
+answer rather than an error.
+
+**Verify from outside the layer under test.** Checking a persistence backfill
+by reading it through the ORM lets a mapping bug satisfy the assertion; check
+it with raw SQL. Checking an emitter rule against data where two rules produce
+the same output proves nothing; supply a case where they differ. Register
+verification standard.
+
 ## Environments
 
 - `backend/.venv` — the application and `pytest`.

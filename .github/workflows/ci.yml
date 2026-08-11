@@ -168,6 +168,11 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          # Full history and tags: the populated-database verification builds a
+          # git worktree at the previous release tag, so the "before" side is
+          # produced by the code that shipped rather than the current tree.
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -193,6 +198,37 @@ jobs:
             echo "::error::expected exactly 1 alembic head, found $count"
             exit 1
           fi
+
+      - name: Assert every revision id fits alembic_version
+        # alembic_version.version_num is VARCHAR(32). A longer id raises
+        # StringDataRightTruncation *after* the DDL succeeds, while stamping the
+        # version — so `alembic heads` above reports clean and an empty-database
+        # test passes. Sprint 2 shipped a 40-character id and only a real
+        # Postgres upgrade caught it.
+        run: |
+          cd modelbox-ai/backend
+          python - <<'PY'
+          import pathlib, re, sys
+          bad = []
+          for path in pathlib.Path("alembic/versions").glob("*.py"):
+              match = re.search(r'^revision:\s*str\s*=\s*"([^"]+)"',
+                                path.read_text(encoding="utf-8"), re.M)
+              if match and len(match.group(1)) > 32:
+                  bad.append((len(match.group(1)), match.group(1)))
+          for length, rev in bad:
+              print(f"::error::revision id is {length} chars (max 32): {rev}")
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Verify migrations against a populated database
+        # The empirical case for this job: see the revision-id check above.
+        # Local checks cannot substitute for a real upgrade against the engine.
+        env:
+          MODELBOX_MIGRATION_STRICT: "1"
+        run: |
+          cd modelbox-ai/backend
+          # Full history is needed: the "before" side is a worktree at the last tag.
+          pytest tests/test_migration_0013_populated.py -v --no-header
 
   versions:
     name: Version Consistency

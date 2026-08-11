@@ -18,7 +18,7 @@ below needs re-deriving — every decision here has already been ruled.
 | 2 — `stable_id` (Q6, C3) | **schema+ORM+repo done**, tests pending | this commit |
 | 3 — constraint fields (H4, C2 capability half) | **schema+ORM+repo done**, introspection pending | this commit |
 | 4 — `agg_time_column` (B1's fourth defect) | **schema+ORM+repo done**, gold graphs pending | this commit |
-| 5 — migration written; populated-DB verification (C8) | **migration `0013` written**, verification pending | this commit |
+| 5 — migration + populated-DB verification (C8) | **DONE** — 3/3, byte-identity held | `31443a6` + Task 5 commit |
 | 6 — `references` populate/persist (M6, C7 partial) | not started | |
 | 7 — canvas controls | not started | |
 | 8 — synthesis prompt | not started | |
@@ -167,6 +167,30 @@ rows a column deletion would otherwise orphan. Allocation lives in
 Migration `0013` is additive: add nullable → backfill → tighten. `stable_id` is
 backfilled as `row_number() OVER (PARTITION BY entity_id ORDER BY
 ordinal_position, column_id)`, which reproduces today's Protobuf tags exactly.
+
+## Task 5 outcome
+
+**Passed, 3/3.** No discovery: emitters are deterministic. ~150 artifacts per
+model — DDL x7, dbt, Cube, LookML, MetricFlow, ODCS, Avro, Protobuf, dictionary
+x3, seed x2 — byte-identical across a real PostgreSQL migration, with the
+"before" side produced by a v1.6.0 worktree. Recorded as **PL-005**; that
+assumption underpinned every other Proof Log entry and was previously untested.
+
+It caught a real bug: revision id `0013_add_column_identity_and_constraints` was
+40 characters and `alembic_version.version_num` is `VARCHAR(32)`, so a populated
+upgrade failed *after* the DDL succeeded, while stamping. `alembic heads`
+reported clean and an empty-database test would have passed. Shortened to 24;
+CI now checks every revision id's length and runs the populated verification on
+every push. That is the empirical case for the Postgres service.
+
+Three harness bugs, all self-found, all the same shape — asserting a
+precondition that was never verified: a fixed port binding to a previous run's
+container, a zero exit code taken as arrival, and a `GROUP BY` on `entity_name`
+when `dim_customer` exists in two models. Generalised into the register's
+verification standard and `CLAUDE.md`.
+
+Backfill is asserted **against raw SQL**, not through the ORM, so a mapping bug
+cannot satisfy it.
 
 ## Execution order — RULED, supersedes `SPRINT_2_PROMPT.md`
 
