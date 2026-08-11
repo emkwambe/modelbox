@@ -218,6 +218,15 @@ class GraphRepository:
             row.is_unique = col.is_unique
             row.default_value = col.default_value
             row.check_expression = col.check_expression
+            # One concept, three names, and all three are correct:
+            #   ColumnSchema.references      the IR — the published contract
+            #   entity_columns.reference_target
+            #                                storage — REFERENCES is reserved SQL
+            #   ODCS v3.1.0 `foreignKey`     the emitted artifact (Sprint 3, C7)
+            # This assignment is the only place the IR and storage names are
+            # translated. Do not "fix" the mismatch by renaming either side:
+            # the column name would break Postgres, and the IR name is a
+            # published contract the canvas and every export already use.
             row.reference_target = col.references
             row.ordinal_position = (
                 col.ordinal_position if col.ordinal_position is not None else position

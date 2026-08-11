@@ -168,6 +168,20 @@ Migration `0013` is additive: add nullable → backfill → tighten. `stable_id`
 backfilled as `row_number() OVER (PARTITION BY entity_id ORDER BY
 ordinal_position, column_id)`, which reproduces today's Protobuf tags exactly.
 
+## Execution order — RULED, supersedes `SPRINT_2_PROMPT.md`
+
+**5 → 9 → 3 → 4 → 6–8.** The prompt's numbering is not the execution order.
+
+Round-trip tests (9) come before introspection (3), gold graphs (4) and the
+canvas (6–8). `stable_id` allocation is the piece most likely to be subtly
+wrong and is currently exercised only incidentally by the existing suite.
+
+The sharper reason is correction C7. A test that cannot distinguish the correct
+implementation from the current one is worthless, and *untested allocation
+logic* is the same hazard one step earlier: everything built on top of it would
+appear to work while resting on an unverified invariant. Verify the invariant,
+then build on it.
+
 ### Still to do on these tasks
 
 - Introspection does not yet populate `is_nullable`/`default_value` (all four
@@ -211,3 +225,37 @@ Against a disposable Postgres container, never the appliance volume.
 
 Ruled: **add a `postgres` service to the existing backend CI job** so this runs
 on every push. It does not add a seventh required check.
+
+### If step 5 fails, it is a discovery, not a migration bug
+
+The byte-identical export assertion is this sprint's real gate, and it has not
+run yet. Sprint 2 changes no emitter, so **the same model must produce the same
+bytes before and after the migration.** If it does not, the first hypothesis is
+*not* that the migration is wrong.
+
+It means something in the emitters is already non-deterministic — dictionary or
+set iteration order, an unsorted `glob`, a timestamp, a hash seed — and that
+would be a **new finding outranking most of what is on the board**, because
+every fidelity verdict, every Proof Log entry and the whole byte-comparison
+method rest on emitters being pure functions of the IR. Two of the three
+Sprint 1 Proof Log entries assume it.
+
+Treat a failure as something to characterise and report, not to debug into
+submission until the diff goes away. Establish first *which* artifact differs
+and *how*, then decide whether it is the migration or the emitter.
+
+## For the PR body and the Proof Log
+
+**H6 reproduced by the fix for H6.** The watermark had to move off
+delete-and-recreate persistence, and the reason is the most instructive thing
+in this sprint: a watermark stored on a row that `replace_graph` deleted on
+every save would have been destroyed on first save, ids re-derived from
+scratch, and a tag reissued that a deployed Protobuf consumer still associates
+with an older field. That is precisely the defect `stable_id` exists to
+prevent — latent inside its own remedy, and invisible until you ask what
+happens on the *second* save.
+
+**Sprint 8 lab candidate: "the fix that recreates the bug."** A real defect, a
+real mechanism, and a fix whose first draft reintroduces the thing it was
+written to eliminate. Better teaching material than an artificial flaw, and it
+comes with a verifiable end state — `stable_id` unchanged across two saves.
