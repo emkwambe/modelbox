@@ -964,22 +964,52 @@ def test_odcs_conforms_to_v3_fundamentals(gid: str) -> None:
     "record_source. Needs ColumnSchema.is_nullable from Sprint 2."
 ))
 def test_odcs_required_reflects_nullability(gid: str) -> None:
-    """`required` must derive from a nullability declaration, not from the PK flag."""
-    assert "is_nullable" in ColumnSchema.model_fields, (
-        "ColumnSchema cannot express nullability, so `required` cannot be "
-        "derived from it (Sprint 2, H4)"
-    )
+    """`required` must derive from declared nullability, not from the PK flag.
+
+    Asserted against a *mutated* copy in which one non-key column per entity is
+    marked non-nullable, because on the gold graphs as authored the two rules
+    are indistinguishable: with ``is_nullable`` defaulting to ``True`` and
+    primary keys forced ``False``, ``not is_nullable`` and ``is_primary_key``
+    agree on every column. A test that cannot tell the correct implementation
+    from the current one would go green the moment Sprint 2 added the field,
+    against an emitter that still never read it — passing for the wrong reason.
+    See PROJECT_STATE_REPORT.md correction C7.
+    """
+    if "is_nullable" not in ColumnSchema.model_fields:
+        pytest.fail(
+            "ColumnSchema cannot express nullability, so `required` cannot be "
+            "derived from it (Sprint 2, H4)"
+        )
+
+    fixture = GOLD[gid]
+    model = fixture.model.model_copy(deep=True)
+    # One non-key column per entity forced non-nullable: the counterexample the
+    # authored graphs do not contain.
+    discriminating: list[str] = []
+    for entity in model.entities:
+        for column in entity.columns:
+            if not column.is_primary_key:
+                column.is_nullable = False
+                discriminating.append(f"{entity.entity_name}.{column.name}")
+                break
+    assert discriminating, "fixture sanity: no entity has a non-key column"
+
     columns = {
-        (e.entity_name, c.name): c
-        for e in GOLD[gid].model.entities for c in e.columns
+        (e.entity_name, c.name): c for e in model.entities for c in e.columns
     }
-    for table in _odcs(GOLD[gid])["schema"]:
+    contract = yaml.safe_load(
+        exporter().export_data_contract(model, "odcs", fixture.dataset_name)[
+            "datacontract.yaml"
+        ]
+    )
+    for table in contract["schema"]:
         for prop in table["properties"]:
             column = columns[(table["name"], prop["name"])]
-            expected = not getattr(column, "is_nullable")
+            expected = not column.is_nullable
             assert prop["required"] is expected, (
                 f"{table['name']}.{prop['name']}: required={prop['required']} "
-                f"but is_nullable={getattr(column, 'is_nullable')}"
+                f"but is_nullable={column.is_nullable} — `required` is "
+                f"restating is_primary_key ({column.is_primary_key})"
             )
 
 

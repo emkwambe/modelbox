@@ -145,6 +145,14 @@ If any of these becomes true, halt the sprint and escalate rather than working a
 4. A criterion is met by weakening its test rather than fixing the product. This is the
    single most likely failure mode of a self-graded register, and the reason every
    criterion names external evidence.
+
+   Its quieter variant, found in Sprint 2: **a criterion met by a test that cannot
+   distinguish the correct implementation from the current one is NOT MET.** A test
+   passes for the wrong reason when the data it runs on makes two different rules
+   produce identical output — nobody weakens anything, and the criterion closes on a
+   defect that was never fixed. When a criterion depends on a new field, check that the
+   fixtures contain a case where old and new behaviour actually differ. See correction
+   C7.
 5. A public claim ships without a Proof Log ID. The entire trust argument collapses on
    the first instance.
 6. Phase I extends past ten weeks. The engineering is well-mapped; a large overrun means
