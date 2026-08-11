@@ -10,6 +10,7 @@
       "grain": null,
       "tier": null,
       "freshness_sla": null,
+      "agg_time_column": null,
       "canvas_position_x": 0,
       "canvas_position_y": 0,
       "columns": [
@@ -82,6 +83,7 @@
       "grain": null,
       "tier": null,
       "freshness_sla": null,
+      "agg_time_column": null,
       "canvas_position_x": 320,
       "canvas_position_y": 0,
       "columns": [
@@ -154,6 +156,7 @@
       "grain": "One row per order line item.",
       "tier": null,
       "freshness_sla": null,
+      "agg_time_column": null,
       "canvas_position_x": 640,
       "canvas_position_y": 0,
       "columns": [

@@ -10,6 +10,7 @@
       "grain": null,
       "tier": null,
       "freshness_sla": null,
+      "agg_time_column": "date_of_birth",
       "canvas_position_x": 0,
       "canvas_position_y": 0,
       "columns": [
@@ -82,6 +83,7 @@
       "grain": null,
       "tier": null,
       "freshness_sla": null,
+      "agg_time_column": null,
       "canvas_position_x": 320,
       "canvas_position_y": 0,
       "columns": [
@@ -139,6 +141,7 @@
       "grain": null,
       "tier": null,
       "freshness_sla": null,
+      "agg_time_column": "encounter_ts",
       "canvas_position_x": 640,
       "canvas_position_y": 0,
       "columns": [
@@ -211,6 +214,7 @@
       "grain": null,
       "tier": null,
       "freshness_sla": null,
+      "agg_time_column": null,
       "canvas_position_x": 0,
       "canvas_position_y": 240,
       "columns": [

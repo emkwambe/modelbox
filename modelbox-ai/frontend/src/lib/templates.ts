@@ -64,7 +64,7 @@ function ent(
   entity_name: string,
   entity_type: Entity['entity_type'],
   columns: Column[],
-  extra: Partial<Pick<Entity, 'description' | 'grain'>> = {},
+  extra: Partial<Pick<Entity, 'description' | 'grain' | 'agg_time_column'>> = {},
 ): Entity {
   return {
     entity_name,
@@ -74,6 +74,10 @@ function ent(
     columns,
     description: extra.description ?? null,
     grain: extra.grain ?? null,
+    // The entity's default time axis for measures. Null where the entity has
+    // no temporal column at all — six of the fifteen entities here — in which
+    // case it gets no measures rather than an invented time dimension.
+    agg_time_column: extra.agg_time_column ?? null,
   };
 }
 
@@ -126,7 +130,10 @@ export const TEMPLATES: Template[] = [
           col('valid_to', 'DATE'),
           col('is_current', 'BOOLEAN'),
         ],
-        { description: 'SCD Type 2 customer dimension.' },
+        {
+          description: 'SCD Type 2 customer dimension.',
+          agg_time_column: 'valid_from',
+        },
       ),
       ent('dim_plan', 'DIMENSION', [
         pk('plan_sk'),
@@ -146,7 +153,10 @@ export const TEMPLATES: Template[] = [
           metric('seats', 'INTEGER'),
           col('is_churned', 'BOOLEAN'),
         ],
-        { grain: 'One row per subscription per month.' },
+        {
+          grain: 'One row per subscription per month.',
+          agg_time_column: 'month',
+        },
       ),
     ]),
     relationships: [
@@ -225,25 +235,25 @@ export const TEMPLATES: Template[] = [
         col('customer_bk', 'VARCHAR(64)', { description: 'Business key' }),
         col('load_dts', 'TIMESTAMP'),
         col('record_source', 'VARCHAR(64)'),
-      ]),
+      ], { agg_time_column: 'load_dts' }),
       ent('hub_account', 'HUB', [
         pk('account_hk', 'CHAR(32)'),
         col('account_bk', 'VARCHAR(64)'),
         col('load_dts', 'TIMESTAMP'),
         col('record_source', 'VARCHAR(64)'),
-      ]),
+      ], { agg_time_column: 'load_dts' }),
       ent('lnk_transaction', 'LINK', [
         pk('transaction_hk', 'CHAR(32)'),
         fk('account_hk', 'CHAR(32)'),
         fk('customer_hk', 'CHAR(32)'),
         col('load_dts', 'TIMESTAMP'),
-      ]),
+      ], { agg_time_column: 'load_dts' }),
       ent('sat_account_details', 'SATELLITE', [
         fk('account_hk', 'CHAR(32)'),
         col('load_dts', 'TIMESTAMP'),
         col('status', 'VARCHAR(32)'),
         metric('balance'),
-      ]),
+      ], { agg_time_column: 'load_dts' }),
     ]),
     relationships: [
       rel('lnk_transaction.account_hk', 'hub_account.account_hk'),
@@ -274,7 +284,7 @@ export const TEMPLATES: Template[] = [
         pii('full_name', 'VARCHAR(200)', 'NAME'),
         pii('ssn', 'CHAR(11)', 'SSN'),
         col('date_of_birth', 'DATE'),
-      ]),
+      ], { agg_time_column: 'date_of_birth' }),
       ent('provider', 'TABLE', [
         pk('provider_id'),
         pii('full_name', 'VARCHAR(200)', 'NAME'),
@@ -285,7 +295,7 @@ export const TEMPLATES: Template[] = [
         fk('patient_id'),
         fk('provider_id'),
         col('encounter_ts', 'TIMESTAMP'),
-      ]),
+      ], { agg_time_column: 'encounter_ts' }),
       ent('diagnosis', 'TABLE', [
         pk('diagnosis_id'),
         fk('encounter_id'),
@@ -331,7 +341,10 @@ export const TEMPLATES: Template[] = [
           metric('attributed_revenue'),
           col('is_conversion', 'BOOLEAN'),
         ],
-        { grain: 'One row per user touchpoint (fully denormalized).' },
+        {
+          grain: 'One row per user touchpoint (fully denormalized).',
+          agg_time_column: 'event_ts',
+        },
       ),
     ]),
     relationships: [],

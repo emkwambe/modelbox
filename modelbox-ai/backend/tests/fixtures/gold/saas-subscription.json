@@ -10,6 +10,7 @@
       "grain": null,
       "tier": null,
       "freshness_sla": null,
+      "agg_time_column": "valid_from",
       "canvas_position_x": 0,
       "canvas_position_y": 0,
       "columns": [
@@ -127,6 +128,7 @@
       "grain": null,
       "tier": null,
       "freshness_sla": null,
+      "agg_time_column": null,
       "canvas_position_x": 320,
       "canvas_position_y": 0,
       "columns": [
@@ -199,6 +201,7 @@
       "grain": "One row per subscription per month.",
       "tier": null,
       "freshness_sla": null,
+      "agg_time_column": "month",
       "canvas_position_x": 640,
       "canvas_position_y": 0,
       "columns": [

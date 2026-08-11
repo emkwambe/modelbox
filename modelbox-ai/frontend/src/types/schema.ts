@@ -82,6 +82,19 @@ export interface Column {
   min_value?: number | null;
   max_value?: number | null;
   regex_pattern?: string | null;
+  /**
+   * Server-assigned stable identity (Sprint 2). Allocated once and never
+   * reused, so it is safe as a Protobuf field tag and lets the diff engine
+   * tell a rename from a drop-plus-add. Echo it back unchanged on save;
+   * never edit it, and never invent one for a new column.
+   */
+  stable_id?: number | null;
+  // Physical constraints (Sprint 2). is_nullable defaults to true — the SQL
+  // default — and is forced false on primary keys by the server.
+  is_nullable?: boolean;
+  is_unique?: boolean;
+  default_value?: string | null;
+  check_expression?: string | null;
 }
 
 export interface Entity {
@@ -91,6 +104,13 @@ export interface Entity {
   grain?: string | null;
   tier?: AssetTier | null;
   freshness_sla?: string | null;
+  /**
+   * Default aggregation time dimension: the name of a temporal column on this
+   * entity. MetricFlow requires `defaults.agg_time_dimension` on any semantic
+   * model declaring measures. Null is legitimate — an entity with no temporal
+   * column has no time axis, and gets no measures rather than an invented one.
+   */
+  agg_time_column?: string | null;
   canvas_position_x: number;
   canvas_position_y: number;
   columns: Column[];
@@ -305,6 +325,7 @@ export interface EntityNodeData extends Record<string, unknown> {
   grain?: string | null;
   tier?: AssetTier | null;
   freshness_sla?: string | null;
+  agg_time_column?: string | null;
   columns: Column[];
 }
 
