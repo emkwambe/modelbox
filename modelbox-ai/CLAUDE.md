@@ -28,6 +28,13 @@ F821 — rather than the author. Read back what the file now contains, or run th
 check that would fail if it did not. Same shape as `_upgrade_to` reading back
 `alembic current`.
 
+**A round-trip test cannot see a defect the round-trip itself corrects.** If
+the path under test normalises its input in transit, the assertion measures the
+repair. Assert at construction as well as after a save. A Pydantic
+`field_validator` never fires on an unsupplied field, so a rule that looks
+enforced can be doing nothing on every real payload while a save-reload test
+passes — see register verification standard 5.
+
 **A test must verify its own preconditions.** An exit code says a command
 ran, not that it achieved its purpose. `alembic upgrade` returning 0 does not
 mean the database reached that revision — read back `alembic current` and
@@ -46,6 +53,13 @@ by reading it through the ORM lets a mapping bug satisfy the assertion; check
 it with raw SQL. Checking an emitter rule against data where two rules produce
 the same output proves nothing; supply a case where they differ. Register
 verification standard.
+
+**Prefer a direct file edit to a shell heredoc for source changes.** Escapes in
+`
+`-bearing string literals get mangled going through bash, which cost three
+retries in one sprint. When a scripted multi-file edit really is the right tool,
+validate every anchor against the file *before* writing anything, so a late
+mismatch cannot leave a file half-edited.
 
 ## Environments
 

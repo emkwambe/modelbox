@@ -155,6 +155,22 @@ the reason it claimed to test. Stated once here rather than rediscovered again:
    `MODELBOX_MIGRATION_STRICT`) that turns absence into failure, and remove the
    cause where you can (`fetch-depth: 0`).
 
+5. **A round-trip test cannot see a defect the round-trip itself corrects.**
+   If the path under test normalises its input on the way through, the assertion
+   measures the repair rather than the thing being tested. Assert at
+   construction as well as after a save.
+
+   Worked example, Sprint 2. `_primary_keys_are_never_nullable` was a Pydantic
+   `field_validator`, and Pydantic does not validate a field that was never
+   supplied — so it did nothing whenever `is_nullable` was omitted, which is
+   every LLM response and every gold graph. The round-trip test passed anyway,
+   because reloading constructs `ColumnSchema` with every field explicit and
+   the rule fired on the way back. The IR was wrong at construction and correct
+   after a save. `POST /model/synthesize` returns the model **directly**, so a
+   freshly synthesised primary key stayed nullable and Sprint 3 would have
+   emitted no `NOT NULL` for it — silently defeating H4, the whole purpose of
+   the sprint that introduced the field.
+
 A criterion whose evidence violates any of these is NOT MET, whatever the test
 reports.
 
