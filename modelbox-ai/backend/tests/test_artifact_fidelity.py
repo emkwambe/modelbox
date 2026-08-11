@@ -1013,6 +1013,55 @@ def test_odcs_required_reflects_nullability(gid: str) -> None:
             )
 
 
+@pytest.mark.xfail(
+    reason="H10: quality entries are emitted as {'rule': 'range', "
+           "'mustBeGreaterThanOrEqualTo': ...}. `rule` is not an ODCS key. A "
+           "v3.1.0 property-level entry is {id, metric, mustBe*, arguments, "
+           "unit, description} with an optional type of library|sql|custom. "
+           "Reachable only through the synthetic fixture, since no gold graph "
+           "declares a quality rule — which is why the audit missed it. "
+           "Assigned to Sprint 4.",
+    strict=True,
+)
+def test_odcs_quality_entries_use_v3_vocabulary() -> None:
+    """Quality blocks must speak ODCS, not an invented dialect.
+
+    Spec: https://github.com/bitol-io/open-data-contract-standard/blob/main/docs/data-quality.md
+    Confirmed via context7 on 2026-08-11. A library rule carries `metric` and a
+    `mustBe*` comparator; a SQL rule carries `type: sql` and `query`. There is
+    no `rule` key at any level.
+    """
+    fixture = SYNTHETIC["quality-rules"]
+    contract = yaml.safe_load(
+        exporter().export_data_contract(fixture.model, "odcs", fixture.dataset_name)[
+            "datacontract.yaml"
+        ]
+    )
+    entries = [
+        (table["name"], prop["name"], entry)
+        for table in contract["schema"]
+        for prop in table["properties"]
+        for entry in prop.get("quality", [])
+    ]
+    assert entries, "fixture no longer exercises H10"
+
+    offending: list[str] = []
+    for table, prop, entry in entries:
+        where = f"{table}.{prop}"
+        if "rule" in entry:
+            offending.append(f"{where}: 'rule' is not an ODCS key ({entry})")
+            continue
+        kind = entry.get("type", "library")
+        if kind == "sql":
+            if "query" not in entry:
+                offending.append(f"{where}: a sql rule needs a query")
+        elif "metric" not in entry:
+            offending.append(f"{where}: a library rule needs a metric ({entry})")
+        if not any(k == "mustBe" or k.startswith("mustBe") for k in entry):
+            offending.append(f"{where}: no mustBe* comparator ({entry})")
+    assert not offending, offending
+
+
 # ===========================================================================
 # 7. Avro
 # ===========================================================================

@@ -147,6 +147,51 @@ Generalised as stop condition 4 in the Acceptance Criteria register: a criterion
 met by a test that cannot distinguish the correct implementation from the
 current one is NOT MET.
 
+### C7-a — the ODCS foreign-key construct was named wrongly in C3
+
+*Added 2026-08-11 during Sprint 3.*
+
+Correction C3 stated that ODCS v3.1.0 has "native property-level `foreignKey`",
+and Sprint 2's M6 ruling ("wire it, don't delete it") rested on that. **The
+ruling holds — `ColumnSchema.references` does have a real downstream consumer —
+but the construct was named wrongly.**
+
+Verified against Bitol's `references.md` via context7:
+
+* **Property level** uses `relationships`, with `from` implicit:
+  `relationships: [{to: <object>.<property>}]`.
+* `type: foreignKey` is the **schema-level** construct, and there both `from`
+  and `to` are required.
+
+The shorthand notation `<object>.<property>` happens to be exactly the shape
+`ColumnSchema.references` already stores, so it maps across with no
+transformation. That is a lucky outcome rather than a designed one — the field
+predates the ruling and was never shaped against this spec.
+
+Also recorded, because Sprint 3's task list had it incomplete: the **required
+top-level set is `apiVersion`, `kind`, `id`, `version`, `status`**. `name` is
+optional and `dataProduct` is deprecated since v3.1.0. The task list named only
+`version` and `status`.
+
+### H10 — ODCS quality blocks are not valid v3.1.0
+
+*Added 2026-08-11 during Sprint 3, found while verifying C7-a.*
+
+`_odcs_quality` (`exporter_service.py:969-982`) emits
+`{"rule": "range", "mustBeGreaterThanOrEqualTo": …}` and
+`{"rule": "regex", "pattern": …}`. **`rule` is not an ODCS key.** A v3.1.0
+property-level quality entry is `{id, metric, mustBe*, arguments, unit,
+description}` with an optional `type` of `library`, `sql` or `custom`.
+
+No gold graph declares a quality rule, so this is reachable only through the
+synthetic `quality-rules` fixture — which is why the audit's ODCS work never
+surfaced it.
+
+Severity high, not blocker: the surrounding contract is valid and a consumer
+ignoring an unrecognised block still gets a usable document. **Assigned to
+Sprint 4**, entered into the inventory now as an xfail so it is a test rather
+than a paragraph.
+
 ### Findings closed since the audit
 
 | Finding | Status |
