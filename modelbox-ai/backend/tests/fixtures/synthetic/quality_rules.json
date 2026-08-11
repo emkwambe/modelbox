@@ -1,0 +1,82 @@
+{
+  "id": "quality-rules",
+  "title": "Quality Rules (defect fixture)",
+  "paradigm": "3NF",
+  "defect": "H1, M7",
+  "rationale": "The seed generator must honour the same min_value/max_value/regex_pattern/length the model exports as dbt and ODCS assertions, and the dbt project must declare the dbt_expectations package it depends on.",
+  "entities": [
+    {
+      "entity_name": "order_scores",
+      "entity_type": "TABLE",
+      "description": "Order quality scores carrying declared range, pattern, and length constraints.",
+      "grain": "One row per scored order.",
+      "tier": null,
+      "freshness_sla": null,
+      "canvas_position_x": 0,
+      "canvas_position_y": 0,
+      "columns": [
+        {
+          "name": "order_score_id",
+          "data_type": "INTEGER",
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": "Surrogate key.",
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "satisfaction_score",
+          "data_type": "NUMERIC(5,2)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": "Customer satisfaction, bounded 0.0 to 5.0 inclusive.",
+          "references": null,
+          "is_metric": true,
+          "aggregation": "avg",
+          "min_value": 0.0,
+          "max_value": 5.0,
+          "regex_pattern": null
+        },
+        {
+          "name": "ref_code",
+          "data_type": "VARCHAR(8)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": "Reference code, three uppercase letters then four digits.",
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": "^[A-Z]{3}-\\d{4}$"
+        },
+        {
+          "name": "short_label",
+          "data_type": "VARCHAR(6)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": "Deliberately narrow, to catch generated values overflowing the declared length.",
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        }
+      ]
+    }
+  ],
+  "relationships": []
+}

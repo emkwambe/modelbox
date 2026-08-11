@@ -6,8 +6,9 @@ graph, then runs the topological checks the canvas relies on (FR-2.3):
 * cyclic foreign-key detection,
 * missing-primary-key linting,
 * dangling-reference detection,
-* dependency layering / topological ordering (used by OBT denormalization and
-  deterministic DDL emission order).
+* dependency layering / topological ordering (used by the synthetic seed
+  generator to order INSERTs; **not** currently used for DDL emission order —
+  see :meth:`GraphEngine.topological_order`).
 
 This is Component A from TRD §2.2. Business logic lives here as a reusable
 service class — API handlers only orchestrate it.
@@ -109,6 +110,15 @@ class GraphEngine:
 
         Raises ``networkx.NetworkXUnfeasible`` if the graph contains a cycle;
         callers should run :meth:`detect_cycles` first when that is possible.
+
+        .. warning::
+           Used by :class:`~app.services.seed_generator.SyntheticSeedGenerator`
+           only. ``ExporterService.generate_ddl`` does **not** call this and
+           emits in declaration order, so a model whose entities are not
+           declared parent-first produces DDL that fails on its first
+           statement (finding H5, Sprint 3). The module docstring previously
+           claimed this function ordered DDL emission; it never did, and that
+           claim is why the defect went unnoticed.
         """
         # Reverse so referenced (parent) entities come first.
         return list(nx.topological_sort(graph.reverse(copy=False)))

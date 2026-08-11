@@ -52,7 +52,7 @@ ModelBox is a **deterministic NL/DDL → typed-graph → multi-dialect codegen p
 - **FR-1.2 Canvas persistence:** node positions, column add/edit/delete, and relationship cardinality edits MUST persist via a stateful graph endpoint, re-validated on save.
 
 **Module 2 — Migration, Brownfield & Contracts**
-- **FR-2.1 Introspection:** connect to PostgreSQL / Snowflake / BigQuery / DuckDB, pull `INFORMATION_SCHEMA` into a `SynthesizedModel` graph, save as a model.
+- **FR-2.1 Introspection:** connect to PostgreSQL / Snowflake / BigQuery / MySQL, pull `INFORMATION_SCHEMA` into a `SynthesizedModel` graph, save as a model. *(Corrected 2026-08-11: MySQL is implemented and was omitted; **DuckDB introspection is NOT implemented** — a DuckDB connection can be registered but introspection returns 501. Either build it or drop it from the engine list.)*
 - **FR-2.2 Schema diff → `ALTER`:** compare model A vs B → dialect-specific `ALTER TABLE` DDL + a `breaking_changes` list.
 - **FR-2.3 Contract & semantic exporters:** OpenDataContract (YAML), Avro, Protobuf, LookML, dbt MetricFlow.
 - **FR-2.4 Referential synthetic seed:** generate CSV/SQL seed honoring `topological_order()` (dimensions before facts) + column constraints; never touch production. ⟳

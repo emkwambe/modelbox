@@ -180,7 +180,13 @@ class LLMGateway:
         messages: list[dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": self._maybe_mask(prompt)})
+        # ---- egress choke point -------------------------------------------
+        # Every outbound prompt in the application passes through here; there
+        # are exactly three call sites into this method (synthesis_engine,
+        # paradigm_translator, trainer_service). The append-only egress ledger
+        # (B3, Sprint 5) attaches at this line. Prompt masking previously sat
+        # here and did nothing; see Settings.mask_metadata_in_prompts.
+        messages.append({"role": "user", "content": prompt})
 
         last_error: Exception | None = None
         for provider_name in chain:
@@ -208,17 +214,6 @@ class LLMGateway:
         raise LLMRouterError(
             f"All providers exhausted for task '{task}'. Last error: {last_error}"
         )
-
-    def _maybe_mask(self, prompt: str) -> str:
-        """Hook for schema/PII masking before egress (FR-6, TRD §2.2).
-
-        Full tokenized masking is implemented in the governance engine; this
-        stub is the single choke point every outbound prompt passes through.
-        """
-        if not self._settings.mask_metadata_in_prompts:
-            return prompt
-        # TODO(governance): substitute sensitive identifiers with reversible tokens.
-        return prompt
 
 
 _gateway: LLMGateway | None = None

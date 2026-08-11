@@ -17,8 +17,9 @@ settings:
   # When true (AIRGAPPED=true), the gateway rejects any route that resolves
   # to a cloud provider and pins all tasks to local_ollama / airgapped_vllm.
   airgapped_mode_env: "AIRGAPPED"
-  # Strip/obfuscate sensitive schema + column names before egress (FR-6, TRD 2.2).
-  mask_metadata_in_prompts_env: "MASK_METADATA_IN_PROMPTS"
+  # NOTE: prompt masking was retired in v1.6.0 — it was documented but never
+  # implemented. Use AIRGAPPED=true for a real zero-egress guarantee; the
+  # gateway strips every non-local provider from each task's chain below.
   # Enforce zero-retention vendor parameters where supported (NFR-3.3 / GDPR).
   enforce_zero_retention: true
   request_timeout_seconds: 60

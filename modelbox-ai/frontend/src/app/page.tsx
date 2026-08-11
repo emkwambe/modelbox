@@ -316,8 +316,8 @@ export default function HomePage() {
 
       {loading && (
         <p style={{ color: '#64748b', marginTop: 8, fontSize: 13 }}>
-          {progress ?? 'Working…'} — runs as a background job, so it won't time
-          out (up to a couple of minutes).
+          {progress ?? 'Working…'} — runs as a background job, so it won&apos;t
+          time out (up to a couple of minutes).
         </p>
       )}
 

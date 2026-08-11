@@ -1,10 +1,15 @@
 name: ModelBox AI CI
 
+# Gates every push and pull request. Before v1.6.0 this ran on `main` and PRs
+# into `main` only, so feature branches were unguarded until a PR was opened.
 on:
   push:
-    branches: [ main ]
+    branches: [ "**" ]
   pull_request:
-    branches: [ main ]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend-test:
@@ -20,17 +25,83 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-          cache-dependency-path: modelbox-ai/backend/requirements.txt
+          cache-dependency-path: modelbox-ai/backend/requirements.lock
 
       - name: Install Backend Dependencies
+        # The lock, not requirements.txt: every dependency is floor-only (>=),
+        # so an unpinned install resolves to whatever PyPI serves that day.
         run: |
           python -m pip install --upgrade pip
-          pip install -r modelbox-ai/backend/requirements.txt
+          pip install -r modelbox-ai/backend/requirements.lock
 
       - name: Run Pytest Suite
         run: |
           cd modelbox-ai/backend
           pytest -v
+
+  artifact-fidelity:
+    name: Artifact Fidelity Harness
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: modelbox-ai/backend/requirements-dev.txt
+
+      - name: Set up Node.js 22
+        # Cube.js schemas are executed rather than regex-matched, and the gold
+        # graph mirror is re-extracted from templates.ts to prove it has not
+        # drifted. That extraction imports a TypeScript module directly, which
+        # requires --experimental-strip-types: Node >= 22.6. The frontend jobs
+        # stay on 20, matching the app's own engines constraint.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install protoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends protobuf-compiler
+          protoc --version
+
+      - name: Install Verification Toolchain
+        # A SEPARATE environment from the app dependencies. Installing dbt
+        # alongside them downgrades protobuf and pathspec and removes mypy.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r modelbox-ai/backend/requirements-dev.txt
+
+      - name: Run Fidelity Harness
+        # MODELBOX_FIDELITY_STRICT turns a missing toolchain into a hard failure.
+        # Without it a failed install would make every gate skip and this job
+        # would report green having verified nothing.
+        env:
+          MODELBOX_FIDELITY_STRICT: "1"
+        run: |
+          cd modelbox-ai/backend
+          pytest tests/test_artifact_fidelity.py -v --no-header
+
+      - name: Report xfail burn-down
+        if: always()
+        env:
+          MODELBOX_FIDELITY_STRICT: "1"
+        run: |
+          cd modelbox-ai/backend
+          echo "### Artifact fidelity" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "burn-down (non-preview, target 0):" >> "$GITHUB_STEP_SUMMARY"
+          pytest tests/test_artifact_fidelity.py -m "not preview" -q --no-header \
+            2>/dev/null | tail -1 >> "$GITHUB_STEP_SUMMARY"
+          echo "preview (labelled, not debt):" >> "$GITHUB_STEP_SUMMARY"
+          pytest tests/test_artifact_fidelity.py -m preview -q --no-header \
+            2>/dev/null | tail -1 >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
   frontend-build:
     name: Frontend Strict Type Check & Build
@@ -61,3 +132,82 @@ jobs:
         run: |
           cd modelbox-ai/frontend
           npm run build
+
+  frontend-lint:
+    name: Frontend Lint
+    runs-on: ubuntu-latest
+    # Blocking as of v1.6.0. The ESLint config was added in Sprint 1 and the
+    # codebase was already clean apart from one unescaped apostrophe, so the
+    # planned `continue-on-error` grace period through Sprint 5 bought nothing.
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: modelbox-ai/frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd modelbox-ai/frontend
+          npm ci
+
+      - name: Run ESLint
+        run: |
+          cd modelbox-ai/frontend
+          npx next lint --max-warnings 0
+
+  migrations:
+    name: Alembic Single Head
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: modelbox-ai/backend/requirements.lock
+
+      - name: Install Backend Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r modelbox-ai/backend/requirements.lock
+
+      - name: Assert exactly one migration head
+        # A second head means two migrations claim the same parent and
+        # `alembic upgrade head` fails at container start, not in review.
+        run: |
+          cd modelbox-ai/backend
+          heads="$(alembic heads --resolve-dependencies)"
+          echo "$heads"
+          count="$(printf '%s\n' "$heads" | grep -c '(head)' || true)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::expected exactly 1 alembic head, found $count"
+            exit 1
+          fi
+
+  versions:
+    name: Version Consistency
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Assert every version stamp agrees
+        # These disagreed four ways before v1.6.0 — package.json 1.2.0,
+        # /health 1.2.0, compose tags v1.3.0, release notes v1.5.0.
+        run: python modelbox-ai/scripts/check_versions.py

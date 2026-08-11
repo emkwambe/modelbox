@@ -1,10 +1,21 @@
-# ModelBox AI — v1.5.0 Release Notes (draft)
+# ModelBox AI — v1.5.0 Release Notes
 
-**Tag:** `v1.5.0` (unreleased)  ·  **Cut from:** `main`  ·  **CI:** green
+**Tag:** `v1.5.0`  ·  **Cut from:** `main`  ·  **CI:** green
+
+> **Corrected 2026-08-11 (Sprint 1).** This file previously read "(draft)" and
+> "(unreleased)" while also asserting CI status, and was superseded before it was
+> ever tagged. It is now stamped at its actual state.
+>
+> The "CI: green" claim was accurate — `.github/workflows/ci.yml` had run 59
+> times, green on every `main` push. What it did *not* say is what CI gated at
+> the time: `pytest`, `tsc --noEmit` and `next build`, with the backend suite
+> asserting exporter output by substring. That is how the defects catalogued in
+> `PROJECT_STATE_REPORT.md` §4 reached `main` behind a green run. v1.6.0 adds
+> the artifact-fidelity harness, `next lint`, an alembic-head check and a
+> version-consistency check, and makes all six required for merge.
 
 Builds on [v1.4.0](RELEASE_NOTES_v1.4.0.md). Headline feature: **programmatic API
-key management** for CI/CD pipelines and agents. Further Step 2 work (docs & UI
-polish) is appended here as it lands.
+key management** for CI/CD pipelines and agents.
 
 ---
 
