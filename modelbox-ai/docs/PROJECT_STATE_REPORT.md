@@ -192,6 +192,17 @@ ignoring an unrecognised block still gets a usable document. **Assigned to
 Sprint 4**, entered into the inventory now as an xfail so it is a test rather
 than a paragraph.
 
+### Scope of the ODCS re-read (Sprint 3)
+
+The v3.1.0 conformance work read the specification **for the constructs this
+emitter produces** — fundamentals, schema objects, properties, relationships,
+quality. It was not an audit of the whole standard.
+
+Within that scope, one further gap was found beyond H10 (`id` missing from the
+required top-level set) and fixed. Anything outside it is unexamined rather
+than confirmed clean, and the distinction should survive: a scoped check and an
+audit look identical in a changelog.
+
 ### Findings closed since the audit
 
 | Finding | Status |

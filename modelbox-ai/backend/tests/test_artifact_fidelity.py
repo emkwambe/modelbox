@@ -1127,24 +1127,61 @@ def test_protobuf_compiles(gid: str, tmp_path: Path) -> None:
         assert proc.returncode == 0, proc.stderr[-1500:]
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "H6: field tags come from enumerate() over the column list, so inserting a "
-    "column renumbers every later field and breaks wire compatibility with "
-    "deployed consumers. ordinal_position is ignored; needs stable_id (Q6)."
-))
+def _persisted(fixture: Fixture, *, gap_after: int = 2) -> Fixture:
+    """A copy whose columns carry stable ids, as a saved model's would.
+
+    The gold graphs are loaded straight from JSON and never persisted, so every
+    ``stable_id`` is ``None`` — and a tag-stability test over them would prove
+    nothing about a field the emitter only reads when it is set (register
+    verification standard 8).
+
+    Ids are assigned **with a gap**, which is the whole point. A model that has
+    ever had a column deleted has non-contiguous ids, and that is precisely the
+    case the plausible wrong implementation gets wrong: sorting the columns by
+    ``stable_id`` and then numbering by loop index looks correct, is stable
+    under reorder, and quietly re-compacts the gap — reissuing a tag a deployed
+    consumer still holds.
+    """
+    model = fixture.model.model_copy(deep=True)
+    for entity in model.entities:
+        next_id = 1
+        for index, column in enumerate(entity.columns):
+            column.stable_id = next_id
+            # Simulate one previously-deleted column part-way along.
+            next_id += 2 if index == gap_after else 1
+    return Fixture(fixture.id, model, fixture.dataset_name, fixture.raw)
+
+
+def _proto_name(fixture: Fixture) -> str:
+    return f"{ExporterService._safe_identifier(fixture.dataset_name)}.proto"
+
+
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_protobuf_tags_stable_on_insert(gid: str) -> None:
-    """Inserting a column must not move any existing field tag."""
-    fixture = GOLD[gid]
-    before = _proto_files(fixture)[f"{fixture.dataset_name}.proto"]
+    """Inserting a column must not move any existing field tag.
+
+    The criterion the whole ``stable_id`` design exists for. A tag is a wire
+    contract: a deployed consumer decodes field 3 as whatever field 3 meant
+    when its copy of the schema was generated.
+    """
+    fixture = _persisted(GOLD[gid])
+    before = _proto_files(fixture)[_proto_name(fixture)]
 
     mutated = fixture.model.model_copy(deep=True)
     target = mutated.entities[0]
+    highest = max(c.stable_id or 0 for c in target.columns)
     target.columns.insert(
-        1, ColumnSchema(name="inserted_column", data_type="VARCHAR(80)")
+        1,
+        ColumnSchema(
+            name="inserted_column",
+            data_type="VARCHAR(80)",
+            # A newly allocated id: past the high-water mark, never reused.
+            stable_id=highest + 1,
+        ),
     )
     after = _proto_files(
         Fixture(fixture.id, mutated, fixture.dataset_name, fixture.raw)
-    )[f"{fixture.dataset_name}.proto"]
+    )[_proto_name(fixture)]
 
     message = ExporterService._to_pascal_case(target.entity_name)
     original = _proto_tags(before, message)
@@ -1153,18 +1190,37 @@ def test_protobuf_tags_stable_on_insert(gid: str) -> None:
         name: (tag, updated.get(name))
         for name, tag in original.items() if updated.get(name) != tag
     }
-    assert not moved, f"field tags moved after an insertion: {moved}"
+    assert not moved, (
+        f"field tags moved after an insertion: {moved}. A deployed consumer "
+        f"would misparse every one of them."
+    )
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    gid: "H6: NUMERIC/DECIMAL maps to proto `double`, making money a "
-         "floating-point field. Avro emits a decimal logical type with "
-         "precision and scale from the same column and is the reference."
-    for gid in GOLD_IDS if gid != "healthcare-ehr"
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
+def test_protobuf_tags_are_the_stable_ids(gid: str) -> None:
+    """Tags are the identities themselves, gaps included, not a renumbering."""
+    fixture = _persisted(GOLD[gid])
+    proto = _proto_files(fixture)[_proto_name(fixture)]
+    for entity in fixture.model.entities:
+        message = ExporterService._to_pascal_case(entity.entity_name)
+        emitted = _proto_tags(proto, message)
+        expected = {c.name: c.stable_id for c in entity.columns}
+        assert emitted == expected, (
+            f"{message}: tags {emitted} are not the stable ids {expected} — a "
+            f"gap has been compacted, which reissues a retired tag"
+        )
+
+
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_protobuf_decimal_is_not_double(gid: str) -> None:
+    """Exact numerics must not become binary floats.
+
+    A NUMERIC(18,2) ledger balance is exact by definition. Avro emits a decimal
+    logical type with precision and scale from the same column, so mapping the
+    same value to `double` made the two contracts disagree about it.
+    """
     fixture = GOLD[gid]
-    proto = _proto_files(fixture)[f"{fixture.dataset_name}.proto"]
+    proto = _proto_files(fixture)[_proto_name(fixture)]
     offending = [
         f"{e.entity_name}.{c.name}({c.data_type})"
         for e in fixture.model.entities for c in e.columns
@@ -1174,12 +1230,6 @@ def test_protobuf_decimal_is_not_double(gid: str) -> None:
     assert not offending, f"fixed-point columns emitted as double: {offending}"
 
 
-@pytest.mark.xfail(
-    reason="H6: the proto package name is sanitised via _safe_identifier but "
-           "the emitted filename is not, so a model titled 'Untitled Model' "
-           "yields 'Untitled Model.proto'.",
-    strict=True,
-)
 def test_protobuf_filename_is_a_safe_identifier() -> None:
     fixture = SYNTHETIC["spaced-title"]
     assert " " in fixture.dataset_name, "fixture no longer exercises H6"

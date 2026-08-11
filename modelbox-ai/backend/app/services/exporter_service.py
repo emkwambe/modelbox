@@ -411,7 +411,13 @@ class ExporterService:
                 for entity in model.entities
             }
         if fmt in ("protobuf", "proto", "proto3"):
-            return {f"{dataset_name}.proto": self._protobuf_schema(model, dataset_name)}
+            # The filename is sanitised as well as the package name. dataset_name
+            # is the model title, so an untitled model produced
+            # "Untitled Model.proto" — a filename protoc will not import.
+            return {
+                f"{self._safe_identifier(dataset_name)}.proto":
+                    self._protobuf_schema(model, dataset_name)
+            }
         raise ExporterError(f"Unsupported contract format: {contract_format}")
 
     def _odcs_contract(self, model: SynthesizedModel, dataset_name: str) -> str:
@@ -526,14 +532,34 @@ class ExporterService:
         return json.dumps(record, indent=2)
 
     def _protobuf_schema(self, model: SynthesizedModel, package: str) -> str:
-        """Protobuf proto3 message definitions for the whole model."""
+        """Protobuf proto3 message definitions for the whole model.
+
+        **Field tags come from ``ColumnSchema.stable_id``, never from position.**
+        A tag is a wire-format contract: a deployed consumer decodes field 3 as
+        whatever field 3 meant when it was generated. Numbering by list position
+        meant inserting a column silently renumbered every later field, so an
+        existing consumer misparsed every one of them — finding H6, and the
+        reason ``stable_id`` exists at all.
+
+        The identity is allocated once at first persist and never reused, and
+        the allocator already skips protoc's reserved 19000-19999, so nothing
+        needs special-casing here.
+
+        A model that has never been persisted has no identities yet. It falls
+        back to position, which is honest: an unsaved draft has no wire contract
+        to keep. Anything exported through the API has been persisted, so the
+        guarantee holds wherever it can meaningfully be claimed.
+        """
         # proto3 package names must be valid identifiers (no spaces/punctuation).
         safe_package = self._safe_identifier(package)
         lines = ['syntax = "proto3";', "", f"package {safe_package};", ""]
         for entity in model.entities:
             lines.append(f"message {self._to_pascal_case(entity.entity_name)} {{")
-            for tag, col in enumerate(entity.columns, start=1):
-                lines.append(f"  {self._proto_type(col.data_type)} {col.name} = {tag};")
+            for position, col in enumerate(entity.columns, start=1):
+                tag = col.stable_id if col.stable_id is not None else position
+                lines.append(
+                    f"  {self._proto_type(col.data_type)} {col.name} = {tag};"
+                )
             lines.append("}")
             lines.append("")
         return "\n".join(lines)
@@ -1083,7 +1109,17 @@ class ExporterService:
             return "bool"
         if any(tok in t for tok in ("BIGINT", "BIGSERIAL")):
             return "int64"
-        if any(tok in t for tok in ("FLOAT", "DOUBLE", "REAL", "NUMERIC", "DECIMAL", "NUMBER")):
+        if any(tok in t for tok in ("NUMERIC", "DECIMAL", "NUMBER")):
+            # Exact numerics carry as `string`, not `double`. A ledger balance
+            # declared NUMERIC(18,2) is exact by definition, and proto3 has no
+            # fixed-point scalar — mapping it to a binary float silently makes
+            # money approximate. That is a correctness defect, not a style one:
+            # Avro already emits a decimal logical type with precision and
+            # scale from the same column, so the two contracts disagreed about
+            # the same value. A decimal string round-trips exactly and is what
+            # google.type.Decimal and most financial schemas do.
+            return "string"
+        if any(tok in t for tok in ("FLOAT", "DOUBLE", "REAL")):
             return "double"
         if any(tok in t for tok in ("INT", "SERIAL")):
             return "int32"

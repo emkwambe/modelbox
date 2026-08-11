@@ -195,6 +195,18 @@ the reason it claimed to test. Stated once here rather than rediscovered again:
    have shipped and kept warning. Same shape as a non-discriminating test: the
    visible evidence was a partial description of the defect.
 
+8. **A test over fixtures that do not exercise the feature passes vacuously.**
+   Distinct from a non-discriminating test, and it wears the same green: there,
+   two rules produce identical output; here, the feature is never reached at
+   all.
+
+   Sprint 3: the gold graphs carry no `references` values, so a test asserting
+   that foreign keys reach the ODCS contract would have passed on five models
+   declaring zero foreign keys. The remedy is the general pattern — mutate the
+   fixture to populate the field from information the graph already contains
+   (there, the relationship edges), then assert the round-trip. Check that the
+   fixture *can* fail before trusting that it didn't.
+
 A criterion whose evidence violates any of these is NOT MET, whatever the test
 reports.
 

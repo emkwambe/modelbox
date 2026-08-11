@@ -148,14 +148,20 @@ def test_protobuf_proto3() -> None:
     assert "message Customers {" in proto
     assert "int32 id = 1;" in proto
     assert "string email = 2;" in proto
-    assert "double total = 3;" in proto  # NUMERIC -> double
+    # NUMERIC is exact; proto3 has no fixed-point scalar, so it carries as a
+    # decimal string rather than a binary float. Avro emits a decimal logical
+    # type for the same column, and the two contracts must agree about it.
+    assert "string total = 3;" in proto
 
 
 def test_identifiers_are_sanitized_for_spaced_titles() -> None:
     # A human title with spaces must not leak into proto/Avro identifiers.
     exporter = ExporterService()
     proto = exporter.export_data_contract(_model(), "protobuf", "Untitled Model")
-    proto_text = proto["Untitled Model.proto"]
+    # The filename is sanitised too, not just the package: protoc cannot
+    # import "Untitled Model.proto".
+    assert "Untitled Model.proto" not in proto
+    proto_text = proto["untitled_model.proto"]
     assert "package untitled_model;" in proto_text
     assert "package Untitled Model;" not in proto_text
 
