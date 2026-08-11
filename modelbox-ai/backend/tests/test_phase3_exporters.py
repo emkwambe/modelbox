@@ -195,10 +195,11 @@ def test_metricflow_yaml() -> None:
     customers = next(m for m in doc["semantic_models"] if m["name"] == "customers")
     entity_types = {e["name"]: e["type"] for e in customers["entities"]}
     assert entity_types["id"] == "primary"
-    measure_names = {m["name"] for m in customers["measures"]}
-    assert "customers_count" in measure_names
-    metric_names = {m["name"] for m in doc["metrics"]}
-    assert "customers_count" in metric_names
+    # `customers` declares no agg_time_column, so it is dimension-only: a
+    # measure with no time axis is unemittable, and MetricFlow rejects a
+    # semantic model that declares one without defaults.agg_time_dimension.
+    assert "measures" not in customers
+    assert doc["semantic_models"][0]["model"].startswith("ref('stg_")
 
 
 def test_semantic_cube_dispatch_and_unknown_raises() -> None:

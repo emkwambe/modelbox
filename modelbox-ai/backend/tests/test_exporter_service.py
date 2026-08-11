@@ -277,8 +277,13 @@ def test_metricflow_declared_measure_becomes_metric() -> None:
                 entity_name="fact_orders",
                 entity_type="FACT",  # type: ignore[arg-type]
                 grain="per order",
+                # A measure needs a time axis: MetricFlow requires
+                # defaults.agg_time_dimension on any semantic model declaring
+                # measures, so an entity without one is dimension-only.
+                agg_time_column="ordered_at",
                 columns=[
                     _col("order_id", "INTEGER", pk=True),
+                    _col("ordered_at", "TIMESTAMP"),
                     _col("rating", "VARCHAR(8)", metric=True, agg="avg"),  # declared
                     _col("amount", "NUMERIC(12,2)"),  # numeric heuristic
                 ],
@@ -293,7 +298,8 @@ def test_metricflow_declared_measure_becomes_metric() -> None:
     fo = doc["semantic_models"][0]
     measures = {m["name"]: m for m in fo["measures"]}
     assert "total_rating" in measures  # declared measure emitted despite VARCHAR
-    assert measures["total_rating"]["agg"] == "avg"
+    # 'avg' is not a MetricFlow AggregationType; it is mapped to 'average'.
+    assert measures["total_rating"]["agg"] == "average"
     assert "total_amount" in measures
     metric_names = {m["name"] for m in doc["metrics"]}
     assert {"total_rating", "total_amount"} <= metric_names  # a metric per measure

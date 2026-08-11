@@ -657,12 +657,7 @@ def _metricflow_doc(fixture: Fixture) -> dict[str, Any]:
     return yaml.safe_load(files["semantic_models.yml"])
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "B1: MetricFlow output does not parse in dbt. Four independent defects — "
-    "missing metric `label`; model ref points at '{name}' where the dbt "
-    "exporter emits 'stg_{name}'; `avg` is not a MetricFlow AggregationType; "
-    "no defaults.agg_time_dimension."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_parses_in_dbt(
     gid: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
@@ -673,20 +668,14 @@ def test_metricflow_parses_in_dbt(
     assert result.success, f"{result.error} {detail}"
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "B1: metrics are emitted without `label`, which dbt requires."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_metrics_have_label(gid: str) -> None:
     doc = _metricflow_doc(GOLD[gid])
     missing = [m["name"] for m in doc.get("metrics", []) if not m.get("label")]
     assert not missing, f"metrics without a label: {missing}"
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "B1: semantic models reference ref('{entity}') but generate_dbt_project "
-    "names its models stg_{entity} — the two exporters disagree about their "
-    "own naming convention."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_ref_matches_dbt_model_name(gid: str) -> None:
     fixture = GOLD[gid]
     dbt_models = {
@@ -711,12 +700,7 @@ _METRICFLOW_AGGREGATIONS = {
 }
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    "saas-subscription":
-        "B1: dim_plan.list_price declares aggregation 'avg', which is not a "
-        "MetricFlow AggregationType ('average'); dbt exits with a traceback "
-        "rather than a parse error.",
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_agg_vocabulary_is_valid(gid: str) -> None:
     for semantic_model in _metricflow_doc(GOLD[gid]).get("semantic_models", []):
         for measure in semantic_model.get("measures", []):
@@ -726,10 +710,7 @@ def test_metricflow_agg_vocabulary_is_valid(gid: str) -> None:
             )
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "B1: no `defaults.agg_time_dimension` is emitted, so every measure fails "
-    "semantic-manifest validation. Needs the Sprint 2 IR field."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_declares_agg_time_dimension(gid: str) -> None:
     for semantic_model in _metricflow_doc(GOLD[gid]).get("semantic_models", []):
         if not semantic_model.get("measures"):
@@ -741,12 +722,7 @@ def test_metricflow_declares_agg_time_dimension(gid: str) -> None:
         )
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    "banking-datavault":
-        "B1: sat_account_details has no primary-key column, so no primary "
-        "entity is emitted and the manifest is rejected. Satellites "
-        "legitimately have no single-column PK.",
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_semantic_model_has_primary_entity(gid: str) -> None:
     for semantic_model in _metricflow_doc(GOLD[gid]).get("semantic_models", []):
         if not semantic_model.get("dimensions"):
@@ -764,11 +740,7 @@ _RESERVED_GRANULARITIES = {
 }
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    "saas-subscription":
-        "B1: fact_subscription_monthly.month collides with a reserved "
-        "MetricFlow time-granularity keyword; the emitter has no name guard.",
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_names_avoid_reserved_granularity(gid: str) -> None:
     for semantic_model in _metricflow_doc(GOLD[gid]).get("semantic_models", []):
         for block in ("entities", "dimensions", "measures"):
@@ -779,13 +751,39 @@ def test_metricflow_names_avoid_reserved_granularity(gid: str) -> None:
                 )
 
 
-@pytest.mark.xfail(
-    reason="B1: foreign entities are named after the local FK column, so a "
-           "role-playing dimension (ship_to_/bill_to_) has no counterpart on "
-           "the parent and the join silently does not exist. Latent on the gold "
-           "graphs, where every FK name equals its parent's PK name.",
-    strict=True,
-)
+@pytest.mark.parametrize("gid", GOLD_IDS)
+def test_metricflow_measures_require_an_aggregation_time_axis(gid: str) -> None:
+    """A semantic model with no `agg_time_column` declares no measures.
+
+    Ruled behaviour, asserted so the rule is verifiable rather than incidental.
+    Six of the fifteen reference entities have no temporal column and cannot
+    acquire one honestly, so they are dimension-only rather than being given an
+    invented time axis.
+
+    The inverse is asserted in the same place, and it is the more fragile half:
+    a model that *does* declare measures must carry the default, and the default
+    must name a dimension that exists in the emitted block. Reserved-granularity
+    names are renamed (`month` -> `month_dim`), so a default built from the raw
+    column would point at a dimension that no longer exists — one fix silently
+    undoing another inside the same emitter.
+    """
+    for semantic_model in _metricflow_doc(GOLD[gid]).get("semantic_models", []):
+        default = semantic_model.get("defaults", {}).get("agg_time_dimension")
+        measures = semantic_model.get("measures", [])
+        if default is None:
+            assert not measures, (
+                f"'{semantic_model['name']}' has no aggregation time axis but "
+                f"declares measures {[m['name'] for m in measures]}"
+            )
+            continue
+        emitted = {d["name"] for d in semantic_model.get("dimensions", [])}
+        assert default in emitted, (
+            f"'{semantic_model['name']}' aggregates over {default!r}, which is "
+            f"not among its dimensions {sorted(emitted)} — a renamed dimension "
+            f"orphaned by its own default"
+        )
+
+
 def test_metricflow_foreign_entity_names_parent_primary() -> None:
     """Foreign entity names must match the parent's primary entity name."""
     fixture = SYNTHETIC["role-playing-dimension"]
@@ -861,12 +859,6 @@ def test_cube_no_measure_over_key(gid: str, tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("gid", gold_params(
-    {
-        gid: "M3: _cube_type has no boolean branch, so BOOLEAN columns are "
-             "typed `string`, though _logical_type and _lookml_type both "
-             "handle booleans."
-        for gid in ("saas-subscription", "marketing-attribution")
-    },
     skips={
         gid: "graph declares no BOOLEAN column"
         for gid in ("ecommerce-orders", "banking-datavault", "healthcare-ehr")

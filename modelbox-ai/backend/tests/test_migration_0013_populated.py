@@ -170,49 +170,88 @@ def _digest(files: dict[str, str]) -> dict[str, str]:
 # The gate
 # ---------------------------------------------------------------------------
 @pytest.mark.slow
-def test_migration_0013_preserves_every_artifact_byte_for_byte(
+def test_migration_0013_preserves_the_persisted_model(
     postgres_dsn: str, baseline_worktree: Path
 ) -> None:
+    """Models written by the previous release survive the upgrade unchanged.
+
+    **Compares structure, not bytes, and the distinction is the point.** An
+    earlier version of this test asserted that every emitted artifact was
+    byte-identical across the migration. That held in the sprint that
+    introduced it, because that sprint changed no emitter — and it is false by
+    design in any sprint that does. Two properties with different lifetimes had
+    been fused into one assertion:
+
+    * *the migration preserves the persisted model* — permanent, and what
+      register criterion C8 actually claims;
+    * *emitters are deterministic* — permanent, and now asserted separately by
+      ``test_artifact_generation_is_deterministic``;
+    * *emitters produce the same bytes as the previous release* — true only
+      while no emitter changes, which is a schedule dependency rather than a
+      property.
+
+    Register: a gate asserting a relationship to a previous release must state
+    the condition under which that relationship holds. This one holds always,
+    because the projection is limited to what both releases can express.
+    """
     _need_docker()
 
-    # 1. Pre-migration schema, seeded and exported by the code that shipped it.
+    # 1. Previous schema, seeded and projected by the code that shipped it.
     _upgrade_to(baseline_worktree, postgres_dsn, PRE_MIGRATION_REVISION)
-
     before = _run_helper(baseline_worktree, postgres_dsn, "seed-and-export")
     assert len(before["models"]) == 5, "expected all five gold graphs seeded"
+    before_projection = _run_helper(
+        baseline_worktree, postgres_dsn, "project-model"
+    )["models"]
 
     # 2. Migrate.
     _upgrade_to(BACKEND, postgres_dsn, "head")
 
-    # 3. Re-export with the new code from the migrated database.
-    after = _run_helper(BACKEND, postgres_dsn, "export-only")
+    # 3. Re-read with the new code and compare the structure.
+    after_projection = _run_helper(BACKEND, postgres_dsn, "project-model")["models"]
 
-    # 4. Byte-identity, per artifact, with a characterising failure message.
+    assert set(before_projection) == set(after_projection), (
+        f"models lost or gained across the migration: "
+        f"before={sorted(before_projection)}, after={sorted(after_projection)}"
+    )
+    for title, before_model in before_projection.items():
+        assert after_projection[title] == before_model, (
+            f"model '{title}' changed across the migration.\n"
+            f"This is a data-preservation failure, not an emitter question — "
+            f"the projection covers only what both releases can express.\n"
+            f"before: {json.dumps(before_model, sort_keys=True)[:900]}\n"
+            f"after:  {json.dumps(after_projection[title], sort_keys=True)[:900]}"
+        )
+
+
+@pytest.mark.slow
+def test_artifact_generation_is_deterministic(
+    postgres_dsn: str, baseline_worktree: Path
+) -> None:
+    """The same model produces the same bytes, twice, in separate processes.
+
+    Separate processes matter: Python randomises string hashing per process, so
+    a comparison within one interpreter would not detect an emitter that
+    depended on set or dict iteration order. Every fidelity verdict and the
+    Proof Log's PL-005 rest on this holding.
+    """
+    _need_docker()
+    first = _run_helper(BACKEND, postgres_dsn, "export-only")["models"]
+    second = _run_helper(BACKEND, postgres_dsn, "export-only")["models"]
+
+    assert set(first) == set(second)
     differing: list[str] = []
-    for title, before_files in before["models"].items():
-        after_files = after["models"].get(title)
-        assert after_files is not None, f"model '{title}' did not survive the migration"
-        before_hashes, after_hashes = _digest(before_files), _digest(after_files)
-        assert set(before_hashes) == set(after_hashes), (
-            f"{title}: artifact set changed — "
-            f"only before: {sorted(set(before_hashes) - set(after_hashes))}, "
-            f"only after: {sorted(set(after_hashes) - set(before_hashes))}"
-        )
-        differing.extend(
-            f"{title}::{path}" for path, digest in before_hashes.items()
-            if after_hashes[path] != digest
-        )
+    for title, files in first.items():
+        a, b = _digest(files), _digest(second[title])
+        assert set(a) == set(b), f"{title}: artifact set differs between runs"
+        differing.extend(f"{title}::{path}" for path, d in a.items() if b[path] != d)
 
     assert not differing, (
-        "Artifacts changed across a migration that touches no emitter.\n"
-        "Before concluding the migration is at fault: this sprint changes no "
-        "exporter, so the same model must produce the same bytes. A difference "
-        "most likely means an emitter is NOT a pure function of the IR "
-        "(iteration order, unsorted glob, clock, hash seed), which would "
-        "invalidate every fidelity verdict and two of three Proof Log entries. "
-        "Characterise it — is it stable across repeated runs? — before fixing "
-        "anything.\n"
-        f"Differing artifacts ({len(differing)}): {differing[:12]}"
+        "Artifact generation is not deterministic. The same model produced "
+        "different bytes in two processes, which means an emitter depends on "
+        "iteration order, a clock, or a hash seed. Every fidelity verdict and "
+        "Proof Log PL-005 assume otherwise.\n"
+        f"Differing ({len(differing)}): {differing[:12]}"
     )
 
 

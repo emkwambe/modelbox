@@ -171,6 +171,19 @@ the reason it claimed to test. Stated once here rather than rediscovered again:
    emitted no `NOT NULL` for it — silently defeating H4, the whole purpose of
    the sprint that introduced the field.
 
+6. **A gate asserting a relationship to a previous release must state the
+   condition under which that relationship holds.** Otherwise its premise
+   expires and the gate becomes a schedule dependency rather than a property.
+
+   Sprint 3 found the pattern twice. The migration test asserted every artifact
+   was byte-identical to the previous release's output — true only while no
+   emitter changes, which was Sprint 2 by design and false in Sprint 3 by
+   design. It fused three properties with different lifetimes: *the migration
+   preserves the persisted model* (permanent), *emitters are deterministic*
+   (permanent), and *emitters match the previous release byte for byte* (a
+   schedule dependency). Split into the first two, each stating its scope. The
+   same shape produced the sprint's stale 76 → 0 target.
+
 A criterion whose evidence violates any of these is NOT MET, whatever the test
 reports.
 

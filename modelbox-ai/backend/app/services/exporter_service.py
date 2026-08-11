@@ -26,6 +26,7 @@ from app.schemas.data_model import (
     EntitySchema,
     RelationshipSchema,
     SynthesizedModel,
+    _is_temporal_type,
 )
 
 if TYPE_CHECKING:
@@ -446,7 +447,7 @@ class ExporterService:
     def _lookml_view(self, entity: EntitySchema) -> str:
         lines = [f"view: {entity.entity_name} {{", f"  sql_table_name: {entity.entity_name} ;;", ""]
         for col in entity.columns:
-            if self._is_temporal(col.data_type):
+            if _is_temporal_type(col.data_type):
                 lines.append(f"  dimension_group: {col.name} {{")
                 lines.append("    type: time")
                 lines.append("    timeframes: [raw, date, week, month, quarter, year]")
@@ -477,91 +478,203 @@ class ExporterService:
         return "\n".join(lines)
 
     def _metricflow(self, model: SynthesizedModel) -> str:
-        # Map (entity, column) -> parent for foreign-key entity declarations.
-        fk_refs: dict[tuple[str, str], str] = {}
+        """Emit a dbt semantic layer that ``dbt parse`` accepts (B1).
+
+        Seven defects were fixed together here because none of them is visible
+        on its own: ``dbt parse`` fails on the first, so nothing downstream can
+        be observed until all of the blocking ones are correct.
+
+        The load-bearing rules:
+
+        * A measure needs a time axis. An entity with no ``agg_time_column``
+          therefore declares **no measures** and is dimension-only, rather than
+          being given an invented one. Six of the fifteen reference entities
+          have no temporal column at all.
+        * A foreign entity is named after the **parent's primary entity**, with
+          ``expr`` carrying the local column. MetricFlow resolves joins by
+          entity name, so naming it after the local FK column only worked when
+          that name coincidentally equalled the parent's key.
+        * A name colliding with a reserved granularity keyword is suffixed —
+          and ``defaults.agg_time_dimension`` must then reference the
+          **renamed** dimension. Renaming without that would fix one defect and
+          silently reintroduce another.
+        """
+        # (child entity, child column) -> parent entity, for foreign entities.
+        fk_parent: dict[tuple[str, str], str] = {}
         for rel in model.relationships:
             from_entity, from_col = self._split_ref(rel.from_ref)
             to_entity, _ = self._split_ref(rel.to_ref)
             if from_col:
-                fk_refs[(from_entity, from_col)] = to_entity
+                fk_parent[(from_entity, from_col)] = to_entity
+
+        # Each entity's primary-entity name, which is its primary-key column.
+        # A foreign entity must reuse the parent's, or the join does not exist.
+        primary_entity_name: dict[str, str] = {}
+        for entity in model.entities:
+            pk = next((c.name for c in entity.columns if c.is_primary_key), None)
+            if pk is not None:
+                primary_entity_name[entity.entity_name] = self._safe_semantic_name(pk)
 
         semantic_models: list[dict[str, object]] = []
         metrics: list[dict[str, object]] = []
+
         for entity in model.entities:
             entities_block: list[dict[str, object]] = []
             dimensions: list[dict[str, object]] = []
             measures: list[dict[str, object]] = []
-            measure_names: list[str] = []
+
+            # A measure without a time axis is unemittable, so the entity's
+            # declared aggregation time dimension decides whether it has any.
+            agg_time_dimension: str | None = None
+            if entity.agg_time_column:
+                agg_time_dimension = self._safe_semantic_name(entity.agg_time_column)
 
             for col in entity.columns:
+                safe_name = self._safe_semantic_name(col.name)
+                parent = fk_parent.get((entity.entity_name, col.name))
+
                 if col.is_primary_key:
                     entities_block.append(
-                        {"name": col.name, "type": "primary", "expr": col.name}
+                        {"name": safe_name, "type": "primary", "expr": col.name}
                     )
-                elif (entity.entity_name, col.name) in fk_refs:
+                elif parent is not None:
                     entities_block.append(
-                        {"name": col.name, "type": "foreign", "expr": col.name}
+                        {
+                            # The parent's primary entity, not the local column.
+                            "name": primary_entity_name.get(parent, safe_name),
+                            "type": "foreign",
+                            "expr": col.name,
+                        }
                     )
-                elif self._is_temporal(col.data_type):
+                elif _is_temporal_type(col.data_type):
                     dimensions.append(
                         {
-                            "name": col.name,
+                            "name": safe_name,
                             "type": "time",
                             "type_params": {"time_granularity": "day"},
                             "expr": col.name,
                         }
                     )
                 elif col.is_metric or self._is_numeric(col):
-                    # Explicit measure declaration wins over the numeric heuristic.
+                    if agg_time_dimension is None:
+                        # No time axis: express it as a dimension rather than
+                        # dropping the column from the semantic model entirely.
+                        dimensions.append(
+                            {"name": safe_name, "type": "categorical", "expr": col.name}
+                        )
+                        continue
                     measure_name = f"total_{col.name}"
                     measures.append(
                         {
                             "name": measure_name,
-                            "agg": (col.aggregation or "sum").lower(),
+                            "agg": self._metricflow_agg(col.aggregation),
                             "expr": col.name,
                         }
                     )
-                    measure_names.append(measure_name)
                 else:
                     dimensions.append(
-                        {"name": col.name, "type": "categorical", "expr": col.name}
+                        {"name": safe_name, "type": "categorical", "expr": col.name}
                     )
 
-            # A simple metric per declared measure, so the layer is usable.
-            for measure_name in measure_names:
+            if agg_time_dimension is not None:
+                count_measure = f"{entity.entity_name}_count"
+                measures.append({"name": count_measure, "agg": "count", "expr": "1"})
+
+            for measure in measures:
+                name = str(measure["name"])
                 metrics.append(
                     {
-                        "name": measure_name,
+                        "name": name,
+                        # dbt requires a label on every metric.
+                        "label": name.replace("_", " ").strip().title(),
                         "type": "simple",
-                        "type_params": {"measure": measure_name},
+                        "type_params": {"measure": name},
                     }
                 )
 
-            count_measure = f"{entity.entity_name}_count"
-            measures.append({"name": count_measure, "agg": "count", "expr": "1"})
-            metrics.append(
-                {
-                    "name": count_measure,
-                    "type": "simple",
-                    "type_params": {"measure": count_measure},
-                }
-            )
-
             model_doc: dict[str, object] = {
                 "name": entity.entity_name,
-                "model": f"ref('{entity.entity_name}')",
+                # The dbt exporter names its models stg_<entity>; referencing
+                # the bare entity pointed at a node that does not exist.
+                "model": f"ref('stg_{entity.entity_name}')",
                 "entities": entities_block,
             }
+            if entity.entity_name not in primary_entity_name and dimensions:
+                # A satellite or bridge with no single-column key still needs a
+                # primary entity once it declares dimensions.
+                model_doc["primary_entity"] = entity.entity_name
+            if measures:
+                model_doc["defaults"] = {"agg_time_dimension": agg_time_dimension}
             if dimensions:
                 model_doc["dimensions"] = dimensions
-            model_doc["measures"] = measures
+            if measures:
+                model_doc["measures"] = measures
             semantic_models.append(model_doc)
 
-        return yaml.safe_dump(
-            {"semantic_models": semantic_models, "metrics": metrics},
-            sort_keys=False,
-            default_flow_style=False,
-        )
+        document: dict[str, object] = {"semantic_models": semantic_models}
+        if metrics:
+            document["metrics"] = metrics
+        return yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
+
+    # MetricFlow's AggregationType. Mapped explicitly rather than lower-cased
+    # through, because `avg` — the obvious spelling, and what the canvas offers
+    # — is not a member and made dbt exit with a traceback rather than a parse
+    # error.
+    _METRICFLOW_AGGREGATIONS: dict[str, str] = {
+        "sum": "sum",
+        "min": "min",
+        "max": "max",
+        "count": "count",
+        "count_distinct": "count_distinct",
+        "distinct_count": "count_distinct",
+        "avg": "average",
+        "average": "average",
+        "mean": "average",
+        "median": "median",
+        "percentile": "percentile",
+        "sum_boolean": "sum_boolean",
+    }
+
+    @classmethod
+    def _metricflow_agg(cls, aggregation: str | None) -> str:
+        """Translate a declared aggregation into MetricFlow's vocabulary.
+
+        Raises rather than passing an unknown value through: a refused export
+        names the problem, whereas an unmapped aggregation surfaces as a
+        traceback from inside ``dbt parse`` pointing at a generated file.
+        """
+        if not aggregation:
+            return "sum"
+        key = aggregation.strip().lower()
+        try:
+            return cls._METRICFLOW_AGGREGATIONS[key]
+        except KeyError:
+            raise ExporterError(
+                f"Aggregation {aggregation!r} has no MetricFlow equivalent. "
+                f"Supported: "
+                f"{', '.join(sorted(set(cls._METRICFLOW_AGGREGATIONS.values())))}."
+            ) from None
+
+    # MetricFlow rejects any name equal to a time-granularity keyword.
+    _RESERVED_GRANULARITIES = frozenset(
+        {
+            "nanosecond", "microsecond", "millisecond", "second", "minute",
+            "hour", "day", "week", "month", "quarter", "year",
+        }
+    )
+
+    @classmethod
+    def _safe_semantic_name(cls, name: str) -> str:
+        """Suffix a name that collides with a reserved granularity keyword.
+
+        ``expr`` carries the real column, so the identifier is free to differ.
+        Every producer of a semantic name goes through here, including the one
+        that builds ``defaults.agg_time_dimension`` — the two must agree or the
+        default points at a dimension that was renamed out from under it.
+        """
+        if name.lower() in cls._RESERVED_GRANULARITIES:
+            return f"{name}_dim"
+        return name
 
     # ---------------------------------------------------------------------
     # 7. Data dictionary & business glossary (Phase 3, Pick 2)
@@ -825,10 +938,6 @@ class ExporterService:
             return "date"
         return "string"
 
-    @staticmethod
-    def _is_temporal(data_type: str) -> bool:
-        t = data_type.upper()
-        return any(tok in t for tok in ("TIMESTAMP", "DATETIME", "DATE", "TIME"))
 
     def _avro_type(self, data_type: str) -> object:
         t = data_type.upper()
@@ -997,9 +1106,15 @@ class ExporterService:
         return None
 
     def _cube_type(self, col: ColumnSchema) -> str:
-        upper = col.data_type.upper()
-        if any(tok in upper for tok in ("DATE", "TIME", "TIMESTAMP")):
+        if _is_temporal_type(col.data_type):
             return "time"
+        if "BOOL" in col.data_type.upper():
+            # Cube has a boolean dimension type. Omitting this branch typed
+            # every BOOLEAN column as `string` (M3), while _logical_type and
+            # _lookml_type both handled booleans — the disagreement between
+            # three private copies of the same predicate that the shared
+            # _is_temporal_type now prevents.
+            return "boolean"
         if self._is_numeric(col):
             return "number"
         return "string"
