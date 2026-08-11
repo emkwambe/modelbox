@@ -35,7 +35,7 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | A6 ◆ | No non-preview xfail remains at Phase I exit; each flipped test is `strict=True` | `pytest` output: 0 xfail outside `@preview` | 3 |
 | A7 | Preview failures — the three Preview dialects (15) and LookML (3) — are reported separately and never counted as debt | `pytest -m preview`: 18 xfail, 2 pass | 1 |
 | A8 | Version is consistent across `package.json`, `/health`, compose tags, release notes, enforced in CI | Version-check job passes | 1 |
-| A9 | A tagged release builds a GHCR image that pulls and starts clean on a machine that never built it | Pull-and-run transcript | 1 |
+| A9 **MET** | A tagged release builds a GHCR image that pulls and starts clean on a machine that never built it | Proof Log PL-004 — v1.6.0 pulled from GHCR, migrated, `/health` 1.6.0 | 1 |
 
 ## B. Artifact correctness — the core claim
 

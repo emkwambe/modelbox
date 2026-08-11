@@ -128,8 +128,12 @@ State these before a reviewer finds them. Two concern the gate itself:
   `main` is a worse failure mode than the theoretical bypass. The accurate claim
   is "changes are gated," not "changes cannot be forced." No reviewer approval
   is required either.
-- **The published image has not yet been pulled on a machine that never built
-  it.** Register criterion **A9** is therefore NOT MET at the time of writing.
+- **Verified after tagging (2026-08-11):** the published images were pulled from
+  GHCR — neither existed locally beforehand — and the backend started, migrated
+  and served `/health` reporting 1.6.0. Register **A9** is MET; see Proof Log
+  PL-004. The limit that remains is that the host had previously built the
+  project, so this is not a first-run test on a wholly clean machine (**G1**,
+  Sprint 5). As originally written, this note read:
   The appliance was verified locally — `/health` reporting 1.6.0, UI and `/docs`
   both 200, backend healthy in ~5s — but a clean-machine pull of the GHCR image
   is a different test and has not been run.

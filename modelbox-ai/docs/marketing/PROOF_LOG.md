@@ -114,6 +114,38 @@ context list, or the fidelity job stops running with `MODELBOX_FIDELITY_STRICT=1
 
 ---
 
+## PL-004 — A tagged release publishes an image that pulls and runs clean
+
+**Claim:** "Tag a release and you get container images on GHCR that start,
+migrate, and serve on a host that did not build them."
+
+**Evidence:** tag `v1.6.0` triggered `.github/workflows/release.yml`, which built
+and pushed `ghcr.io/emkwambe/modelbox-backend:1.6.0` and
+`…-frontend:1.6.0`. Neither image existed locally — `docker rmi` reported *No
+such image* before the pull, so the artifact tested is the runner's, not a local
+build. Pulled, started against the appliance Postgres, and observed:
+
+- Alembic ran to head inside the container.
+- The healthcheck went healthy in ~10s.
+- `/health` returned `{"status":"ok", … "version":"1.6.0"}` — the same value
+  stamped in `backend/app/__version__.py`, `package.json` and the compose tags.
+- The retired masking flag still fails startup *in the published image*, exiting
+  1 with the error naming `AIRGAPPED=true`.
+
+**Honest limit:** the *images* were never built on this host, but the *host* has
+built the project. This proves the published artifact is self-sufficient — it
+does not prove a first-run experience on a machine with no toolchain, no build
+cache and no prior Docker layers. Register **A9** is satisfied; the stronger
+unassisted-install claim is **G1**, Sprint 5.
+
+**Verified:** 2026-08-11 · **Sprint:** 1 · **Version:** 1.6.0
+**Expires:** on any change to `docker/Dockerfile.backend`, `release.yml`, or the
+container start command.
+**Usable in:** install documentation, enterprise evaluation guide, "how we ship"
+post.
+
+---
+
 ## Claims explicitly NOT yet provable
 
 Recorded so nobody reaches for them early. Each becomes an entry when its test
