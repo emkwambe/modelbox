@@ -108,7 +108,7 @@ class ExporterService:
         # TABLE individually (otherwise it falls back to opaque passthrough).
         script = ";\n".join(
             self._entity_create_table(entity, model.relationships)
-            for entity in model.entities
+            for entity in self._emission_order(model)
         )
         statements = sqlglot.transpile(
             script,
@@ -118,12 +118,54 @@ class ExporterService:
         )
         return ";\n\n".join(statements) + ";\n"
 
+    @staticmethod
+    def _emission_order(model: SynthesizedModel) -> list[EntitySchema]:
+        """Order entities so a referenced table is always created first (H5).
+
+        Emission previously followed declaration order, which is only correct
+        when the model happens to have been authored parent-first. A model that
+        was not — anything an LLM produced, or a canvas reordered — emitted a
+        child table whose ``FOREIGN KEY`` named a table that did not exist yet,
+        and psql aborted on the first statement.
+
+        ``GraphEngine.topological_order`` has always existed for this; the
+        module docstring claimed it was used here when it never was, which is
+        the reason the defect went unnoticed. A cyclic graph has no topological
+        order, so it falls back to declaration order — the same fallback the
+        seed generator uses, and the cycle itself is already reported as
+        ``CYCLIC_FK``.
+        """
+        from app.services.graph_engine import GraphEngine
+
+        by_name = {entity.entity_name: entity for entity in model.entities}
+        try:
+            graph = GraphEngine.build_graph(model.entities, model.relationships)
+            ordered = GraphEngine.topological_order(graph)
+        except Exception:  # noqa: BLE001 - NetworkXUnfeasible on a cyclic graph
+            return list(model.entities)
+        # `ordered` covers only entities the graph knows about; anything else
+        # keeps its declared position rather than being dropped.
+        seen = set()
+        out: list[EntitySchema] = []
+        for name in ordered:
+            entity = by_name.get(name)
+            if entity is not None and name not in seen:
+                seen.add(name)
+                out.append(entity)
+        out.extend(e for e in model.entities if e.entity_name not in seen)
+        return out
+
     def _entity_create_table(
         self, entity: EntitySchema, relationships: list[RelationshipSchema]
     ) -> str:
         """Build a single ANSI ``CREATE TABLE`` string for an entity."""
         lines: list[str] = [
-            f"    {col.name} {col.data_type}" for col in entity.columns
+            # NOT NULL from the declared constraint (H4). Emitting nothing made
+            # every column implicitly nullable, which is also why Databricks
+            # rejected the emitted primary keys outright.
+            f"    {col.name} {col.data_type}"
+            + ("" if col.is_nullable else " NOT NULL")
+            for col in entity.columns
         ]
 
         pk_cols = [c.name for c in entity.columns if c.is_primary_key]

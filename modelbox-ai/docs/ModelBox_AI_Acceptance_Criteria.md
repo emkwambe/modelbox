@@ -46,7 +46,7 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | B3 ◆ | Emitted DDL **executes** on at least one certified engine, not merely parses | `test_ddl_executes_on_duckdb`, 5/5 | 1 (locked), 3 (held) |
 | B4 ◆ | All four certified dialects pass sqlfluff dialect grammar with zero unparsable segments | `test_ddl_dialect_grammar`, 20/20 | 3 |
 | B5 ◆ | Preview dialects are visibly labelled in the export UI and docs — no silent downgrade | Screenshot; docs section | 3 |
-| B6 ◆ | Protobuf tags do not move when a column is inserted | `test_protobuf_tags_stable_on_insert`, 5/5 | 3 |
+| B6 ◆ | Protobuf tags **are** the stable identities, gaps included; and do not move when a column is inserted | `test_protobuf_tags_are_the_stable_ids` (primary), `test_protobuf_tags_stable_on_insert`, 5/5 each | 3 |
 | B7 ◆ | ODCS output validates as ODCS v3.1.0 — correct `apiVersion`, required `version` and `status` present, no foreign-spec `info:` block | `test_odcs_*`, 5/5 | 3 |
 | B8 ◆ | `required` in ODCS reflects declared nullability, not primary-key status | `test_odcs_required_reflects_nullability` | 3 |
 | B9 ◆ | DDL emits in topological order; a deliberately non-parent-first model still deploys | `test_ddl_order_is_topological` | 3 |
@@ -206,6 +206,29 @@ the reason it claimed to test. Stated once here rather than rediscovered again:
    fixture to populate the field from information the graph already contains
    (there, the relationship edges), then assert the round-trip. Check that the
    fixture *can* fail before trusting that it didn't.
+
+9. **A test can pass on a *consequence* of the property rather than the
+   property itself.** The correct implementation implies the consequence, so
+   the assertion looks like the thing you care about — but a wrong
+   implementation can satisfy it too. The subtlest of the three ways a green
+   test means nothing, because unlike vacuous passing (8) and
+   non-discriminating passing (1) the assertion reads as exactly right.
+
+   Sprint 3, and it indicted a criterion in this register. B6 named
+   "inserting a column moves no existing tag" as the proof of Protobuf wire
+   stability. The realistic wrong implementation — sort columns by
+   `stable_id`, then number by loop index — honours the field, is stable under
+   reorder, and **passes that test on 5/5**, because the inserted column sorts
+   last and every existing index is unchanged. It silently re-compacts the gap
+   a deleted column leaves, reissuing a retired tag. The property is *tags are
+   the identities, gaps included*; no-movement-on-insert is a weaker
+   consequence of it. B6 now cites both, property first.
+
+   Note also what the mutation needed before it could discriminate: the fixture
+   had to be persisted so `stable_id` was not null throughout (8), and had to
+   carry a deliberate gap (1). Two independent fixture properties, either of
+   which alone would have made the check meaningless. A suite can be one
+   fixture property away from proving nothing.
 
 A criterion whose evidence violates any of these is NOT MET, whatever the test
 reports.

@@ -55,7 +55,12 @@ from typing import Any
 import pytest
 import yaml
 
-from app.schemas.data_model import ColumnSchema, SynthesizedModel
+from app.schemas.data_model import (
+    ColumnSchema,
+    EntitySchema,
+    RelationshipSchema,
+    SynthesizedModel,
+)
 from app.services.exporter_service import ExporterService
 from app.services.seed_generator import SyntheticSeedGenerator
 
@@ -511,11 +516,7 @@ def test_ddl_executes_on_duckdb(gid: str) -> None:
     assert created == {e.entity_name for e in GOLD[gid].model.entities}
 
 
-@pytest.mark.parametrize("gid", all_gold(
-    "H4/H3: no NOT NULL is emitted anywhere. A primary key is non-nullable by "
-    "definition and Databricks rejects a PK on a nullable column; the general "
-    "case needs ColumnSchema.is_nullable from Sprint 2."
-))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_ddl_primary_key_columns_are_not_null(gid: str) -> None:
     """PK columns must be emitted NOT NULL."""
     model = GOLD[gid].model
@@ -531,13 +532,103 @@ def test_ddl_primary_key_columns_are_not_null(gid: str) -> None:
             )
 
 
+@pytest.mark.parametrize("gid", GOLD_IDS)
+def test_ddl_not_null_follows_declared_nullability(gid: str) -> None:
+    """NOT NULL comes from `is_nullable`, not from the primary-key flag.
+
+    Asserted against a mutated copy, for the same reason the ODCS `required`
+    check is: on the graphs as authored, `is_nullable` is false exactly where
+    `is_primary_key` is true, so emitting NOT NULL from either rule produces
+    byte-identical DDL. `test_ddl_primary_key_columns_are_not_null` therefore
+    passes under the wrong implementation — it asserts a consequence, not the
+    property (register verification standard 9).
+
+    One non-key column per entity is forced non-nullable here, which is the
+    counterexample a correct model rarely contains.
+    """
+    model = GOLD[gid].model.model_copy(deep=True)
+    forced: list[str] = []
+    for entity in model.entities:
+        for column in entity.columns:
+            if not column.is_primary_key:
+                column.is_nullable = False
+                forced.append(column.name)
+                break
+    assert forced, "fixture sanity: no entity has a non-key column"
+
+    ddl = exporter().generate_ddl(model, "postgres")
+    for entity in model.entities:
+        # Scoped to this table's own CREATE block. A column name is not unique
+        # across a model — `plan_sk` is a nullable foreign key on the fact and
+        # the non-nullable primary key of `dim_plan` — so an unscoped search
+        # reads one table's constraint as another's.
+        block = re.search(
+            rf"CREATE TABLE {re.escape(entity.entity_name)} \((.*?)\n\);",
+            ddl,
+            re.S,
+        )
+        assert block, f"no CREATE TABLE emitted for {entity.entity_name}"
+        for column in entity.columns:
+            pattern = rf"^\s*{re.escape(column.name)}\s+\S.*$"
+            line = re.search(pattern, block.group(1), re.M)
+            assert line, f"{entity.entity_name}.{column.name} not emitted"
+            emitted = "NOT NULL" in line.group(0).upper()
+            assert emitted is (not column.is_nullable), (
+                f"{entity.entity_name}.{column.name}: is_nullable="
+                f"{column.is_nullable} but NOT NULL "
+                f"{'was' if emitted else 'was not'} emitted — {line.group(0).strip()!r}"
+            )
+
+
+def test_ddl_order_defeats_both_plausible_wrong_orderings() -> None:
+    """Emission order is a dependency sort, not declaration or alphabetical.
+
+    The gold graphs catch alphabetical ordering only by accident — one of the
+    five happens to have a child whose name sorts before its parent. Relying on
+    that is fragile: rename an entity and the mutant survives. This model is
+    adversarial to both plausible wrong implementations at once, so the
+    discrimination is deliberate rather than incidental.
+
+    `a_child` references `z_parent`, and is declared first. Declaration order
+    is wrong. Alphabetical order is wrong. Only a dependency sort is right.
+    """
+    model = SynthesizedModel(
+        paradigm="3NF",  # type: ignore[arg-type]
+        entities=[
+            EntitySchema(
+                entity_name="a_child",
+                entity_type="TABLE",  # type: ignore[arg-type]
+                columns=[
+                    ColumnSchema(name="a_child_id", data_type="INTEGER",
+                                 is_primary_key=True),
+                    ColumnSchema(name="z_parent_id", data_type="INTEGER",
+                                 is_foreign_key=True),
+                ],
+            ),
+            EntitySchema(
+                entity_name="z_parent",
+                entity_type="TABLE",  # type: ignore[arg-type]
+                columns=[
+                    ColumnSchema(name="z_parent_id", data_type="INTEGER",
+                                 is_primary_key=True),
+                ],
+            ),
+        ],
+        relationships=[
+            RelationshipSchema.model_validate(
+                {"from": "a_child.z_parent_id", "to": "z_parent.z_parent_id",
+                 "cardinality": "N:1"}
+            )
+        ],
+    )
+    ddl = exporter().generate_ddl(model, "postgres")
+    order = re.findall(r"CREATE TABLE (\w+)", ddl)
+    assert order == ["z_parent", "a_child"], (
+        f"emitted {order}; the referenced table must be created first"
+    )
+
+
 @pytest.mark.parametrize("gid", gold_params(
-    {
-        gid: "H5: generate_ddl iterates model.entities in declaration order and "
-             "never calls GraphEngine.topological_order, so a child table can be "
-             "created before the parent it references."
-        for gid in GOLD_IDS
-    },
     skips={"marketing-attribution": "single-entity OBT model has no FK ordering"},
 ))
 def test_ddl_order_is_topological(gid: str) -> None:
