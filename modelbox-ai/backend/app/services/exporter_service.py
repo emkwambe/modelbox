@@ -404,6 +404,14 @@ class ExporterService:
             "    count: {\n      type: `count`\n    }",
         ]
         for col in entity.columns:
+            # A key is an identifier that happens to be stored as a number.
+            # SUM(customer_sk) and SUM(order_line_sk) are arithmetic on
+            # identifiers — numerically valid, semantically meaningless, and
+            # offered to every BI user as though they meant something (M3).
+            # Both halves matter: excluding only foreign keys would still sum
+            # a surrogate primary key that nothing references.
+            if col.is_primary_key or col.is_foreign_key:
+                continue
             if col.is_metric or self._is_numeric(col):
                 agg = (col.aggregation or "sum").lower()
                 measures.append(

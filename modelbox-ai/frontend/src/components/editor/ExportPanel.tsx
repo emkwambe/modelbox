@@ -43,7 +43,20 @@ const FORMATS: { value: ExportFormat; label: string }[] = [
   { value: 'cube', label: 'Cube.js' },
 ];
 
-const DIALECTS = ['snowflake', 'postgres', 'bigquery', 'databricks', 'duckdb'];
+/**
+ * Certified dialects are verified on every push by two independent grammars,
+ * and DuckDB additionally by executing the emitted DDL against the engine.
+ * Preview dialects transpile but are not deployment-verified: BigQuery needs
+ * NOT ENFORCED on key constraints, Databricks needs NOT NULL on primary keys,
+ * ClickHouse needs an ENGINE clause and forbids Nullable in a key.
+ *
+ * The distinction is shown in the picker, before the user commits to an
+ * export — a warning discovered afterwards is not a warning.
+ */
+const CERTIFIED_DIALECTS = ['postgres', 'snowflake', 'redshift', 'duckdb'];
+const PREVIEW_DIALECTS = ['bigquery', 'databricks', 'clickhouse'];
+const DIALECTS = [...CERTIFIED_DIALECTS, ...PREVIEW_DIALECTS];
+const isPreviewDialect = (d: string) => PREVIEW_DIALECTS.includes(d);
 
 const SEED_FORMATS: { value: SeedFormat; label: string }[] = [
   { value: 'sql_insert', label: 'SQL INSERT' },
@@ -278,11 +291,20 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
             onChange={(e) => setDialect(e.target.value)}
             style={selectStyle}
           >
-            {DIALECTS.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
+            <optgroup label="Certified — deployment-verified">
+              {CERTIFIED_DIALECTS.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Preview — not deployment-verified">
+              {PREVIEW_DIALECTS.map((d) => (
+                <option key={d} value={d}>
+                  {d} (preview)
+                </option>
+              ))}
+            </optgroup>
           </select>
         )}
         <button
@@ -320,6 +342,16 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
           </button>
         )}
       </div>
+
+      {dialectRelevant && isPreviewDialect(dialect) && (
+        <div style={previewBanner} role="status">
+          <strong>{dialect}</strong> is <strong>Preview — not
+          deployment-verified.</strong> The DDL transpiles and re-parses, but we
+          do not verify that this engine accepts it, and it currently does not
+          without hand-editing. Certified dialects are{' '}
+          {CERTIFIED_DIALECTS.join(', ')}.
+        </div>
+      )}
 
       {fileNames.length > 1 && (
         <select
@@ -411,6 +443,19 @@ const controlRow: React.CSSProperties = {
   color: '#e2e8f0',
   flexWrap: 'wrap',
   borderTop: '1px solid #0f172a',
+};
+
+const previewBanner: React.CSSProperties = {
+  margin: '0 8px 8px',
+  padding: '8px 10px',
+  borderRadius: 6,
+  // Amber: the brand system's warning colour. Not an error — the export works,
+  // it is the deployability that is unverified.
+  background: '#78350f',
+  border: '1px solid #b45309',
+  color: '#fef3c7',
+  fontSize: 12,
+  lineHeight: 1.45,
 };
 
 const selectStyle: React.CSSProperties = {

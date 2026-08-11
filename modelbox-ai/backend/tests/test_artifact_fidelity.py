@@ -897,12 +897,7 @@ def test_cube_is_valid_js(gid: str, tmp_path: Path) -> None:
         assert cube.get("sql_table"), f"{cube['name']} has no sql_table"
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    gid: "M3: every numeric column becomes a measure, so surrogate and foreign "
-         "keys are emitted as SUM(). LookML excludes the PK but not FKs; Cube "
-         "excludes neither."
-    for gid in GOLD_IDS if gid != "banking-datavault"
-}))
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_cube_no_measure_over_key(gid: str, tmp_path: Path) -> None:
     """SUM() over a surrogate or foreign key is never a meaningful measure."""
     _need(NODE, "node")

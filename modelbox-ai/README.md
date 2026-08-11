@@ -109,12 +109,16 @@ for DuckDB by executing the emitted DDL against the engine itself:
 `postgres`, `snowflake`, `redshift`, `duckdb`.
 
 **Preview — not deployment-verified:** `bigquery`, `databricks`, `clickhouse`.
-These transpile, but the emitted DDL is not accepted by those engines as
-written (BigQuery requires `NOT ENFORCED` on key constraints; Databricks
-requires `NOT NULL` on primary keys; ClickHouse requires an `ENGINE` clause and
-forbids `Nullable` in a key). LookML is Preview for the same reason — no
-offline parser exists, so we cannot verify it. Promotion out of Preview is
-gated on the fidelity harness proving deployability.
+These transpile and re-parse, but the emitted DDL is not accepted by those
+engines as written: BigQuery requires `NOT ENFORCED` on key constraints,
+Databricks requires `NOT NULL` on primary keys, ClickHouse requires an `ENGINE`
+clause and forbids `Nullable` in a key. LookML is Preview for a different
+reason — no offline parser exists, so we cannot verify it at all.
+
+The distinction is shown **in the export picker, before you generate**, not in
+a note afterwards: certified and preview dialects are grouped separately and
+choosing a preview dialect raises a standing warning. Promotion out of Preview
+is gated on the fidelity harness proving deployability, not on a decision.
 
 ## Governance & air-gap
 
