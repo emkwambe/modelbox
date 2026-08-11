@@ -228,6 +228,17 @@ class ModelEntity(Base):
     grain: Mapped[str | None] = mapped_column(Text, nullable=True)
     tier: Mapped[str | None] = mapped_column(String(32), nullable=True)
     freshness_sla: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Default aggregation time dimension for this entity's measures (Sprint 2).
+    # Nullable by design: an entity with no temporal column has no time axis.
+    agg_time_column: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # High-water mark for EntityColumn.stable_id (Sprint 2, Q6). Stored, never
+    # derived as max(existing) + 1: deleting the highest column must NOT free
+    # its id, which is precisely the wire-compatibility break H6 is about.
+    # Only ever increases. Survives a save because GraphRepository upserts
+    # entities by (model_id, entity_name) rather than deleting them.
+    next_stable_id: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
 
     data_model: Mapped["DataModel"] = relationship(back_populates="entities")
     columns: Mapped[list["EntityColumn"]] = relationship(
@@ -242,6 +253,9 @@ class EntityColumn(Base):
     """An attribute column belonging to an entity."""
 
     __tablename__ = "entity_columns"
+    __table_args__ = (
+        UniqueConstraint("entity_id", "stable_id", name="uq_entity_column_stable_id"),
+    )
 
     column_id: Mapped[uuid.UUID] = _uuid_pk()
     entity_id: Mapped[uuid.UUID] = mapped_column(
@@ -273,6 +287,24 @@ class EntityColumn(Base):
     min_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     regex_pattern: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Stable column identity (Sprint 2, Q6). Allocated once from the entity's
+    # high-water mark and immutable thereafter — a reorder moves
+    # ordinal_position, never this. Becomes the Protobuf field tag in Sprint 3
+    # and lets the diff engine tell a rename from a drop-plus-add in Sprint 4.
+    stable_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Physical constraints (Sprint 2, H4).
+    is_nullable: Mapped[bool] = mapped_column(
+        default=True, server_default=text("true")
+    )
+    is_unique: Mapped[bool] = mapped_column(
+        default=False, server_default=text("false")
+    )
+    default_value: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    check_expression: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # ColumnSchema.references — a qualified 'entity.column' FK target (M6).
+    # Named reference_target in the database because REFERENCES is a reserved
+    # SQL word; the IR field keeps its name.
+    reference_target: Mapped[str | None] = mapped_column(String(257), nullable=True)
 
     entity: Mapped["ModelEntity"] = relationship(back_populates="columns")
 

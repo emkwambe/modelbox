@@ -19,7 +19,7 @@ import datetime
 import enum
 import uuid
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +417,19 @@ class PIIType(str, enum.Enum):
 # ---------------------------------------------------------------------------
 # Core representations (shared by API + LLM output)
 # ---------------------------------------------------------------------------
+# Temporal type tokens, matched case-insensitively against a declared physical
+# type. Kept in one place because the exporters each carry their own copy of
+# this test today (exporter_service._is_temporal, _cube_type, _lookml_type);
+# Sprint 3 should collapse them onto this one.
+_TEMPORAL_TOKENS = ("TIMESTAMP", "DATETIME", "DATE", "TIME")
+
+
+def _is_temporal_type(data_type: str) -> bool:
+    """Whether a declared physical type denotes a date or time."""
+    upper = data_type.upper()
+    return any(token in upper for token in _TEMPORAL_TOKENS)
+
+
 class ColumnSchema(BaseModel):
     """A single attribute column within an entity."""
 
@@ -424,6 +437,17 @@ class ColumnSchema(BaseModel):
 
     name: str = Field(..., description="Column name.", max_length=128)
     data_type: str = Field(..., description="Physical data type.", max_length=64)
+    # Stable per-entity column identity (Sprint 2, Q6). Allocated once at first
+    # persist from a high-water mark on the entity and never reused, so it is
+    # safe as a Protobuf field tag and lets the diff engine tell a rename from a
+    # drop-plus-add. Server-assigned: absent on a new column, echoed back by the
+    # canvas on every subsequent save. Never editable by a client — see
+    # GraphRepository for the allocation rules.
+    stable_id: int | None = Field(
+        default=None,
+        ge=1,
+        description="Server-assigned stable column identity. Read-only.",
+    )
     is_primary_key: bool = False
     is_foreign_key: bool = False
     is_pii: bool = False
@@ -452,6 +476,47 @@ class ColumnSchema(BaseModel):
         description="Regex the column's values must match.",
         max_length=512,
     )
+    # Physical constraints (Sprint 2, H4). Until now the IR could not express
+    # any of these, so four exporters guessed and guessed differently: Avro
+    # declared every non-key column nullable, Protobuf declared nothing
+    # nullable, ODCS restated the primary-key flag, and DDL emitted no
+    # constraint at all. Consumed by the emitters in Sprint 3, not here.
+    is_nullable: bool = Field(
+        default=True,
+        description=(
+            "Whether the column admits NULL. Defaults to True — the SQL "
+            "default, and what the current DDL already implies by emitting no "
+            "NOT NULL — so existing models keep their present meaning. Forced "
+            "False on primary keys."
+        ),
+    )
+    is_unique: bool = Field(
+        default=False,
+        description="A UNIQUE constraint applies (independently of the PK).",
+    )
+    default_value: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Literal or expression used as the column DEFAULT.",
+    )
+    check_expression: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Boolean SQL expression the column's values must satisfy.",
+    )
+
+    @field_validator("is_nullable", mode="after")
+    @classmethod
+    def _primary_keys_are_never_nullable(cls, value: bool, info) -> bool:
+        """A primary key cannot be NULL, whatever the payload claims.
+
+        Enforced in the IR rather than left to each emitter, because the four
+        emitters previously disagreed about exactly this. Databricks also
+        rejects a primary key on a nullable column outright.
+        """
+        if info.data.get("is_primary_key", False):
+            return False
+        return value
 
     @field_validator("pii_type", mode="after")
     @classmethod
@@ -481,6 +546,23 @@ class EntitySchema(BaseModel):
     freshness_sla: str | None = Field(
         default=None, description="Freshness SLA, e.g. '< 1h'.", max_length=64
     )
+    # Default time axis for this entity's measures (Sprint 2). MetricFlow needs
+    # `defaults.agg_time_dimension` on any semantic model declaring measures,
+    # and its absence is one of B1's four parse blockers.
+    #
+    # Entity-level rather than a column-level boolean because MetricFlow's
+    # construct is one-per-semantic-model: a scalar here makes the invalid state
+    # — two columns flagged on one entity — unrepresentable. MetricFlow's
+    # per-measure override also names a dimension rather than flagging one, so a
+    # boolean would be the wrong shape even for that case.
+    #
+    # Legitimately None: an entity with no temporal column has no time axis, and
+    # Sprint 3's emitter gives those no measures rather than inventing one.
+    agg_time_column: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Name of this entity's default aggregation time dimension.",
+    )
     canvas_position_x: float = 0.0
     canvas_position_y: float = 0.0
     columns: list[ColumnSchema] = Field(default_factory=list)
@@ -494,6 +576,32 @@ class EntitySchema(BaseModel):
         if not value:
             raise ValueError("Entity must declare at least one column.")
         return value
+
+    @model_validator(mode="after")
+    def _agg_time_column_is_a_temporal_column(self) -> "EntitySchema":
+        """The named aggregation time dimension must exist and be temporal.
+
+        Checked here so an unemittable semantic model cannot be persisted in the
+        first place, rather than failing later inside ``dbt parse`` where the
+        error names a generated file instead of the model the user edited.
+        """
+        if self.agg_time_column is None:
+            return self
+        column = next(
+            (c for c in self.columns if c.name == self.agg_time_column), None
+        )
+        if column is None:
+            raise ValueError(
+                f"agg_time_column '{self.agg_time_column}' is not a column of "
+                f"entity '{self.entity_name}'."
+            )
+        if not _is_temporal_type(column.data_type):
+            raise ValueError(
+                f"agg_time_column '{self.agg_time_column}' on entity "
+                f"'{self.entity_name}' is {column.data_type}, which is not a "
+                f"date or time type."
+            )
+        return self
 
 
 class RelationshipSchema(BaseModel):

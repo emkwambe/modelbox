@@ -150,6 +150,7 @@ class SynthesisEngine:
                     grain=entity.grain,
                     tier=entity.tier,  # type: ignore[arg-type]
                     freshness_sla=entity.freshness_sla,
+                    agg_time_column=entity.agg_time_column,
                     canvas_position_x=entity.canvas_position_x,
                     canvas_position_y=entity.canvas_position_y,
                     columns=[self._column_to_schema(c) for c in columns],
@@ -324,4 +325,10 @@ class SynthesisEngine:
             max_value=col.max_value,
             regex_pattern=col.regex_pattern,
             ordinal_position=col.ordinal_position,
+            stable_id=col.stable_id,
+            is_nullable=col.is_nullable,
+            is_unique=col.is_unique,
+            default_value=col.default_value,
+            check_expression=col.check_expression,
+            references=col.reference_target,
         )

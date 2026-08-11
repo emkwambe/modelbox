@@ -15,10 +15,10 @@ below needs re-deriving — every decision here has already been ruled.
 | :-- | :-- | :-- |
 | 1 — consolidate persistence (Q8, C6) | **done** | `a273dc3` |
 | — amend `test_odcs_required_reflects_nullability` (C7) | **done** | this commit |
-| 2 — `stable_id` (Q6, C3) | not started | |
-| 3 — constraint fields (H4, C2 capability half) | not started | |
-| 4 — `agg_time_column` (B1's fourth defect) | not started | |
-| 5 — migration + populated-DB verification (C8) | not started | |
+| 2 — `stable_id` (Q6, C3) | **schema+ORM+repo done**, tests pending | this commit |
+| 3 — constraint fields (H4, C2 capability half) | **schema+ORM+repo done**, introspection pending | this commit |
+| 4 — `agg_time_column` (B1's fourth defect) | **schema+ORM+repo done**, gold graphs pending | this commit |
+| 5 — migration written; populated-DB verification (C8) | **migration `0013` written**, verification pending | this commit |
 | 6 — `references` populate/persist (M6, C7 partial) | not started | |
 | 7 — canvas controls | not started | |
 | 8 — synthesis prompt | not started | |
@@ -141,6 +141,43 @@ Closed by this sprint: **C1, C2 (capability half), C3, C6, C8.** C7 partial.
 The sprint prompt listed C7 as closing and omitted C8; C8 is exactly Task 5.
 
 ---
+
+## What landed in the schema+ORM+migration commit
+
+`ColumnSchema`: `stable_id` (server-assigned, `ge=1`), `is_nullable` (default
+`True`, a validator forces `False` on primary keys), `is_unique`,
+`default_value`, `check_expression`. `EntitySchema`: `agg_time_column`, with a
+model validator requiring the named column to exist on the entity and be
+temporal. A shared `_is_temporal_type` helper now lives in `data_model.py` —
+three exporters carry their own copy of that predicate today, and Sprint 3
+should collapse them onto it.
+
+ORM: `model_entities.agg_time_column`, `model_entities.next_stable_id`;
+`entity_columns.stable_id` with `uq_entity_column_stable_id (entity_id,
+stable_id)`, plus the four constraint columns and `reference_target`. The FK
+target column is **not** called `references` — that is a reserved SQL word — but
+the IR field keeps the name.
+
+`GraphRepository.replace_graph` now upserts entities by name instead of
+delete-and-recreate, so the watermark survives a save. Relationships are still
+rebuilt wholesale and are deleted *first*, because they reference the column
+rows a column deletion would otherwise orphan. Allocation lives in
+`_match_existing` / `_next_free_id`.
+
+Migration `0013` is additive: add nullable → backfill → tighten. `stable_id` is
+backfilled as `row_number() OVER (PARTITION BY entity_id ORDER BY
+ordinal_position, column_id)`, which reproduces today's Protobuf tags exactly.
+
+### Still to do on these tasks
+
+- Introspection does not yet populate `is_nullable`/`default_value` (all four
+  engines) or `is_unique`/`check_expression` (where the catalog supports it).
+- The five gold graphs do not yet set `agg_time_column`; 9 of 15 entities can.
+- Round-trip tests (Task 9) are not written. The properties to assert are listed
+  in `SPRINT_2_PROMPT.md`.
+- The populated-database migration verification (Task 5) is not run; the plan is
+  at the end of this file.
+- Canvas (Task 7) and synthesis prompt (Task 8) untouched.
 
 ## Hard constraints
 
