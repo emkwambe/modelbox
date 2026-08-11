@@ -41,16 +41,34 @@ Concretely, in Sprint 1 every §4 fidelity failure becomes an `xfail`-marked tes
 new `backend/tests/test_artifact_fidelity.py`, parameterised across the five gold
 graphs, invoking each artifact's real toolchain:
 
+Delivered in Sprint 1 as `backend/tests/test_artifact_fidelity.py`. Actual state
+after implementation — amended against the estimates this section was drafted
+with, because the harness found more than the audit did:
+
 | Artifact | Verification | Sprint 1 state |
 |---|---|---|
-| DDL (per dialect) | `sqlglot` re-parse + dialect deployability assertions | 4 pass / 3 xfail |
-| dbt | `dbt parse` in a temp project | xfail (2 defects) |
-| MetricFlow | `dbt parse` with semantic models | xfail (4 defects) |
-| Cube.js | JS parse + measure-type assertions | xfail (M3) |
-| ODCS | schema shape + `apiVersion` assertion | xfail (H2) |
-| Avro | `fastavro.parse_schema` | pass — lock it in |
-| Protobuf | `protoc` compile + tag-stability assertion | xfail (H6) |
-| Seed | generated rows validated against the model's own contract | xfail (H1) |
+| DDL (per dialect) | `sqlglot` re-parse, `sqlfluff` dialect grammar, **real DuckDB execution** | re-parse 35/35 pass; grammar 20/20 certified pass, 15 `@preview` xfail; DuckDB executes 5/5 |
+| dbt | `dbt parse` in a generated project | 5/5 parse; xfail H9 (not self-contained), M11 (deprecations), M7 (packages.yml) |
+| MetricFlow | `dbt parse` with semantic models | 24 xfail (B1) |
+| Cube.js | executed in a `vm` sandbox with Cube's globals shimmed | 5/5 valid; 6 xfail (M3) |
+| LookML | none exists offline — **Preview**, structural assertions only | 3 xfail, `@preview`, excluded from burn-down |
+| ODCS | ODCS **v3.1.0** fundamentals (spec confirmed via context7) | 15 xfail (H2, H2-ext, H2/H4) |
+| Avro | `fastavro.parse_schema` | 15/15 pass — locked in |
+| Protobuf | `protoc` compile + tag-stability probe | 5/5 compile; 10 xfail (H6) |
+| Seed | generated rows validated against the model's own contract | 2 xfail (H1) |
+
+**Totals: 107 pass, 4 skip, 94 xfail — of which 76 are the Sprint 3 burn-down
+and 18 are `@preview`.** Run the burn-down with `pytest -m "not preview"`.
+
+Two properties, both amendments made during implementation and adopted:
+
+- **`strict=True` from creation** (supersedes §7.3's original "strict on flip").
+  A fix therefore turns CI red via XPASS until the marker is removed, closing
+  the window in which a repaired defect still reads as debt.
+- **`MODELBOX_FIDELITY_STRICT=1`**, set by the CI tools job. Tests skip when a
+  toolchain is absent so the module is usable in the app venv; with the flag
+  set, a missing toolchain is a hard failure. A gate that silently skips is
+  worse than no gate, because it reports green having verified nothing.
 
 This inverts the usual dynamic. Today a defect is invisible until a customer finds it.
 After Sprint 1, every known defect has a named, failing test with a finding ID, and
@@ -130,6 +148,22 @@ day of labelling, and it is more honest than the status quo, which advertises se
 dialects and deploys on four. Promote a dialect out of preview when a customer needs it,
 with the fidelity harness proving deployability as the gate. Advertising less and
 delivering all of it is the correct posture for a product selling contract reliability.
+
+**Amended in Sprint 1 — the certification boundary is now evidence, not judgement.**
+`sqlfluff`, which carries real per-dialect grammars, independently reproduces exactly
+this split: `postgres`, `snowflake`, `redshift` and `duckdb` parse with zero unparsable
+segments; `bigquery`, `databricks` and `clickhouse` each reject the emitted `CREATE
+TABLE` constraint body. DuckDB additionally *executes* the emitted DDL on all five gold
+graphs, so at least one certified dialect is proven deployable rather than merely
+parseable.
+
+**LookML also drops to Preview.** It is proprietary, no offline parser exists — so it is
+permanently unverifiable in the harness — and the install base does not justify Sprint 3
+effort. The emitter stays behind a Preview label rather than being deleted, and M3
+narrows to Cube only. The Sprint 3 slot this vacates goes to running **SafeSQL Pro over
+ModelBox's own emitted DDL and dbt models** as a harness step: a real security gate on
+generated SQL, dogfooding a sibling product, and a Proof Log claim no competitor can
+make. To be scoped in Sprint 3 planning.
 
 ### Q5 — Should quality rules emit `CHECK` constraints in DDL? **(non-blocking)**
 
@@ -276,9 +310,18 @@ Applies to every sprint unless explicitly amended in the sprint spec.
 1. Every behavioural change has a test; no fix lands without one that would have caught
    the original defect.
 2. CI green across all jobs: backend pytest, artifact-fidelity harness, `tsc --noEmit`,
-   `next build`, `next lint`, alembic-head check.
-3. No new `xfail` without a finding ID and an issue reference. Any xfail flipped to pass
-   is converted to `strict=True` so it can never silently revert.
+   `next build`, `next lint`, alembic-head check. `next lint` runs
+   `continue-on-error` through Sprint 5 and becomes blocking in Sprint 6 (F7) —
+   a new ESLint config failing CI on day one would only train everyone to
+   ignore the pipeline.
+3. No new `xfail` without a finding ID. Every defect xfail is `strict=True`
+   **from creation**, so a fix turns the run red via XPASS until the marker is
+   removed and the inventory can never overstate remaining work. *(Amended in
+   Sprint 1; the original formulation applied strict only once an xfail
+   flipped, which left a window where a repaired defect still read as debt.)*
+   Failures that are labelled rather than repaired — Preview dialects and
+   LookML, per Q4 — carry `@pytest.mark.preview` and are excluded from the
+   burn-down. Sprint completion is defined against non-preview xfails only.
 4. Version stamps consistent across `package.json`, `/health`, compose image tags, and
    release notes — enforced by a CI check once Sprint 1 lands.
 5. Documentation updated in the same PR. No aspirational claims: if the code does not do

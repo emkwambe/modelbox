@@ -883,14 +883,18 @@ def test_cube_boolean_dimensions_are_boolean(gid: str, tmp_path: Path) -> None:
 
 
 # ===========================================================================
-# 5. LookML
+# 5. LookML — PREVIEW
 #
-# No offline LookML parser exists, so these are structural assertions only —
-# recorded as UNVERIFIED-by-toolchain in audit §4.5.
+# LookML is Preview, not certified. It is proprietary, no offline parser
+# exists, so it is permanently unverifiable here (audit §4.5 records it as
+# UNVERIFIED-by-toolchain), and the install base does not justify repair
+# effort. The emitter stays behind a Preview label; these structural
+# assertions are excluded from the Sprint 3 burn-down.
 # ===========================================================================
+@pytest.mark.preview
 @pytest.mark.parametrize("gid", gold_params({
     gid: "M3: LookML excludes the primary key from measures but not foreign "
-         "keys, so SUM() over an FK is emitted."
+         "keys, so SUM() over an FK is emitted. Preview — not scheduled."
     for gid in ("saas-subscription", "ecommerce-orders", "healthcare-ehr")
 }))
 def test_lookml_no_measure_over_foreign_key(gid: str) -> None:

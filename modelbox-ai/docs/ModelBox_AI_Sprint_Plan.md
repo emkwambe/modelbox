@@ -33,15 +33,21 @@ defects — it makes them visible and permanent.
 | M5 | Reconcile version stamps across `package.json`, `/health`, compose image tags, release notes; add a CI check |
 | M10 | Documentation reconciliation — remove the six shipped-features-listed-as-gaps from ROADMAP, the `hvac` dependency claim, DuckDB introspection, the `topological_order` claim |
 | — | Move the four unimplemented research docs to `docs/research/` with status headers |
+| M9 | ESLint config only (pulled forward from Sprint 6; the `next lint` job runs `continue-on-error` until Sprint 6) |
+| — | Three synthetic defect-reproduction fixtures for findings no correct model can express (H1/M7, B1 role-playing dimension, H6 filename) |
 
 **Definition of Done**
 
 - CI green on `main` and required for merge.
-- `pytest` reports a known, documented count of xfails, each carrying a finding ID.
+- `pytest` reports a known, documented count of xfails, each carrying a finding ID:
+  **76 non-preview** (the Sprint 3 burn-down) and **18 `@preview`** (labelled, not
+  scheduled). `MODELBOX_FIDELITY_STRICT=1` in CI so none of it can pass by skipping.
 - No document asserts a capability the code lacks — verifiable by re-reading §2 of the
   audit against the updated docs.
-- `requirements.lock` committed; a fresh `docker build` produces the same resolved
-  versions recorded in the audit's Appendix A.
+- `requirements.lock` committed, **generated inside `python:3.11-slim`** so it carries
+  Linux environment markers and no Windows-only packages; a rebuild reproduces it
+  byte-identically. (Appendix A was a fifteen-package spot check, not a
+  specification — byte-identical reproduction is the property that matters.)
 - Startup fails loudly with masking enabled.
 - Proof Log seeded with its first entries (CI exists; dependency set is reproducible).
 
@@ -97,13 +103,17 @@ harness.
 | H6 | Protobuf tags from `stable_id`, never `enumerate()`; fix `NUMERIC → double`; sanitise filenames |
 | H2 | ODCS: correct `apiVersion` to the current v3 line (verify via context7); `required` from `is_nullable` |
 | H3/Q4 | Dialect certification — verify `postgres`, `snowflake`, `redshift`, `duckdb` deployable; label the other three "Preview" in UI and docs |
-| M3 | Cube and LookML: exclude FKs from measures; fix Cube's missing `BOOLEAN` branch |
-| M7 | Emit `packages.yml` alongside any dbt project using `dbt_expectations` |
+| M3 | Cube: exclude key columns from measures; add the missing `BOOLEAN` branch. LookML is Preview — no longer in scope |
+| M7/H9 | Make the emitted dbt project self-contained: declare the sources its own models reference, and emit `packages.yml` when quality rules produce `dbt_expectations` tests |
+| M11 | Nest generic-test arguments under `arguments:` — dbt 1.11 deprecates top-level arguments |
+| — | **SafeSQL Pro over ModelBox's own output** — every emitted DDL statement and dbt model scanned as a harness step (takes the slot vacated by LookML). Scope during Sprint 3 planning |
 
 **Definition of Done**
 
-- Every §4 xfail flipped to `strict=True` pass, or explicitly deferred with written
-  rationale in the sprint retro.
+- Every **non-preview** xfail flipped to a pass and its marker removed (they are
+  `strict=True` from creation, so an unremoved marker turns CI red), or explicitly
+  deferred with written rationale in the sprint retro. Target: 76 -> 0.
+  `@preview` xfails are labelled, not debt, and are excluded.
 - 5/5 gold graphs parse in every certified emitter's native toolchain.
 - A Protobuf tag-stability test inserts a column and asserts no existing tag moves.
 - Preview dialects are visibly labelled in the export UI — no silent downgrade.
