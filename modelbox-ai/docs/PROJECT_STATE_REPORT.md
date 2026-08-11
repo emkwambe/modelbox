@@ -203,6 +203,26 @@ required top-level set) and fixed. Anything outside it is unexamined rather
 than confirmed clean, and the distinction should survive: a scoped check and an
 audit look identical in a changelog.
 
+### M12 — the UI and the backend disagreed about which dialects exist
+
+*Added 2026-08-11 during Sprint 3, and fixed in the same commit.*
+
+`ExportPanel.tsx` offered five dialects; the exporter accepts seven.
+**`redshift` was certified and unreachable from the UI**, and **`clickhouse`
+was preview and offered without qualification.**
+
+The class matters more than the instance. The fidelity programme verified what
+the *emitters produce*; it never checked what the *UI lets you ask for*. So it
+was certifying a surface users could not fully reach, while users could reach a
+surface it had not verified. Neither the audit nor the harness was wrong about
+its own subject — the gap was between them, which is why nothing caught it.
+
+The rule: every capability the backend exposes should be reachable from the UI,
+and every capability the UI offers should be one the backend certifies. Closed
+by `test_export_ui_offers_exactly_the_dialects_the_backend_supports`, which
+compares the panel's two lists against the harness's and against
+`_SQLGLOT_DIALECTS`, so an eighth dialect cannot drift in on one side only.
+
 ### Findings closed since the audit
 
 | Finding | Status |

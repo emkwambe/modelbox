@@ -434,6 +434,50 @@ def test_templates_ts_is_the_only_gold_source() -> None:
     assert len(GOLD_IDS) == 5, "the Requirements Library is five gold graphs"
 
 
+_EXPORT_PANEL = (
+    Path(__file__).resolve().parents[2]
+    / "frontend" / "src" / "components" / "editor" / "ExportPanel.tsx"
+)
+
+
+def test_export_ui_offers_exactly_the_dialects_the_backend_supports() -> None:
+    """The UI's dialect list must match the backend's, certification included.
+
+    Finding M12. The export panel offered five dialects while the backend
+    accepted seven: `redshift` was **certified and unreachable**, and
+    `clickhouse` was **preview and offered without qualification**. The whole
+    fidelity programme was therefore verifying a surface users could not fully
+    reach, while users could reach a surface it had not verified.
+
+    That is a gap between the harness and the product rather than a bug in
+    either, which is exactly why neither caught it — the audit checked what the
+    emitters produce, never what the UI lets you ask for. This test closes the
+    seam so an eighth dialect cannot drift in on one side only.
+    """
+    source = _EXPORT_PANEL.read_text(encoding="utf-8")
+
+    def declared(name: str) -> list[str]:
+        match = re.search(rf"const {name} = \[(.*?)\];", source, re.S)
+        assert match, f"{name} not found in ExportPanel.tsx"
+        return re.findall(r"'([^']+)'", match.group(1))
+
+    assert declared("CERTIFIED_DIALECTS") == list(CERTIFIED_DIALECTS), (
+        "the UI's certified dialects differ from the ones this harness verifies"
+    )
+    assert declared("PREVIEW_DIALECTS") == list(PREVIEW_DIALECTS), (
+        "the UI's preview dialects differ from the ones this harness labels"
+    )
+
+    # And both must agree with what the exporter will actually accept.
+    from app.services.exporter_service import _SQLGLOT_DIALECTS
+
+    backend = set(_SQLGLOT_DIALECTS) - {"postgresql"}  # an alias, not a dialect
+    assert set(ALL_DIALECTS) == backend, (
+        f"harness covers {sorted(ALL_DIALECTS)} but the exporter accepts "
+        f"{sorted(backend)}"
+    )
+
+
 # ===========================================================================
 # 1. DDL
 # ===========================================================================
