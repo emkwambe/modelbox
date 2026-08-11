@@ -1,13 +1,23 @@
 """Graph persistence repository (FR-1.2).
 
-Single home for writing an entity/relationship graph to the metadata store.
-Backs ``PUT /model/{id}/graph`` (canvas edits) and is the canonical place to
-persist a graph; synthesis/transform currently keep their own copies and can
-delegate here in a later refactor.
+**The** home for writing an entity/relationship graph to the metadata store.
+Every writer goes through :meth:`GraphRepository.replace_graph`:
+
+* ``PUT /model/{id}/graph`` — canvas edits
+* ``POST /connectors/introspect`` — brownfield import
+* :class:`~app.services.synthesis_engine.SynthesisEngine` — new models
+* :class:`~app.services.paradigm_translator.ParadigmTranslator` — transforms
+
+Until v1.7.0 there were three near-identical implementations of this — this one,
+``SynthesisEngine._persist_graph`` and ``ParadigmTranslator._replace_graph`` —
+maintained column-by-column in parallel, with nothing enforcing that they
+agreed (finding Q8, register C6). They were collapsed here before the IR gained
+new fields, so that each field is written in exactly one place.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from sqlalchemy import select
@@ -19,6 +29,8 @@ from app.models.metadata_store import (
     ModelEntity,
 )
 from app.schemas.data_model import EntitySchema, RelationshipSchema
+
+logger = logging.getLogger(__name__)
 
 
 class GraphRepository:
@@ -108,6 +120,14 @@ class GraphRepository:
             from_entity, from_col = self._split_ref(rel.from_ref)
             to_entity, to_col = self._split_ref(rel.to_ref)
             if from_entity not in entity_ids or to_entity not in entity_ids:
+                # A dangling edge is a lint finding (DANGLING_REF), not a write
+                # error — the canvas must still be able to save a work in
+                # progress. Log it so a silently dropped edge is traceable.
+                logger.warning(
+                    "Skipping relationship with unknown entity: %s -> %s",
+                    rel.from_ref,
+                    rel.to_ref,
+                )
                 continue
             self._session.add(
                 EntityRelationship(

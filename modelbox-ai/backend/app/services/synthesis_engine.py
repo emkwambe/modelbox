@@ -37,6 +37,7 @@ from app.schemas.data_model import (
     ValidationReport,
 )
 from app.services.graph_engine import GraphEngine
+from app.services.graph_repository import GraphRepository
 from app.services.llm_gateway import LLMGateway
 
 logger = logging.getLogger(__name__)
@@ -248,72 +249,12 @@ class SynthesisEngine:
         self._session.add(model)
         await self._session.flush()
 
-        await self._persist_graph(model.model_id, synthesized)
+        # One persistence path (Q8). The model is new, so `replace_graph` has
+        # nothing to delete and reduces to a write.
+        await GraphRepository(self._session).replace_graph(
+            model.model_id, synthesized.entities, synthesized.relationships
+        )
         return model
-
-    async def _persist_graph(
-        self, model_id: uuid.UUID, synthesized: SynthesizedModel
-    ) -> None:
-        """Persist entities, columns, and relationships for a model."""
-        entity_ids: dict[str, uuid.UUID] = {}
-        column_ids: dict[tuple[str, str], uuid.UUID] = {}
-
-        for entity in synthesized.entities:
-            row = ModelEntity(
-                model_id=model_id,
-                entity_name=entity.entity_name,
-                entity_type=str(entity.entity_type),
-                canvas_position_x=entity.canvas_position_x,
-                canvas_position_y=entity.canvas_position_y,
-                description=entity.description,
-                grain=entity.grain,
-                tier=str(entity.tier) if entity.tier else None,
-                freshness_sla=entity.freshness_sla,
-            )
-            self._session.add(row)
-            await self._session.flush()
-            entity_ids[entity.entity_name] = row.entity_id
-
-            for position, col in enumerate(entity.columns):
-                col_row = EntityColumn(
-                    entity_id=row.entity_id,
-                    column_name=col.name,
-                    data_type=col.data_type,
-                    is_primary_key=col.is_primary_key,
-                    is_foreign_key=col.is_foreign_key,
-                    is_pii=col.is_pii,
-                    pii_type=str(col.pii_type) if col.pii_type else None,
-                    description=col.description,
-                    is_metric=col.is_metric,
-                    aggregation=col.aggregation,
-                    min_value=col.min_value,
-                    max_value=col.max_value,
-                    regex_pattern=col.regex_pattern,
-                    ordinal_position=col.ordinal_position
-                    if col.ordinal_position is not None
-                    else position,
-                )
-                self._session.add(col_row)
-                await self._session.flush()
-                column_ids[(entity.entity_name, col.name)] = col_row.column_id
-
-        for rel in synthesized.relationships:
-            from_entity, from_col = self._split_ref(rel.from_ref)
-            to_entity, to_col = self._split_ref(rel.to_ref)
-            if from_entity not in entity_ids or to_entity not in entity_ids:
-                logger.warning("Skipping relationship with unknown entity: %s", rel)
-                continue
-            self._session.add(
-                EntityRelationship(
-                    model_id=model_id,
-                    from_entity_id=entity_ids[from_entity],
-                    from_column_id=column_ids.get((from_entity, from_col)),
-                    to_entity_id=entity_ids[to_entity],
-                    to_column_id=column_ids.get((to_entity, to_col)),
-                    cardinality=str(rel.cardinality),
-                )
-            )
-        await self._session.flush()
 
     @staticmethod
     def _split_ref(ref: str) -> tuple[str, str]:
