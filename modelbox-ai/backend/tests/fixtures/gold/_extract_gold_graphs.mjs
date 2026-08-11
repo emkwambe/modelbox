@@ -39,6 +39,7 @@ function toGraph(t) {
       grain: e.grain ?? null,
       tier: e.tier ?? null,
       freshness_sla: e.freshness_sla ?? null,
+      agg_time_column: e.agg_time_column ?? null,
       canvas_position_x: e.canvas_position_x ?? 0,
       canvas_position_y: e.canvas_position_y ?? 0,
       columns: e.columns.map((c) => ({
@@ -55,6 +56,17 @@ function toGraph(t) {
         min_value: c.min_value ?? null,
         max_value: c.max_value ?? null,
         regex_pattern: c.regex_pattern ?? null,
+        // Sprint 2 physical constraints are emitted only when a template
+        // actually sets them. Writing `is_nullable: true` for every column
+        // would put a claim in the fixture that the template never made, and
+        // would contradict the IR for primary keys, which are forced
+        // non-nullable. Absent means "the IR default applies".
+        ...(c.is_nullable === undefined ? {} : { is_nullable: c.is_nullable }),
+        ...(c.is_unique === undefined ? {} : { is_unique: c.is_unique }),
+        ...(c.default_value == null ? {} : { default_value: c.default_value }),
+        ...(c.check_expression == null
+          ? {}
+          : { check_expression: c.check_expression }),
       })),
     })),
     relationships: t.relationships.map((r) => ({

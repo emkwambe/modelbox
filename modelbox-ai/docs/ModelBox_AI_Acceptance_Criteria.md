@@ -130,6 +130,50 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 
 ---
 
+## Verification standard
+
+Three times in Sprint 2 an assertion was written that could not have failed for
+the reason it claimed to test. Stated once here rather than rediscovered again:
+
+1. **Verify from outside the layer under test.** A backfill checked through the
+   ORM can be satisfied by a mapping bug; check it with raw SQL. An emitter rule
+   checked on data where the old and new rules agree proves nothing; supply a
+   discriminating case (correction C7).
+2. **A test must verify its own preconditions.** An exit code means a command
+   ran, not that it achieved its purpose.
+3. **Compare against the previous release, not against the current tree.** The
+   "before" side of a migration or compatibility test is produced from a git
+   worktree at the last tag, so new fields left unset cannot mask a difference.
+4. **A skipped gate must be loud, not absent.** Any test depending on something
+   outside the working tree — a toolchain, a container, a git tag, a network
+   service — can silently degrade to a no-op and report green having verified
+   nothing. Two independent instances in Sprints 1–2, reached from unrelated
+   directions: a failed `dbt` install would have skipped fourteen fidelity
+   gates, and a shallow CI checkout has no tags, so the migration verification
+   would have found no `v1.6.0` worktree and skipped itself. Guard each with a
+   strict environment flag (`MODELBOX_FIDELITY_STRICT`,
+   `MODELBOX_MIGRATION_STRICT`) that turns absence into failure, and remove the
+   cause where you can (`fetch-depth: 0`).
+
+5. **A round-trip test cannot see a defect the round-trip itself corrects.**
+   If the path under test normalises its input on the way through, the assertion
+   measures the repair rather than the thing being tested. Assert at
+   construction as well as after a save.
+
+   Worked example, Sprint 2. `_primary_keys_are_never_nullable` was a Pydantic
+   `field_validator`, and Pydantic does not validate a field that was never
+   supplied — so it did nothing whenever `is_nullable` was omitted, which is
+   every LLM response and every gold graph. The round-trip test passed anyway,
+   because reloading constructs `ColumnSchema` with every field explicit and
+   the rule fired on the way back. The IR was wrong at construction and correct
+   after a save. `POST /model/synthesize` returns the model **directly**, so a
+   freshly synthesised primary key stayed nullable and Sprint 3 would have
+   emitted no `NOT NULL` for it — silently defeating H4, the whole purpose of
+   the sprint that introduced the field.
+
+A criterion whose evidence violates any of these is NOT MET, whatever the test
+reports.
+
 ## Stop conditions
 
 If any of these becomes true, halt the sprint and escalate rather than working around it.
@@ -145,6 +189,14 @@ If any of these becomes true, halt the sprint and escalate rather than working a
 4. A criterion is met by weakening its test rather than fixing the product. This is the
    single most likely failure mode of a self-graded register, and the reason every
    criterion names external evidence.
+
+   Its quieter variant, found in Sprint 2: **a criterion met by a test that cannot
+   distinguish the correct implementation from the current one is NOT MET.** A test
+   passes for the wrong reason when the data it runs on makes two different rules
+   produce identical output — nobody weakens anything, and the criterion closes on a
+   defect that was never fixed. When a criterion depends on a new field, check that the
+   fixtures contain a case where old and new behaviour actually differ. See correction
+   C7.
 5. A public claim ships without a Proof Log ID. The entire trust argument collapses on
    the first instance.
 6. Phase I extends past ten weeks. The engineering is well-mapped; a large overrun means

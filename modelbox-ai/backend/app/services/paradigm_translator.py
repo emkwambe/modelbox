@@ -13,21 +13,16 @@ import logging
 import time
 import uuid
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.metadata_store import (
-    DataModel,
-    EntityColumn,
-    EntityRelationship,
-    ModelEntity,
-)
+from app.models.metadata_store import DataModel
 from app.schemas.data_model import (
     Paradigm,
     SynthesizedModel,
     TransformParadigmRequest,
     TransformParadigmResponse,
 )
+from app.services.graph_repository import GraphRepository
 from app.services.llm_gateway import LLMGateway
 from app.services.synthesis_engine import SynthesisEngine
 
@@ -91,7 +86,9 @@ class ParadigmTranslator:
         )
 
         # Replace the model's graph with the transformed one and bump version.
-        await self._replace_graph(model_id, transformed)
+        await GraphRepository(self._session).replace_graph(
+            model_id, transformed.entities, transformed.relationships
+        )
         model.current_paradigm = str(request.target_paradigm)
         model.version_number += 1
         await self._session.flush()
@@ -124,28 +121,3 @@ class ParadigmTranslator:
             f"Options: {request.options.model_dump()}\n\n"
             f"Current entities:\n{entity_summaries}"
         )
-
-    async def _replace_graph(
-        self, model_id: uuid.UUID, transformed: SynthesizedModel
-    ) -> None:
-        """Delete the existing graph and persist the transformed one."""
-        existing = (
-            await self._session.execute(
-                select(ModelEntity).where(ModelEntity.model_id == model_id)
-            )
-        ).scalars().all()
-        for entity in existing:
-            await self._session.delete(entity)  # cascades to columns
-        rels = (
-            await self._session.execute(
-                select(EntityRelationship).where(
-                    EntityRelationship.model_id == model_id
-                )
-            )
-        ).scalars().all()
-        for rel in rels:
-            await self._session.delete(rel)
-        await self._session.flush()
-
-        # Reuse the synthesis engine's persistence for the new graph.
-        await self._synthesis._persist_graph(model_id, transformed)  # noqa: SLF001

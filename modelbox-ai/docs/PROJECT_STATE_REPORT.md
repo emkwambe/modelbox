@@ -122,6 +122,31 @@ the install base does not justify the effort. M3 narrows to Cube only. The
 LookML assertions carry `@pytest.mark.preview` and are excluded from the Sprint 3
 burn-down.
 
+### C7 — §4.6: a fidelity test that could not distinguish two different rules
+
+*Added 2026-08-11 during Sprint 2.*
+
+`test_odcs_required_reflects_nullability` asserted that ODCS `required` derives
+from `ColumnSchema.is_nullable` rather than restating `is_primary_key`. It
+failed only because the field did not exist.
+
+Sprint 2 adds `is_nullable` defaulting to `True` with primary keys forced
+`False`. Under that rule `not is_nullable` and `is_primary_key` are **equal on
+every column of all five gold graphs** — verified, zero mismatches. The test
+would therefore have gone green the moment the field landed, against an emitter
+that still never read it: passing for the wrong reason, and silently closing a
+Sprint 3 finding that was not fixed.
+
+The gold graphs contain no counterexample because a correct model rarely has a
+non-key column that is also non-nullable by declaration. The test now asserts
+against a mutated copy in which one non-key column per entity is forced
+non-nullable, which separates the two rules. Case count is unchanged at 5 and
+the finding remains xfail until Sprint 3 changes the emitter.
+
+Generalised as stop condition 4 in the Acceptance Criteria register: a criterion
+met by a test that cannot distinguish the correct implementation from the
+current one is NOT MET.
+
 ### Findings closed since the audit
 
 | Finding | Status |

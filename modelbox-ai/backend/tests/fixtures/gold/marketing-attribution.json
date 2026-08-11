@@ -10,6 +10,7 @@
       "grain": "One row per user touchpoint (fully denormalized).",
       "tier": null,
       "freshness_sla": null,
+      "agg_time_column": "event_ts",
       "canvas_position_x": 0,
       "canvas_position_y": 0,
       "columns": [
