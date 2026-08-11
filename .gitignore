@@ -4,3 +4,7 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+backend/.venv-tools/
+modelbox-ai/backend/.venv-tools/
+nul
