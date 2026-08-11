@@ -144,6 +144,16 @@ the reason it claimed to test. Stated once here rather than rediscovered again:
 3. **Compare against the previous release, not against the current tree.** The
    "before" side of a migration or compatibility test is produced from a git
    worktree at the last tag, so new fields left unset cannot mask a difference.
+4. **A skipped gate must be loud, not absent.** Any test depending on something
+   outside the working tree — a toolchain, a container, a git tag, a network
+   service — can silently degrade to a no-op and report green having verified
+   nothing. Two independent instances in Sprints 1–2, reached from unrelated
+   directions: a failed `dbt` install would have skipped fourteen fidelity
+   gates, and a shallow CI checkout has no tags, so the migration verification
+   would have found no `v1.6.0` worktree and skipped itself. Guard each with a
+   strict environment flag (`MODELBOX_FIDELITY_STRICT`,
+   `MODELBOX_MIGRATION_STRICT`) that turns absence into failure, and remove the
+   cause where you can (`fetch-depth: 0`).
 
 A criterion whose evidence violates any of these is NOT MET, whatever the test
 reports.

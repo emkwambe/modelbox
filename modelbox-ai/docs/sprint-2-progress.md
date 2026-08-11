@@ -22,7 +22,7 @@ below needs re-deriving — every decision here has already been ruled.
 | 6 — `references` populate/persist (M6, C7 partial) | not started | |
 | 7 — canvas controls | not started | |
 | 8 — synthesis prompt | not started | |
-| 9 — round-trip tests (C1) | not started | |
+| 9 — round-trip tests (C1) | **DONE** — 9 properties, mutation-proven | Task 9 commit |
 
 **Invariant checked at every commit boundary** — if it moves, the commit that
 moved it is the bug:

@@ -178,6 +178,42 @@ suite" post.
 
 ---
 
+## PL-006 — Column identity is stable, and never reused
+
+**Claim:** "Rename a column, reorder your model, delete a field — the identity
+we assign each column never changes and is never handed to a different column.
+That is what makes an exported contract safe to depend on."
+
+**Evidence:** `test_ir_roundtrip_sprint2.py`, nine passing properties, of which
+three carry the claim: `test_stable_id_is_immutable_across_reorder`,
+`test_stable_id_survives_a_rename`, and
+`test_stable_id_is_never_reused_after_delete`. Backfill of existing data is
+verified separately against real PostgreSQL in
+`test_migration_0013_populated.py::test_backfill_assigns_ordinal_ranked_stable_ids`.
+
+**Why it is stronger than it looks — the test was proven to discriminate.**
+The no-reuse property is the one a plausible-looking implementation appears to
+satisfy: deriving the identity counter from the surviving columns rather than
+storing it passes every other assertion and only fails on the sequence *delete
+the highest column, save, add a column, save*. That implementation was written
+deliberately and run against the suite: **eight of nine tests passed, and only
+the no-reuse proof failed.** The test can fail for the reason it claims to
+test, which register verification standard 1 requires and which correction C7
+showed is not automatic.
+
+**Honest limit:** identity is per entity. Dropping an entity discards its
+counter, so an entity recreated under the same name restarts at 1 — asserted
+deliberately in `test_dropping_and_recreating_an_entity_restarts_ids`, because
+a dropped and recreated table is a new contract rather than a continuation.
+
+**Verified:** 2026-08-11 · **Sprint:** 2 · **Version:** unreleased
+**Expires:** on any change to `GraphRepository._persist_columns`,
+`_match_existing`, or `_next_free_id`.
+**Usable in:** data-contract positioning, Protobuf/wire-compatibility claims
+once Sprint 3 consumes the field, "the fix that recreates the bug" post.
+
+---
+
 ## Claims explicitly NOT yet provable
 
 Recorded so nobody reaches for them early. Each becomes an entry when its test

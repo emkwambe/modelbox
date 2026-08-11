@@ -26,6 +26,11 @@ port that bound to a previous run's container, an exit code taken for arrival,
 and a SQL `GROUP BY` on a non-unique name. Each produced a confident wrong
 answer rather than an error.
 
+**A skipped gate must be loud, not absent.** Anything a test depends on from
+outside the working tree — a toolchain, a container, a git tag — can make it
+degrade to a no-op that reports green. Guard it with a strict flag that turns
+absence into failure, and remove the cause where you can.
+
 **Verify from outside the layer under test.** Checking a persistence backfill
 by reading it through the ORM lets a mapping bug satisfy the assertion; check
 it with raw SQL. Checking an emitter rule against data where two rules produce
