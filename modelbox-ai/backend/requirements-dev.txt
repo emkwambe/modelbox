@@ -1,0 +1,38 @@
+# =============================================================================
+# ModelBox AI — artifact-fidelity verification toolchain
+#
+# Installed into a SEPARATE environment from requirements.txt. Never both.
+# Installing dbt alongside the app dependencies downgrades protobuf
+# (7.35.1 -> 6.33.6), pathspec (1.1.1 -> 0.12.1) and removes mypy — see
+# docs/PROJECT_STATE_REPORT.md Appendix A.
+#
+#   local:  backend/.venv-tools   (app + pytest run in backend/.venv)
+#   CI:     a distinct job step with its own virtualenv
+#
+# Pinned exactly, for the same reason requirements.lock exists: every fidelity
+# verdict in the audit and in CI is a statement about these versions.
+# =============================================================================
+
+# --- The consumers each artifact is verified against ---
+dbt-core==1.11.12            # dbt parse: dbt + MetricFlow projects
+dbt-postgres==1.11.0         # an adapter is required for `dbt parse`
+dbt-metricflow==0.13.0       # semantic-manifest validation
+fastavro==1.12.2             # Avro: parse_schema
+duckdb==1.5.5                # DDL: real execution, not a parser proxy
+sqlfluff==4.3.0              # DDL: second, stricter per-dialect grammar
+
+# --- Shared with the app; pinned to the SAME versions so a fidelity verdict
+#     never diverges from application behaviour. Cross-check against
+#     requirements.lock when either moves. ---
+sqlglot==30.16.0
+pydantic==2.13.4
+PyYAML==6.0.3
+networkx==3.6.1
+
+# --- Test runner ---
+pytest==9.1.1
+
+# External binaries the harness also uses, not installable from PyPI:
+#   protoc  (libprotoc 26.1 verified) — Protobuf compile
+#   node    (v22.18.0 verified)       — Cube.js parse, gold-mirror drift guard
+# Tests that need them skip cleanly when absent.

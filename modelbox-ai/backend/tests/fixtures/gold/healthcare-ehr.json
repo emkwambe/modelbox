@@ -1,0 +1,297 @@
+{
+  "id": "healthcare-ehr",
+  "title": "Healthcare Patient EHR",
+  "paradigm": "3NF",
+  "entities": [
+    {
+      "entity_name": "patient",
+      "entity_type": "TABLE",
+      "description": null,
+      "grain": null,
+      "tier": null,
+      "freshness_sla": null,
+      "canvas_position_x": 0,
+      "canvas_position_y": 0,
+      "columns": [
+        {
+          "name": "patient_id",
+          "data_type": "INTEGER",
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "full_name",
+          "data_type": "VARCHAR(200)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": true,
+          "pii_type": "NAME",
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "ssn",
+          "data_type": "CHAR(11)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": true,
+          "pii_type": "SSN",
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "date_of_birth",
+          "data_type": "DATE",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        }
+      ]
+    },
+    {
+      "entity_name": "provider",
+      "entity_type": "TABLE",
+      "description": null,
+      "grain": null,
+      "tier": null,
+      "freshness_sla": null,
+      "canvas_position_x": 320,
+      "canvas_position_y": 0,
+      "columns": [
+        {
+          "name": "provider_id",
+          "data_type": "INTEGER",
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "full_name",
+          "data_type": "VARCHAR(200)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": true,
+          "pii_type": "NAME",
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "specialty",
+          "data_type": "VARCHAR(96)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        }
+      ]
+    },
+    {
+      "entity_name": "encounter",
+      "entity_type": "TABLE",
+      "description": null,
+      "grain": null,
+      "tier": null,
+      "freshness_sla": null,
+      "canvas_position_x": 640,
+      "canvas_position_y": 0,
+      "columns": [
+        {
+          "name": "encounter_id",
+          "data_type": "INTEGER",
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "patient_id",
+          "data_type": "INTEGER",
+          "is_primary_key": false,
+          "is_foreign_key": true,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "provider_id",
+          "data_type": "INTEGER",
+          "is_primary_key": false,
+          "is_foreign_key": true,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "encounter_ts",
+          "data_type": "TIMESTAMP",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        }
+      ]
+    },
+    {
+      "entity_name": "diagnosis",
+      "entity_type": "TABLE",
+      "description": null,
+      "grain": null,
+      "tier": null,
+      "freshness_sla": null,
+      "canvas_position_x": 0,
+      "canvas_position_y": 240,
+      "columns": [
+        {
+          "name": "diagnosis_id",
+          "data_type": "INTEGER",
+          "is_primary_key": true,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "INTEGER",
+          "is_primary_key": false,
+          "is_foreign_key": true,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "icd10_code",
+          "data_type": "VARCHAR(10)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        },
+        {
+          "name": "description",
+          "data_type": "VARCHAR(255)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": null,
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "from": "encounter.patient_id",
+      "to": "patient.patient_id",
+      "cardinality": "N:1"
+    },
+    {
+      "from": "encounter.provider_id",
+      "to": "provider.provider_id",
+      "cardinality": "N:1"
+    },
+    {
+      "from": "diagnosis.encounter_id",
+      "to": "encounter.encounter_id",
+      "cardinality": "N:1"
+    }
+  ]
+}
