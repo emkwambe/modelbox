@@ -19,9 +19,9 @@ below needs re-deriving — every decision here has already been ruled.
 | 3 — constraint fields (H4, C2 capability half) | **DONE** — introspection reads all four | Task 3 commit |
 | 4 — `agg_time_column` (B1's fourth defect) | **schema+ORM+repo done**, gold graphs pending | this commit |
 | 5 — migration + populated-DB verification (C8) | **DONE** — 3/3, byte-identity held | `31443a6` + Task 5 commit |
-| 6 — `references` populate/persist (M6, C7 partial) | not started | |
-| 7 — canvas controls | not started | |
-| 8 — synthesis prompt | not started | |
+| 6 — `references` populate/persist (M6, C7 partial) | **DONE** | `b12d24c` |
+| 7 — canvas controls | **DONE** | `b12d24c` |
+| 8 — synthesis prompt | **DONE** — weak-model paths tested | Task 8 commit |
 | 9 — round-trip tests (C1) | **DONE** — 9 properties, mutation-proven | Task 9 commit |
 
 **Invariant checked at every commit boundary** — if it moves, the commit that
@@ -208,14 +208,33 @@ then build on it.
 
 ### Still to do
 
-- Task 4: the five gold graphs do not yet set `agg_time_column`; 9 of 15
-  entities can.
-- Task 6: `references` population from introspection/synthesis.
-- Task 7: canvas controls in `ColumnSemanticEditor.tsx`.
-- Task 8: synthesis prompt and response schema — new fields **optional** with
-  server-side defaults, and a model omitting all three must still synthesise.
+All nine tasks are done. Remaining: take PR #3 out of draft, appliance smoke,
+tag.
 
-Then: PR out of draft, appliance smoke, tag.
+## Task 8 outcome — and a defect it found
+
+The Sprint 2 fields were already optional with defaults, so *omission* was
+never the real risk. The likelier weak-model failure is a **plausible-looking
+wrong value**, and `agg_time_column` raised on one — which, because
+`SynthesizedModel` is the Instructor `response_model`, failed the entire
+synthesis. One hallucinated column name and the user got no schema at all.
+The validator now discards an unhonourable hint with a warning and the entity
+becomes dimension-only. Nothing is lost on the canvas path, where the select
+offers only that entity's temporal columns.
+
+**The test caught a real bug in the IR.** Pydantic does not validate a field
+that was never supplied, so `_primary_keys_are_never_nullable` as a
+`field_validator` silently did nothing whenever `is_nullable` was omitted — an
+LLM response, or any gold graph. It is now a `model_validator`, which always
+runs.
+
+Why the Task 9 round-trip test had not caught it: reloading constructs
+`ColumnSchema` with every field explicit, so the rule fired on the way back and
+the round-trip corrected the value. The IR was wrong at construction and right
+after a save — and `POST /model/synthesize` returns the model **directly**, so
+a freshly synthesised primary key stayed nullable, and Sprint 3 would have
+emitted no NOT NULL for it. A round-trip test cannot see a defect the
+round-trip itself repairs.
 
 ## Introspection scope as built (Task 3)
 

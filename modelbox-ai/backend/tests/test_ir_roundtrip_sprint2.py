@@ -330,11 +330,112 @@ async def test_every_new_field_survives_a_full_round_trip(
     )
 
 
-async def test_agg_time_column_must_name_a_temporal_column_on_the_entity(
+def test_an_unhonourable_agg_time_column_is_dropped_not_raised() -> None:
+    """A bad hint degrades the entity to dimension-only; it does not fail.
+
+    This model is the Instructor response_model for synthesis, so raising here
+    would fail the entire SynthesizedModel: one hallucinated column name from a
+    weaker local model and the user gets no schema at all rather than a good
+    schema with one hint missing. See Task 8.
+    """
+    assert entity("t", [col("a")], agg_time_column="missing").agg_time_column is None
+    assert (
+        entity("t", [col("a", "INTEGER")], agg_time_column="a").agg_time_column
+        is None
+    )
+    # A hint that *can* be honoured is kept.
+    kept = entity("t", [col("ts", "TIMESTAMP")], agg_time_column="ts")
+    assert kept.agg_time_column == "ts"
+
+
+# ---------------------------------------------------------------------------
+# Task 8 — a weaker model must still produce a usable schema
+#
+# "LLM-agnostic" is the claim at risk here, and it fails quietly: a response
+# schema only the strongest cloud model satisfies makes air-gapped mode worse
+# with no visible symptom until Sprint 5's provider conformance report, where
+# it would read as a model-quality problem rather than a schema decision taken
+# three sprints earlier.
+# ---------------------------------------------------------------------------
+_MINIMAL_LLM_RESPONSE = {
+    "paradigm": "KIMBALL",
+    "entities": [
+        {
+            "entity_name": "fact_sales",
+            "entity_type": "FACT",
+            "columns": [
+                {"name": "sale_sk", "data_type": "INTEGER", "is_primary_key": True},
+                {"name": "customer_sk", "data_type": "INTEGER",
+                 "is_foreign_key": True},
+                {"name": "amount", "data_type": "NUMERIC(18,2)"},
+            ],
+        },
+        {
+            "entity_name": "dim_customer",
+            "entity_type": "DIMENSION",
+            "columns": [
+                {"name": "customer_sk", "data_type": "INTEGER",
+                 "is_primary_key": True},
+            ],
+        },
+    ],
+    "relationships": [
+        {"from": "fact_sales.customer_sk", "to": "dim_customer.customer_sk",
+         "cardinality": "N:1"},
+    ],
+}
+
+
+def test_a_response_omitting_every_new_field_still_validates() -> None:
+    """The Sprint 2 fields are optional with server-side defaults."""
+    model = SynthesizedModel.model_validate(_MINIMAL_LLM_RESPONSE)
+    fact = model.entities[0]
+    assert fact.agg_time_column is None
+    by_name = {c.name: c for c in fact.columns}
+    assert by_name["sale_sk"].is_nullable is False, "a primary key is never null"
+    assert by_name["amount"].is_nullable is True, "the SQL default applies"
+    assert by_name["amount"].is_unique is False
+    assert by_name["amount"].default_value is None
+    assert by_name["amount"].check_expression is None
+    assert by_name["amount"].references is None
+    assert all(c.stable_id is None for c in fact.columns), (
+        "stable_id is server-assigned; the model must not be asked for one"
+    )
+
+
+def test_a_response_with_an_unhonourable_hint_still_validates() -> None:
+    """A hallucinated column name costs the hint, not the whole schema.
+
+    The likelier weak-model failure is not omission but a plausible-looking
+    wrong value. Raising here would fail the entire SynthesizedModel.
+    """
+    import copy
+
+    payload = copy.deepcopy(_MINIMAL_LLM_RESPONSE)
+    payload["entities"][0]["agg_time_column"] = "order_date"  # no such column
+    payload["entities"][1]["agg_time_column"] = "customer_sk"  # not temporal
+
+    model = SynthesizedModel.model_validate(payload)
+    assert [e.agg_time_column for e in model.entities] == [None, None]
+    assert len(model.entities) == 2, "the schema itself survived"
+    assert len(model.relationships) == 1
+
+
+async def test_a_minimal_response_persists_and_reloads(
     session: AsyncSession, model_id: uuid.UUID
 ) -> None:
-    """Invalid semantic models are rejected at the IR, not inside dbt parse."""
-    with pytest.raises(ValueError, match="not a column of entity"):
-        entity("t", [col("a")], agg_time_column="missing")
-    with pytest.raises(ValueError, match="not a date or time type"):
-        entity("t", [col("a", "INTEGER")], agg_time_column="a")
+    """End to end: a bare response saves and reloads with defaults applied."""
+    model = SynthesizedModel.model_validate(_MINIMAL_LLM_RESPONSE)
+    await save(session, model_id, model.entities, model.relationships)
+
+    reloaded = await reload(session, model_id)
+    assert {e.entity_name for e in reloaded.entities} == {
+        "fact_sales", "dim_customer"
+    }
+    fact = next(e for e in reloaded.entities if e.entity_name == "fact_sales")
+    assert all(c.stable_id is not None for c in fact.columns), (
+        "the server assigned identities the model never supplied"
+    )
+    assert next(c for c in fact.columns if c.name == "amount").is_nullable is True
+    assert len(reloaded.relationships) == 1
+

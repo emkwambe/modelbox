@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import datetime
 import enum
+import logging
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -505,18 +508,26 @@ class ColumnSchema(BaseModel):
         description="Boolean SQL expression the column's values must satisfy.",
     )
 
-    @field_validator("is_nullable", mode="after")
-    @classmethod
-    def _primary_keys_are_never_nullable(cls, value: bool, info) -> bool:
+    @model_validator(mode="after")
+    def _primary_keys_are_never_nullable(self) -> "ColumnSchema":
         """A primary key cannot be NULL, whatever the payload claims.
 
         Enforced in the IR rather than left to each emitter, because the four
-        emitters previously disagreed about exactly this. Databricks also
+        emitters previously disagreed about exactly this, and Databricks
         rejects a primary key on a nullable column outright.
+
+        A ``model_validator`` rather than a ``field_validator``: Pydantic does
+        not validate a field that was never supplied, so as a field validator
+        this silently did nothing in the common case — an LLM response or a
+        gold graph that simply omits ``is_nullable``. A round-trip through the
+        database masked it, because reloading passes every field explicitly and
+        the rule fired on the way back; but ``POST /model/synthesize`` returns
+        the model directly, so a freshly synthesised primary key stayed
+        nullable and Sprint 3 would have emitted no NOT NULL for it.
         """
-        if info.data.get("is_primary_key", False):
-            return False
-        return value
+        if self.is_primary_key and self.is_nullable:
+            self.is_nullable = False
+        return self
 
     @field_validator("pii_type", mode="after")
     @classmethod
@@ -579,11 +590,25 @@ class EntitySchema(BaseModel):
 
     @model_validator(mode="after")
     def _agg_time_column_is_a_temporal_column(self) -> "EntitySchema":
-        """The named aggregation time dimension must exist and be temporal.
+        """Drop an aggregation time dimension that cannot be honoured.
 
-        Checked here so an unemittable semantic model cannot be persisted in the
-        first place, rather than failing later inside ``dbt parse`` where the
-        error names a generated file instead of the model the user edited.
+        An ``agg_time_column`` naming a column that does not exist, or one that
+        is not a date or time, is unemittable — MetricFlow would reject it. It
+        is **discarded with a warning rather than raised**, and the entity
+        becomes dimension-only.
+
+        Rejecting looks stricter and is worse. This model is the Instructor
+        ``response_model`` for synthesis, so a raise fails the whole
+        ``SynthesizedModel``: one hallucinated column name from a weaker local
+        model and the user gets no schema at all instead of a good schema with
+        one hint missing. "LLM-agnostic" is a claim this would quietly break,
+        and the damage would first appear in Sprint 5's provider conformance
+        report looking like a model-quality problem rather than a schema
+        decision made here.
+
+        Nothing is lost on the canvas path: the entity editor offers only that
+        entity's temporal columns, so the UI cannot produce a value this
+        discards.
         """
         if self.agg_time_column is None:
             return self
@@ -591,16 +616,21 @@ class EntitySchema(BaseModel):
             (c for c in self.columns if c.name == self.agg_time_column), None
         )
         if column is None:
-            raise ValueError(
-                f"agg_time_column '{self.agg_time_column}' is not a column of "
-                f"entity '{self.entity_name}'."
+            logger.warning(
+                "Discarding agg_time_column %r on entity %r: no such column.",
+                self.agg_time_column,
+                self.entity_name,
             )
-        if not _is_temporal_type(column.data_type):
-            raise ValueError(
-                f"agg_time_column '{self.agg_time_column}' on entity "
-                f"'{self.entity_name}' is {column.data_type}, which is not a "
-                f"date or time type."
+            self.agg_time_column = None
+        elif not _is_temporal_type(column.data_type):
+            logger.warning(
+                "Discarding agg_time_column %r on entity %r: %s is not a date "
+                "or time type.",
+                self.agg_time_column,
+                self.entity_name,
+                column.data_type,
             )
+            self.agg_time_column = None
         return self
 
 
