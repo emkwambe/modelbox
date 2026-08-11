@@ -23,10 +23,15 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.config import get_settings
+from app.core.logging_config import configure_logging
 from app.services.job_service import JobService
 from app.services.llm_gateway import get_llm_gateway
 
 settings = get_settings()
+
+# Synthesis runs here, so prompts egress from the worker too — it needs the same
+# logging configuration as the API or its routing lines are dropped.
+configure_logging(settings)
 
 celery_app = Celery(
     "modelbox",

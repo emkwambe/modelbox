@@ -14,12 +14,19 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.__version__ import __version__
 from app.core.config import get_settings
 from app.core.database import dispose_engine
+from app.core.logging_config import configure_logging
 from app.services.llm_gateway import get_llm_gateway
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# Install logging before anything else runs. Without this the root logger sits
+# at WARNING under uvicorn's defaults and the gateway's egress line — the only
+# runtime record that a prompt left the box — is silently dropped.
+configure_logging(settings)
 
 
 async def _seed_dev_user() -> None:
@@ -84,7 +91,7 @@ def create_app() -> FastAPI:
     """Application factory — builds and configures the FastAPI instance."""
     app = FastAPI(
         title=settings.app_name,
-        version="1.2.0",
+        version=__version__,
         description="LLM-agnostic enterprise data modeling engine.",
         lifespan=lifespan,
     )

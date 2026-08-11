@@ -15,8 +15,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential libpq-dev curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Install from the lock, not requirements.txt. Every declared dependency is
+# floor-only (>=), so an unpinned build resolves to whatever PyPI serves that
+# day — sqlglot alone sits seven majors past its floor and is the whole DDL
+# engine. requirements.txt is copied too, as the readable declaration of intent.
+COPY requirements.txt requirements.lock ./
+RUN pip install --upgrade pip && pip install -r requirements.lock
 
 COPY . .
 

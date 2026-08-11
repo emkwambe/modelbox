@@ -1,0 +1,8 @@
+{
+  "root": true,
+  "extends": ["next/core-web-vitals"],
+  "ignorePatterns": ["node_modules/", ".next/", "out/", "next-env.d.ts"],
+  "rules": {
+    "@next/next/no-html-link-for-pages": "off"
+  }
+}

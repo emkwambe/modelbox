@@ -75,9 +75,20 @@ class Settings(BaseSettings):
         default=False,
         description="Zero-egress mode (FR-6.2). Forces local-only LLM routing.",
     )
+    # RETIRED (v1.6.0). Prompt masking was documented but never implemented —
+    # `_maybe_mask` was an identity function, so an operator who set this
+    # believed schema identifiers were obfuscated while they were sent verbatim.
+    # It is not being built: tokenising column names while the same request
+    # carries the source requirements document in full leaks the same
+    # semantics, so the control would not hold. The governance story is
+    # air-gapped mode, per-task egress classification, and the egress ledger.
+    # The field survives only as a tripwire that refuses to start.
     mask_metadata_in_prompts: bool = Field(
         default=False,
-        description="Obfuscate sensitive schema/column names before egress.",
+        description=(
+            "RETIRED — never implemented. Setting this to true fails startup. "
+            "Use AIRGAPPED=true for a real zero-egress guarantee."
+        ),
     )
     cost_optimization_mode: CostOptimizationMode = "balanced"
 
@@ -124,6 +135,26 @@ class Settings(BaseSettings):
                     # crashing app startup on a config typo.
                     pass
             return [origin.strip() for origin in stripped.split(",") if origin.strip()]
+        return value
+
+    @field_validator("mask_metadata_in_prompts", mode="after")
+    @classmethod
+    def _reject_retired_masking_flag(cls, value: bool) -> bool:
+        """Refuse to start when a governance flag the code does not honour is set.
+
+        Failing loudly is the only honest option: silently ignoring the flag is
+        what produced a compliance claim the product could not defend.
+        """
+        if value:
+            raise ValueError(
+                "MASK_METADATA_IN_PROMPTS is set, but prompt masking is not "
+                "implemented and has been retired (v1.6.0). It was an identity "
+                "function: schema identifiers were sent to the provider "
+                "unchanged. Remove the variable, or set it to false. For a real "
+                "zero-egress guarantee set AIRGAPPED=true, which strips every "
+                "non-local provider from each task's routing chain. See "
+                "docs/RELEASE_NOTES_v1.6.0.md."
+            )
         return value
 
     @property
