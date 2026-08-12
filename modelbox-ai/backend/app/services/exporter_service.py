@@ -10,6 +10,37 @@ artifacts (FR-4, Blueprint §7):
 
 Pure/stateless — no database or LLM dependencies — so it is trivially testable
 and safe to run in air-gapped deployments.
+
+Declared IR outranks heuristics
+-------------------------------
+A product-wide precedence rule, stated here because it was violated
+independently in two subsystems and the second violation was found only after
+the first was fixed.
+
+Several code paths carry name-driven guesses — a column called ``status`` draws
+from a conventional ACTIVE/INACTIVE/PENDING vocabulary, a column called ``email``
+gets an email-shaped value. Those guesses are useful **only where the model has
+said nothing**. Where the IR declares a constraint — ``check_expression``,
+``min_value``/``max_value``, ``regex_pattern``, a declared ``VARCHAR(n)``,
+``is_unique``, ``is_nullable`` — the declaration wins, always, with no exceptions
+per field.
+
+The failure this prevents is not an oversight, which is why it needs a rule
+rather than a fix per site. In both violations the code had read the model and
+disagreed with it: the seed generator emitted ``INACTIVE`` for a column
+declaring ``CHECK (status IN ('PENDING','DONE'))`` (H1), and the dbt exporter
+emitted an ``accepted_values`` test asserting the same wrong vocabulary (H11).
+A guess that overrides a contract is worse than no guess at all, because it
+looks deliberate.
+
+Two corollaries, both discovered the hard way:
+
+* **Declared constraints can conflict with each other**, and satisfying one
+  must be done knowing the other. A length clamp applied to distinct values can
+  make them identical, violating a declared UNIQUE.
+* **Referential integrity outranks a declared UNIQUE.** A foreign key must
+  repeat whatever the parent holds; a model declaring both is stating a 1:1,
+  and the FK constraint is the one that cannot be bent.
 """
 
 from __future__ import annotations
@@ -245,6 +276,24 @@ class ExporterService:
 
         Emitting the tests without the dependency produced a project that could
         not resolve its own tests (M7).
+
+        **A version range is a list of strings** — ``[">=0.10.0", "<0.11.0"]``.
+        This emitted each bound as a single-key mapping instead, which dbt
+        rejects outright: not a warning, the project will not load at all
+        (H12). It survived a full release because no gold graph declares a
+        quality rule, so no project the harness ever handed to dbt carried a
+        packages.yml, and the test that covered this asserted only that a file
+        with the right name existed.
+
+        **The package is `metaplane/dbt_expectations`.** `calogica/*` is
+        redirected on dbt Hub and resolving it raises PackageRedirectDeprecation
+        — twice, because its own transitive `dbt_date` is redirected too, which
+        is inside the upstream package and not ours to fix. Verified against
+        dbt 1.11.12 on 2026-08-11: `metaplane/dbt_expectations` 0.10.10 pulls
+        `godatadriven/dbt_date` 0.19.0 and resolves with zero deprecations,
+        which is what keeps B12 reachable for a project with quality rules.
+        `scripts/refresh_dbt_packages.py` is the gate that enforces it — the
+        deprecations fire against the registry, so no offline check can see them.
         """
         needs_expectations = any(
             self._dbt_quality_tests(col)
@@ -256,9 +305,10 @@ class ExporterService:
         return yaml.safe_dump(
             {
                 "packages": [
-                    {"package": "calogica/dbt_expectations", "version": [
-                        {">=": "0.10.0"}, {"<": "0.11.0"}
-                    ]}
+                    {
+                        "package": "metaplane/dbt_expectations",
+                        "version": [">=0.10.0", "<0.11.0"],
+                    }
                 ]
             },
             sort_keys=False,
@@ -1253,6 +1303,14 @@ class ExporterService:
         Numeric bounds become ``expect_column_values_to_be_between`` and a regex
         becomes ``expect_column_values_to_match_regex`` — the de-facto dbt way to
         express range/pattern assertions.
+
+        Arguments nest under ``arguments:`` (M14). Sprint 3's M11 made that
+        change for ``accepted_values`` and stopped there, so half of one defect
+        was fixed and the other half raised
+        MissingArgumentsPropertyInGenericTestDeprecation for another release.
+        Nothing caught it because no project containing these tests was ever
+        parsed — the deprecation gate ran on gold graphs, and no gold graph
+        declares a quality rule.
         """
         tests: list[object] = []
         if col.min_value is not None or col.max_value is not None:
@@ -1262,13 +1320,17 @@ class ExporterService:
             if col.max_value is not None:
                 between["max_value"] = col.max_value
             tests.append(
-                {"dbt_expectations.expect_column_values_to_be_between": between}
+                {
+                    "dbt_expectations.expect_column_values_to_be_between": {
+                        "arguments": between
+                    }
+                }
             )
         if col.regex_pattern and col.regex_pattern.strip():
             tests.append(
                 {
                     "dbt_expectations.expect_column_values_to_match_regex": {
-                        "regex": col.regex_pattern
+                        "arguments": {"regex": col.regex_pattern}
                     }
                 }
             )
@@ -1291,18 +1353,54 @@ class ExporterService:
 
     @classmethod
     def _accepted_values(cls, col: ColumnSchema) -> list[str] | None:
-        """Conventional accepted values for a categorical string column, or None.
+        """Accepted values for a categorical string column, or None.
 
-        Matches by column name (exact or ``*_<name>``) against a curated set of
-        well-known enums so the emitted dbt test asserts real values, not guesses.
+        **Declared IR outranks heuristics** — the product-wide precedence rule
+        (see the module docstring). A declared ``CHECK (col IN (...))`` is the
+        model stating its own vocabulary, and it wins outright.
+
+        H11. This used to consult only ``_CATEGORICAL_VALUES``, so a column
+        named ``status`` got ACTIVE/INACTIVE/PENDING even when its model
+        declared ``CHECK (status IN ('PENDING','DONE'))``. The docstring above
+        this one claimed the emitter "never fabricates a values list we can't
+        stand behind", which is precisely what it did the moment the model
+        declared one — and the guess did not merely fill a gap, it overrode the
+        contract.
+
+        The consequence was cross-artifact and therefore invisible to every
+        gate: the exported dbt test demanded one vocabulary while the seed
+        generator, reading the same model correctly after H1, produced another.
+        Each artifact was valid against its own consumer. Together they could
+        not both be right, and only ``dbt build`` could see it.
         """
         if not cls._is_string_type(col):
             return None
+
+        declared = cls._check_enum_literals(col.check_expression)
+        if declared:
+            return declared
+
         name = col.name.lower()
         for key, values in _CATEGORICAL_VALUES.items():
             if name == key or name.endswith(f"_{key}"):
                 return values
         return None
+
+    @staticmethod
+    def _check_enum_literals(expression: str | None) -> list[str] | None:
+        """Allowed literals from a simple ``col IN ('a', 'b')`` CHECK.
+
+        Deliberately as narrow as the seed generator's `_check_enum`, and for
+        the same reason: an emitter cannot evaluate an arbitrary SQL predicate,
+        and pretending to would be untested handling that fails silently on the
+        first expression it cannot parse. Anything that is not an enumeration
+        falls through to the heuristics, which is the correct behaviour — the
+        model has not stated a vocabulary, so there is nothing to outrank.
+        """
+        if not expression or " IN " not in expression.upper():
+            return None
+        literals = re.findall(r"'([^']*)'", expression)
+        return literals or None
 
     def _cube_type(self, col: ColumnSchema) -> str:
         if _is_temporal_type(col.data_type):

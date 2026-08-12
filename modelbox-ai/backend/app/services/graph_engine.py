@@ -37,6 +37,41 @@ _PREFIX_BY_TYPE: dict[str, str] = {
     "SATELLITE": "sat_",
 }
 _SNAKE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+_LENGTH_RE = re.compile(r"(?:VAR)?CHAR\s*\(\s*(\d+)\s*\)", re.IGNORECASE)
+# Literals, character classes and escapes, each optionally repeated. Only the
+# constructs the seed generator can actually produce a value for.
+_PATTERN_TOKEN = re.compile(
+    r"(?:\[[^\]]+\]|\\[dws]|[A-Za-z0-9_@.\-/ ])(?:\{(\d+)(?:,\d*)?\})?"
+)
+
+
+def _declared_length(data_type: str) -> int | None:
+    match = _LENGTH_RE.search(data_type)
+    return int(match.group(1)) if match else None
+
+
+def _min_match_length(pattern: str) -> int | None:
+    """Shortest string the pattern can match, or None if it is not obvious.
+
+    Silence on anything unrecognised is the point. A lint that guesses produces
+    false warnings on valid models, and a false warning on a governance surface
+    costs more than a missed one — users stop reading the panel. So this
+    handles only the grammar the seed generator itself supports, and declines
+    on alternation, groups, optionals, or anything else it cannot bound
+    exactly.
+    """
+    body = pattern.strip().removeprefix("^").removesuffix("$")
+    if not body or any(ch in body for ch in "|()?*+"):
+        return None
+    total = 0
+    position = 0
+    for match in _PATTERN_TOKEN.finditer(body):
+        if match.start() != position:
+            return None
+        position = match.end()
+        total += int(match.group(1) or 1)
+    return total if position == len(body) else None
 _KEY_SUFFIXES = ("_id", "_sk", "_key", "_hk", "_pk")
 # Column-name fragments that strongly imply personal data. Kept specific to
 # avoid false positives — e.g. "ip_address" (not bare "ip", which would match
@@ -455,8 +490,21 @@ class GraphEngine:
         * ``INVALID_RANGE`` — a numeric range whose min exceeds its max (no row
           can satisfy it), and
         * ``INVALID_REGEX`` — a pattern that does not compile (would crash the
-          generated test).
+          generated test), and
+        * ``PATTERN_EXCEEDS_LENGTH`` — a pattern whose shortest possible match
+          is longer than the column's declared length, so no value can satisfy
+          both constraints.
         Correctly-formed rules stay quiet — good quality is rewarded with silence.
+
+        The third came out of H1. The seed generator clamps values to a declared
+        ``VARCHAR(n)``, but refuses to clamp one it generated from a regex,
+        because truncating a value breaks the pattern it was produced to
+        satisfy. That refusal is right, and it leaves a real contradiction with
+        nowhere to go: ``VARCHAR(6)`` with ``^[A-Z]{3}-\\d{4}$`` cannot be
+        satisfied by any string, and the generator is the wrong place to say so.
+        A model that contradicts itself is a modelling error, and reporting
+        modelling errors is what this surface is for — a generator can only
+        pick the constraint it will violate.
         """
         issues: list[ValidationIssue] = []
         for entity in entities:
@@ -488,6 +536,26 @@ class GraphEngine:
                                 message=(
                                     f"Column '{entity.entity_name}.{column.name}' has an "
                                     f"invalid regex pattern: {exc}."
+                                ),
+                                entities=[entity.entity_name],
+                                entity_name=entity.entity_name,
+                                column_name=column.name,
+                            )
+                        )
+                        continue
+                    limit = _declared_length(column.data_type)
+                    shortest = _min_match_length(pattern)
+                    if limit is not None and shortest is not None and shortest > limit:
+                        issues.append(
+                            ValidationIssue(
+                                severity="warning",
+                                code="PATTERN_EXCEEDS_LENGTH",
+                                message=(
+                                    f"Column '{entity.entity_name}.{column.name}' "
+                                    f"is {column.data_type} but its pattern "
+                                    f"{pattern} cannot match anything shorter "
+                                    f"than {shortest} characters, so no value "
+                                    f"can satisfy both."
                                 ),
                                 entities=[entity.entity_name],
                                 entity_name=entity.entity_name,

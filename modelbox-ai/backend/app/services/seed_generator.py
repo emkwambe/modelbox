@@ -161,6 +161,10 @@ class SyntheticSeedGenerator:
         deliberate: the generator did not overlook the contract, it disagreed
         with it and won. Anything the IR states is now consulted first, and the
         heuristics only decide what the IR leaves open.
+
+        The same violation was later found in the dbt exporter (H11), so the
+        rule is stated once for the whole product in
+        ``app/services/exporter_service`` rather than twice as a local note.
         """
         name = col.name.lower()
         t = col.data_type.upper()

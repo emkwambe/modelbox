@@ -473,6 +473,87 @@ def test_valid_regex_is_quiet(engine: GraphEngine) -> None:
     assert "INVALID_REGEX" not in _codes(report)
 
 
+def test_pattern_longer_than_the_declared_length_is_flagged(
+    engine: GraphEngine,
+) -> None:
+    """A pattern no value of the declared length can match is a contradiction.
+
+    Came out of H1. The seed generator clamps to a declared length but will not
+    clamp a regex-generated value, because truncating it breaks the pattern it
+    was generated to satisfy. Both constraints are declared and they exclude
+    each other, so the generator can only choose which one to violate — saying
+    so is this surface's job, not the generator's.
+    """
+    report = engine.validate(
+        [
+            entity(
+                "t",
+                [
+                    col("id", pk=True),
+                    col(
+                        "ref_code",
+                        data_type="VARCHAR(6)",
+                        regex_pattern=r"^[A-Z]{3}-\d{4}$",  # needs 8
+                    ),
+                ],
+            )
+        ],
+        [],
+    )
+    assert "PATTERN_EXCEEDS_LENGTH" in _codes(report)
+    assert report.is_valid is True, "advisory, like every other quality lint"
+
+
+def test_pattern_that_fits_its_declared_length_is_quiet(
+    engine: GraphEngine,
+) -> None:
+    """The discriminating half: the same pattern in a column wide enough.
+
+    Without this the lint could fire on every patterned column and still look
+    correct — VARCHAR(8) and VARCHAR(6) differ only in whether the pattern fits.
+    """
+    report = engine.validate(
+        [
+            entity(
+                "t",
+                [
+                    col("id", pk=True),
+                    col(
+                        "ref_code",
+                        data_type="VARCHAR(8)",
+                        regex_pattern=r"^[A-Z]{3}-\d{4}$",
+                    ),
+                ],
+            )
+        ],
+        [],
+    )
+    assert "PATTERN_EXCEEDS_LENGTH" not in _codes(report)
+
+
+def test_unbounded_pattern_is_not_guessed_at(engine: GraphEngine) -> None:
+    """A pattern the estimator cannot bound exactly must stay silent.
+
+    A false warning on a governance panel costs more than a missed one: users
+    stop reading it. `[A-Z]+` can match one character, so it fits any column,
+    and anything with alternation or groups is declined outright.
+    """
+    report = engine.validate(
+        [
+            entity(
+                "t",
+                [
+                    col("id", pk=True),
+                    col("a", data_type="VARCHAR(2)", regex_pattern=r"^[A-Z]+$"),
+                    col("b", data_type="VARCHAR(2)", regex_pattern=r"^(abc|de)$"),
+                ],
+            )
+        ],
+        [],
+    )
+    assert "PATTERN_EXCEEDS_LENGTH" not in _codes(report)
+
+
 def test_quality_lints_are_warnings_only(engine: GraphEngine) -> None:
     """A broken quality rule never invalidates the model — advisory only."""
     report = engine.validate(

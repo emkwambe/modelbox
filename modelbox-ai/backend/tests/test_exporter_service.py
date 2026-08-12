@@ -250,7 +250,12 @@ def test_quality_rules_propagate_to_exports() -> None:
         if isinstance(t, dict)
         and "dbt_expectations.expect_column_values_to_be_between" in t
     )
-    assert between == {"min_value": 0, "max_value": 100}
+    # Nested under `arguments:` since M14 — dbt deprecates top-level args on a
+    # generic test, and this assertion previously locked in the deprecated
+    # shape. Values compared as floats: the IR carries the bounds as numbers,
+    # and re-asserting the literal ints would be asserting the YAML round-trip
+    # rather than the emitted contract.
+    assert between == {"arguments": {"min_value": 0.0, "max_value": 100.0}}
     email_tests = cols["email"]["data_tests"]
     regex = next(
         t["dbt_expectations.expect_column_values_to_match_regex"]
@@ -258,7 +263,7 @@ def test_quality_rules_propagate_to_exports() -> None:
         if isinstance(t, dict)
         and "dbt_expectations.expect_column_values_to_match_regex" in t
     )
-    assert regex == {"regex": r"^[^@]+@[^@]+$"}
+    assert regex == {"arguments": {"regex": r"^[^@]+@[^@]+$"}}
 
     # ODCS: column-level quality assertions.
     odcs = yaml.safe_load(

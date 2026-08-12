@@ -77,6 +77,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r modelbox-ai/backend/requirements-dev.txt
 
+      - name: Populate the offline dbt package cache
+        # `dbt build` needs the project's packages installed, and `dbt deps`
+        # fetches them. Doing that here rather than inside a test keeps the
+        # harness itself offline: a gate that can fail because a package
+        # registry is slow is not a gate.
+        #
+        # The script also FAILS on any deprecation dbt reports while resolving
+        # the exporter's own packages.yml. Those fire against the registry, so
+        # this step is the only place they are observable at all (M15) — and
+        # the diff check makes a resolution that no longer matches the
+        # committed lock a red build rather than a silent drift.
+        run: |
+          cd modelbox-ai/backend
+          python scripts/refresh_dbt_packages.py
+          git diff --exit-code tests/fixtures/dbt/package-lock.yml
+
       - name: Run Fidelity Harness
         # MODELBOX_FIDELITY_STRICT turns a missing toolchain into a hard failure.
         # Without it a failed install would make every gate skip and this job

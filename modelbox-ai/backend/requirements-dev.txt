@@ -11,11 +11,22 @@
 #
 # Pinned exactly, for the same reason requirements.lock exists: every fidelity
 # verdict in the audit and in CI is a statement about these versions.
+#
+# Lock delta, recorded per install because the resolver has mutated this
+# environment before:
+#
+#   dbt-duckdb==1.11.0 (Sprint 4, for B13) — added one line. Nothing moved,
+#   nothing was removed, `pip check` clean. The `duckdb==1.5.5` already here
+#   for direct DDL execution satisfied it, so the adapter arrived alone. This
+#   is deliberately noted as a *non*-event: dbt-core moving protobuf and
+#   pathspec was about mixing two dependency sets, not about dbt adapters
+#   being volatile. One instance, not a class.
 # =============================================================================
 
 # --- The consumers each artifact is verified against ---
 dbt-core==1.11.12            # dbt parse: dbt + MetricFlow projects
 dbt-postgres==1.11.0         # an adapter is required for `dbt parse`
+dbt-duckdb==1.11.0           # dbt build: execution, against no external server
 dbt-metricflow==0.13.0       # semantic-manifest validation
 fastavro==1.12.2             # Avro: parse_schema
 duckdb==1.5.5                # DDL: real execution, not a parser proxy

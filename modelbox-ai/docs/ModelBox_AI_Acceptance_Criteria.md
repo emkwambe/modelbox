@@ -51,11 +51,11 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | B8 ◆ | `required` in ODCS reflects declared nullability, not primary-key status | `test_odcs_required_reflects_nullability` | 3 |
 | B9 ◆ | DDL emits in topological order; a deliberately non-parent-first model still deploys | `test_ddl_order_is_topological` | 3 |
 | B10 | No Cube measure aggregates a key column — primary **or** foreign — and BOOLEAN columns are typed boolean. LookML is Preview and out of scope | `test_cube_no_measure_over_key`, `test_cube_boolean_dimensions_are_boolean` | 3 |
-| B11 | A dbt project emitted with quality rules resolves — `packages.yml` present | `test_dbt_declares_packages_yml` | 3 |
+| B11 | A dbt project emitted with quality rules resolves — `packages.yml` present **and accepted by dbt** | `test_dbt_declares_packages_yml` (hands the project to dbt), `test_dbt_parses[quality-rules]` | 3, corrected 4 |
 | M12 | Every dialect the backend accepts is reachable from the export UI, and every dialect the UI offers is one the backend certifies | `test_export_ui_offers_exactly_the_dialects_the_backend_supports` | 3 |
 | B14 | A dbt project emitted with no hand-written scaffolding parses standalone — the exporter declares the sources its own models reference | `test_dbt_project_is_self_contained`, 5/5 (H9) | 3 |
-| B12 | dbt output raises zero deprecation warnings | `test_dbt_no_deprecations`, 5/5 (M11) | 3 |
-| B13 ◆ | Generated seed data passes the contract the same model exports — `dbt build` succeeds on own fixtures | `test_seed_respects_*`, 5/5 | 4 |
+| B12 | dbt output raises zero deprecation warnings, including for a project that declares packages | `test_dbt_no_deprecations`, 6/6 (M11, M14); `scripts/refresh_dbt_packages.py` fails on a redirected package (M15) | 3, extended 4 |
+| B13 ◆ | Generated seed data passes the contract the same model exports — `dbt build` succeeds on own fixtures | `test_dbt_build_succeeds_on_generated_seed_data` (primary — seeds, runs and tests in DuckDB), `test_seed_respects_*` | 4 |
 
 ## C. IR completeness
 
@@ -230,6 +230,40 @@ the reason it claimed to test. Stated once here rather than rediscovered again:
    carry a deliberate gap (1). Two independent fixture properties, either of
    which alone would have made the check meaningless. A suite can be one
    fixture property away from proving nothing.
+
+10. **An artifact can be valid and still be wrong, if it contradicts another
+    artifact from the same model.** Every gate above this one asks whether one
+    output satisfies its own consumer. That question cannot see a disagreement
+    *between* outputs, and the disagreement is the defect the user actually
+    experiences.
+
+    Found in Sprint 4. The dbt exporter emitted an `accepted_values` test
+    asserting `ACTIVE/INACTIVE/PENDING` while the seed generator, reading the
+    same model's `CHECK (status IN ('PENDING','DONE'))` correctly, produced
+    `PENDING` and `DONE` (H11). The contract was valid dbt. The seed was valid
+    against the model. Shipped together they fail on the first run, and the
+    only gate that could see it was `dbt build` — one artifact executed against
+    another.
+
+    Prefer a gate that makes two artifacts meet over two gates that check them
+    separately.
+
+11. **A gate is only as broad as the fixtures it is parameterised over, and
+    that breadth must itself be asserted.** Standard 8 says a fixture must
+    exercise the feature; this says something has to *check* that it still
+    does, because the failure is silent and reads as success.
+
+    Sprint 4 found four defects (H11, H12, M14, M15) in one blind spot: every
+    dbt gate ran over the five gold graphs, no gold graph declares a quality
+    rule, and so no project dbt had ever been handed contained a
+    `dbt_expectations` test or a `packages.yml`. A malformed `packages.yml`
+    that made dbt refuse to load the project shipped in a release whose dbt
+    gates were all green.
+
+    `test_seed_fixtures_exercise_every_declared_rule` is the executable form:
+    it enumerates the rules the suite asserts and fails when no fixture
+    declares one. It fails on a *fixture* regression rather than a code
+    regression, which is a category the suite previously had no member of.
 
 A criterion whose evidence violates any of these is NOT MET, whatever the test
 reports.
