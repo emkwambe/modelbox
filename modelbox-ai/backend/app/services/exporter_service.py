@@ -621,8 +621,15 @@ class ExporterService:
         fields: list[dict[str, object]] = []
         for col in entity.columns:
             avro_type = self._avro_type(col.data_type)
-            # Non-key columns are nullable via a ["null", T] union defaulting null.
-            if not col.is_primary_key:
+            # Nullability comes from `is_nullable`, never from `is_primary_key`.
+            # This branched on the key flag until Sprint 5, which is the same
+            # fact on all five gold graphs — every key is non-nullable and every
+            # non-key column is nullable — so the defect was invisible to every
+            # test that existed (correction C7). A column declared NOT NULL in
+            # DDL and `required` in ODCS was emitted as a nullable union here,
+            # and the three artifacts disagreed about the same IR field.
+            # Found by the cross-artifact gate on its first run.
+            if col.is_nullable:
                 field: dict[str, object] = {
                     "name": col.name,
                     "type": ["null", avro_type],

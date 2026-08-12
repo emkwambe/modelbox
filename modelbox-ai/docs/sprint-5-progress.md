@@ -18,7 +18,7 @@ every commit boundary, not at sprint end.
 
 ---
 
-## Current state — last verified 2026-08-12, at `6863e07`
+## Current state — last verified 2026-08-12, at `Task 4`
 
 A recorded baseline, so a restart can tell whether a number *moved* rather than
 only what it is. A count that differs from this table is a finding, and the
@@ -26,7 +26,7 @@ commit that moved it is where to look.
 
 | Measure | Value | How |
 | :-- | :-- | :-- |
-| App suite | **480 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
+| App suite | **519 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
 | Fidelity, non-preview xfails | **0** | `MODELBOX_FIDELITY_STRICT=1 .venv-tools/Scripts/python -m pytest tests/test_artifact_fidelity.py -m "not preview" -q` |
 | Fidelity, preview xfails | **18** | same, with `-m "preview"` |
 | Ruff over `app` + `tests` | **69**, all pre-existing | `.venv/Scripts/python -m ruff check app tests` |
@@ -440,7 +440,92 @@ the only case that exercised the stripping.
 
 ---
 
-## Task 4 — Cross-artifact consistency gate (standard 10) — DESIGN, not built
+## Task 4 — Cross-artifact consistency gate (standard 10)
+
+**Done, and it found a real defect on its first run.**
+`tests/test_cross_artifact_consistency.py`, 39 tests.
+
+### The defect: Avro read the wrong IR field
+
+`_avro_schema` decided nullability from `col.is_primary_key`, not
+`col.is_nullable` — the comment even said "non-key columns are nullable". So a
+column declared `NOT NULL` in DDL and `required: true` in ODCS was emitted as a
+nullable `["null", T]` union in Avro. Three artifacts, same IR field, two
+answers.
+
+**It was invisible to every test that existed**, because on all five gold graphs
+every primary key is non-nullable and every non-key column is nullable —
+`not is_nullable` and `is_primary_key` are the same partition. That is
+correction C7, and this is the third time it has cost something. The mutated
+fixture that exists precisely for it is what exposed the defect, on the first
+run of the gate, before any mutation was attempted.
+
+Fixed in the same commit, with the reasoning at the site.
+
+### Shape, as designed
+
+A projection reads one IR field out of one emitted artifact:
+`(artifact, field) → {(entity, column): value}`. The gate groups **by IR field**
+and asserts all projections agree. No pair is named anywhere. Currently:
+`is_nullable` from four DDL dialects + ODCS + Avro; `is_primary_key` from four
+DDL dialects + ODCS.
+
+Everything parses — sqlglot for DDL, yaml for ODCS, json for Avro. Never
+substrings.
+
+**Venue changed from the design: the app suite, not `.venv-tools`.** The design
+assumed Avro and Protobuf projections would need `fastavro` and `protoc`. They
+do not: an `.avsc` *is* JSON, so `json.loads` is the correct parse for
+structure, and Protobuf turned out to carry no nullability at all (below). Every
+current projection parses with tools present in `.venv`, so the gate runs on
+every commit rather than only under the fidelity harness — strictly better
+coverage. Artifact *validity* is still asserted against each consumer's own
+parser in `test_artifact_fidelity.py`; this gate assumes it.
+
+### The second finding: Protobuf carries no field presence
+
+proto3 emits no `optional` keyword, so every scalar field has implicit presence
+and the artifact says nothing about nullability. It therefore has no
+`is_nullable` projection — and that is recorded as a finding rather than an
+omission. `test_protobuf_carries_no_field_presence` **fails the day the emitter
+starts emitting `optional`**, which is the day a projection should be added.
+
+Whether the emitter *should* emit `optional` is a product decision, not a
+mechanical one, and is left open.
+
+### Breadth, closed from both ends
+
+* IR side: every `ColumnSchema` field carries ≥2 projections or a written
+  `EXEMPT` reason. Enumerated from `model_fields`, so a new field fails until
+  someone decides.
+* Artifact side: contract formats are discovered by asking the exporter what it
+  accepts, not from a list, so a fifth format cannot arrive uncovered.
+* **A field with exactly one projection is a failure**, not a pass.
+* Exemptions carry reasons; `test_no_exemption_is_silent` also fails on a stale
+  exemption for a field the IR no longer has.
+* `test_each_field_actually_varies_across_the_fixtures` — a projection over a
+  constant proves nothing, so the fixtures must make each field vary.
+* `test_entity_names_canonicalise_injectively` — the join canonicalises
+  `DimCustomer` to `dim_customer`, and must never merge two entities.
+
+`data_type` is exempt with the stated reason: each artifact renders its own type
+system, equality across them is not the property, and a comparison would have to
+be loosened until it passed.
+
+### Mutation results
+
+| # | Mutant | Killed by |
+| :-- | :-- | :-- |
+| 15 | *(not a mutant — the real Avro defect)* | the gate itself, first run, 5 models |
+| 16 | A field registered with a single projection | `test_no_field_has_a_single_projection` + 2 others |
+| 17 | An `EXEMPT` entry removed | `test_every_ir_field_is_projected_or_exempt` |
+
+Row 15 is the strongest evidence available that the gate discriminates: it
+failed for a real reason, on real output, and went green on a real fix.
+
+---
+
+## Task 4 — original design (kept for the record)
 
 Scoped and unblocked, not implemented. Written down so the next session starts
 from a decision rather than a blank file.
@@ -615,8 +700,8 @@ timed rather than refuted.
 | :-- | :-- |
 | 2 — Per-task residency (D5, D8) | **done** |
 | 3 — Air-gapped mode that proves itself (D6, D7, Q1) | **done** |
-| 4 — Cross-artifact consistency gate (standard 10) | **next** — designed above, not built |
-| 5 — Provider conformance harness (D10) | not started; threshold must be written before the first call |
+| 4 — Cross-artifact consistency gate (standard 10) | **done** — found and fixed an Avro/DDL/ODCS disagreement |
+| 5 — Provider conformance harness (D10) | **next** — own session; threshold in writing before the first call |
 | 6 — Security FAQ (G2) | not started |
 | 7 — Unassisted install (G1) | pending an evaluator; Eddy arranges |
 | 8 — One Trainer lab (H4) | not started |
