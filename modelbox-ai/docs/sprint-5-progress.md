@@ -549,6 +549,38 @@ Scope when it runs: mechanical, one pass over the suite, no fixes in the same
 commit as the finding. Anything it turns up is a register entry before it is a
 repair.
 
+### Venue five, and why the scope stays narrow anyway
+
+A fifth instance appeared while this proposal was being written, and it was not
+a gate and not in the suite. **This document** carried every ruling and all
+fourteen mutation results and no test counts at all — so a restart could report
+the current numbers and nothing recorded could say whether they were the right
+ones. Present, plausible, unverifiable: the same shape, in the handoff artifact
+instead of the code. Fixed by the baseline table above, which turns a divergent
+count into a finding with a commit range attached.
+
+That argues the eventual aperture is wider than "every gate in the suite" — the
+general form is *of every artifact that carries a claim, what would have to be
+different for it to be wrong, and would anything notice?* Register rows, Proof
+Log entries and this file all qualify.
+
+**The first pass stays narrow regardless**, and deliberately:
+
+* The narrow sweep is bounded — fourteen-odd gates, one question each — and
+  every instance it finds is of a shape already proven to recur four times.
+* The wide version is an open-ended audit of everything the programme has
+  written, proposed at the point where Sprint 5 still has four tasks left and
+  its only genuine unknown ahead of it.
+* **The first pass is the evidence for whether the second is needed.** Six
+  findings in gates would clearly justify a document-level pass. One finding
+  would suggest the pattern is more concentrated in tests than five venues
+  make it look.
+
+So: narrow pass first, at sprint close. Scope of any second pass decided after
+the first reports, not before. This is a budget decision as much as a
+methodological one — introspection competes with Tasks 4 through 8, and Task 5
+is the one that cannot be rushed.
+
 ---
 
 ## Remaining
