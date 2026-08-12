@@ -194,7 +194,16 @@ class ExporterService:
             # NOT NULL from the declared constraint (H4). Emitting nothing made
             # every column implicitly nullable, which is also why Databricks
             # rejected the emitted primary keys outright.
+            #
+            # DEFAULT from `default_value` (M13). Sprint 2 added the field and
+            # only persistence consumed it, so it round-tripped into a void:
+            # register C2 claimed all four constraints reach every consuming
+            # emitter, and this one reached none. The IR stores the value
+            # already quoted where quoting is needed, so it is emitted verbatim
+            # rather than re-quoted — a literal the model authored, not one
+            # this emitter invents.
             f"    {col.name} {col.data_type}"
+            + (f" DEFAULT {col.default_value}" if col.default_value else "")
             + ("" if col.is_nullable else " NOT NULL")
             for col in entity.columns
         ]
@@ -564,6 +573,9 @@ class ExporterService:
                     # Shorthand notation, <object>.<property>, which is exactly
                     # the shape ColumnSchema.references already stores.
                     prop["relationships"] = [{"to": col.references}]
+                options = self._odcs_logical_type_options(col)
+                if options:
+                    prop["logicalTypeOptions"] = options
                 quality = self._odcs_quality(col)
                 if quality:
                     prop["quality"] = quality
@@ -1338,18 +1350,95 @@ class ExporterService:
 
     @staticmethod
     def _odcs_quality(col: ColumnSchema) -> list[dict[str, object]]:
-        """Declared quality rules -> ODCS column ``quality`` assertions (U3)."""
+        """Declared rules -> ODCS v3.1.0 property ``quality`` entries (H10).
+
+        The old output was `{"rule": "range", "mustBeGreaterThanOrEqualTo": …}`
+        and `{"rule": "regex", "pattern": …}`. **`rule` is not an ODCS key**,
+        and neither shape appears anywhere in the standard.
+
+        A v3.1.0 entry is `{id, type, metric, mustBe*, arguments, unit,
+        description}`, where `metric` names a library metric that returns a
+        number and `mustBe*` compares it. The one that fits a declared domain
+        constraint is `invalidValues`: it counts rows failing the constraint, so
+        the assertion is `mustBe: 0`.
+
+        **A numeric range is deliberately NOT emitted here.** Verified against
+        Bitol's `data-quality.md` and `schema.md` via context7 on 2026-08-11:
+        the documented `invalidValues` arguments are `validValues` (a list) and
+        `pattern`. There is no documented argument for a numeric bound, and
+        inventing one — `validMinimum`, say — would produce a document that
+        validates as ODCS and means nothing to any engine reading it. A range
+        belongs in `logicalTypeOptions.minimum/maximum`, which is where
+        `_odcs_logical_type_options` now puts it. That is a relocation, not a
+        loss: the constraint still reaches the contract, by the name the
+        standard gives it.
+        """
         quality: list[dict[str, object]] = []
-        if col.min_value is not None or col.max_value is not None:
-            rule: dict[str, object] = {"rule": "range"}
-            if col.min_value is not None:
-                rule["mustBeGreaterThanOrEqualTo"] = col.min_value
-            if col.max_value is not None:
-                rule["mustBeLessThanOrEqualTo"] = col.max_value
-            quality.append(rule)
         if col.regex_pattern and col.regex_pattern.strip():
-            quality.append({"rule": "regex", "pattern": col.regex_pattern})
+            quality.append(
+                {
+                    "id": f"{col.name}_pattern",
+                    "metric": "invalidValues",
+                    "mustBe": 0,
+                    "unit": "rows",
+                    "arguments": {"pattern": col.regex_pattern},
+                    "description": (
+                        f"Every value of {col.name} must match "
+                        f"{col.regex_pattern}."
+                    ),
+                }
+            )
+        allowed = ExporterService._check_enum_literals(col.check_expression)
+        if allowed:
+            quality.append(
+                {
+                    "id": f"{col.name}_valid_values",
+                    "metric": "invalidValues",
+                    "mustBe": 0,
+                    "unit": "rows",
+                    "arguments": {"validValues": allowed},
+                    "description": (
+                        f"{col.name} accepts only {', '.join(allowed)}."
+                    ),
+                }
+            )
         return quality
+
+    @staticmethod
+    def _declared_length(data_type: str) -> int | None:
+        match = re.search(r"(?:VAR)?CHAR\s*\(\s*(\d+)\s*\)", data_type, re.IGNORECASE)
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _odcs_logical_type_options(col: ColumnSchema) -> dict[str, object]:
+        """Declared domain constraints -> ODCS ``logicalTypeOptions``.
+
+        Where the standard puts a *bound*, as opposed to a *check*. Per
+        `schema.md`: integer and number support `minimum`, `maximum` and
+        `multipleOf`; string supports `format`, `minLength`, `maxLength` and
+        `pattern`.
+
+        The distinction is real rather than stylistic. `logicalTypeOptions`
+        declares what values the column may hold; `quality` declares a measured
+        assertion with a threshold and a unit. A declared range is the former,
+        which is why moving it here rather than forcing it into an
+        `invalidValues` argument that does not exist is the correct fix for
+        that half of H10.
+        """
+        options: dict[str, object] = {}
+        logical = ExporterService._logical_type(col.data_type)
+        if logical in ("integer", "number"):
+            if col.min_value is not None:
+                options["minimum"] = col.min_value
+            if col.max_value is not None:
+                options["maximum"] = col.max_value
+        if logical == "string":
+            if col.regex_pattern and col.regex_pattern.strip():
+                options["pattern"] = col.regex_pattern
+            length = ExporterService._declared_length(col.data_type)
+            if length is not None:
+                options["maxLength"] = length
+        return options
 
     @classmethod
     def _accepted_values(cls, col: ColumnSchema) -> list[str] | None:

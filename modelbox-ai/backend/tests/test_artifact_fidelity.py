@@ -1398,16 +1398,6 @@ def test_odcs_required_reflects_nullability(gid: str) -> None:
             )
 
 
-@pytest.mark.xfail(
-    reason="H10: quality entries are emitted as {'rule': 'range', "
-           "'mustBeGreaterThanOrEqualTo': ...}. `rule` is not an ODCS key. A "
-           "v3.1.0 property-level entry is {id, metric, mustBe*, arguments, "
-           "unit, description} with an optional type of library|sql|custom. "
-           "Reachable only through the synthetic fixture, since no gold graph "
-           "declares a quality rule — which is why the audit missed it. "
-           "Assigned to Sprint 4.",
-    strict=True,
-)
 def test_odcs_quality_entries_use_v3_vocabulary() -> None:
     """Quality blocks must speak ODCS, not an invented dialect.
 
@@ -1445,6 +1435,93 @@ def test_odcs_quality_entries_use_v3_vocabulary() -> None:
         if not any(k == "mustBe" or k.startswith("mustBe") for k in entry):
             offending.append(f"{where}: no mustBe* comparator ({entry})")
     assert not offending, offending
+
+
+def test_odcs_carries_the_meaning_of_each_declared_constraint() -> None:
+    """Every declared constraint reaches the contract with its meaning intact.
+
+    The vocabulary check above asks whether the document speaks ODCS. This asks
+    whether it says the right thing — the distinction the H10 ruling turned on,
+    because a contract that is valid and wrong is worse than one that is
+    invalid. An emitter that dropped every bound and emitted a syntactically
+    perfect `nullValues` entry instead would pass the vocabulary test outright.
+
+    Where each constraint belongs, verified against Bitol's `schema.md` and
+    `data-quality.md` via context7 on 2026-08-11:
+
+    * a **numeric range** is a bound on the domain — `logicalTypeOptions`
+      `minimum`/`maximum`. It is deliberately *not* a quality entry: the
+      documented `invalidValues` arguments are `validValues` and `pattern`, and
+      there is no argument for a numeric bound. Inventing one would produce a
+      document that validates and communicates nothing.
+    * a **regex** is documented in both places, so it appears in both: as
+      `logicalTypeOptions.pattern` (the domain) and as an `invalidValues`
+      quality entry with `mustBe: 0` (the measured assertion).
+    * an **enumerated CHECK** is `invalidValues` with `arguments.validValues`.
+    """
+    fixture = SYNTHETIC["quality-rules"]
+    contract = yaml.safe_load(
+        exporter().export_data_contract(fixture.model, "odcs", fixture.dataset_name)[
+            "datacontract.yaml"
+        ]
+    )
+    props = {
+        (table["name"], prop["name"]): prop
+        for table in contract["schema"]
+        for prop in table["properties"]
+    }
+
+    checked = {"range": 0, "regex": 0, "enum": 0}
+    missing: list[str] = []
+    for entity in fixture.model.entities:
+        for column in entity.columns:
+            prop = props[(entity.entity_name, column.name)]
+            options = prop.get("logicalTypeOptions", {})
+            arguments = [
+                entry.get("arguments", {})
+                for entry in prop.get("quality", [])
+                if entry.get("metric") == "invalidValues"
+                and entry.get("mustBe") == 0
+            ]
+            where = f"{entity.entity_name}.{column.name}"
+
+            if column.min_value is not None:
+                checked["range"] += 1
+                if options.get("minimum") != column.min_value:
+                    missing.append(
+                        f"{where}: declares min {column.min_value}, contract "
+                        f"says {options.get('minimum')!r}"
+                    )
+            if column.max_value is not None:
+                if options.get("maximum") != column.max_value:
+                    missing.append(
+                        f"{where}: declares max {column.max_value}, contract "
+                        f"says {options.get('maximum')!r}"
+                    )
+            if column.regex_pattern:
+                checked["regex"] += 1
+                if options.get("pattern") != column.regex_pattern:
+                    missing.append(f"{where}: pattern absent from the domain")
+                if not any(
+                    a.get("pattern") == column.regex_pattern for a in arguments
+                ):
+                    missing.append(f"{where}: pattern is asserted by no rule")
+            declared = re.findall(r"'([^']*)'", column.check_expression or "")
+            if declared and " IN " in (column.check_expression or "").upper():
+                checked["enum"] += 1
+                if not any(
+                    a.get("validValues") == declared for a in arguments
+                ):
+                    missing.append(
+                        f"{where}: CHECK allows {declared}, contract asserts "
+                        f"{[a.get('validValues') for a in arguments]}"
+                    )
+
+    assert not missing, missing
+    unexercised = sorted(kind for kind, n in checked.items() if not n)
+    assert not unexercised, (
+        f"the fixture declares no {unexercised}, so that branch asserts nothing"
+    )
 
 
 @pytest.mark.parametrize("gid", GOLD_IDS)
@@ -1859,48 +1936,67 @@ def test_seed_never_nulls_a_non_nullable_column(gid: str) -> None:
                 )
 
 
-@pytest.mark.xfail(
-    reason="M13: default_value and check_expression reach no emitter at all. "
-           "Sprint 2 added them and only persistence and read-back consume "
-           "them, so they round-trip into a void. Register C2 claims all four "
-           "constraints 'reach every consuming emitter'; two of them reach "
-           "none. Assigned within Sprint 4.",
-    strict=True,
-)
 def test_default_and_check_reach_an_emitter() -> None:
-    """A declared DEFAULT and CHECK must appear in some emitted artifact."""
+    """A declared DEFAULT and CHECK must reach a consuming emitter (M13).
+
+    Asserted by meaning, not by substring. The first version of this test
+    searched every artifact for the literal `check_expression` text, and that
+    is the wrong question: ODCS expresses an enumerated CHECK as an
+    `invalidValues` rule carrying `validValues`, which is the constraint's
+    meaning rendered in the standard's own vocabulary. A test demanding the raw
+    SQL string back would fail the correct emitter and pass one that pasted the
+    predicate somewhere harmless.
+
+    `default_value` is emitted verbatim because SQL `DEFAULT` takes the literal
+    the model authored — there the text *is* the meaning.
+    """
     fixture = SYNTHETIC["quality-rules"]
     svc = exporter()
-    artifacts = {
-        "ddl/postgres": svc.generate_ddl(fixture.model, "postgres"),
-        **{
-            f"odcs/{k}": v
-            for k, v in svc.export_data_contract(
-                fixture.model, "odcs", fixture.dataset_name
-            ).items()
-        },
-        **{
-            f"dbt/{k}": v
-            for k, v in svc.generate_dbt_project(fixture.model).items()
-        },
-    }
-    blob = "\n".join(artifacts.values())
-    declared = [
-        (c.name, c.default_value, c.check_expression)
-        for e in fixture.model.entities for c in e.columns
-        if c.default_value or c.check_expression
-    ]
-    assert declared, "fixture no longer exercises M13"
-    missing = [
-        f"{name}: {kind}"
-        for name, default, check in declared
-        for kind, value in (("default", default), ("check", check))
-        if value and value not in blob
-    ]
-    assert not missing, (
-        f"declared constraints reach no artifact: {missing}. Emitted: "
-        f"{sorted(artifacts)}"
+    ddl = svc.generate_ddl(fixture.model, "postgres")
+    contract = yaml.safe_load(
+        svc.export_data_contract(fixture.model, "odcs", fixture.dataset_name)[
+            "datacontract.yaml"
+        ]
     )
+    dbt_schema = yaml.safe_load(
+        svc.generate_dbt_project(fixture.model)["models/staging/schema.yml"]
+    )
+    quality_args = {
+        (table["name"], prop["name"]): [
+            entry.get("arguments", {}) for entry in prop.get("quality", [])
+        ]
+        for table in contract["schema"]
+        for prop in table["properties"]
+    }
+    dbt_values = {
+        col["name"]: test["accepted_values"]["arguments"]["values"]
+        for model in dbt_schema["models"]
+        for col in model.get("columns", [])
+        for test in col.get("data_tests", [])
+        if isinstance(test, dict) and "accepted_values" in test
+    }
+
+    checked = {"default": 0, "check": 0}
+    missing: list[str] = []
+    for entity in fixture.model.entities:
+        for col in entity.columns:
+            where = f"{entity.entity_name}.{col.name}"
+            if col.default_value:
+                checked["default"] += 1
+                if f"DEFAULT {col.default_value}" not in ddl:
+                    missing.append(f"{where}: DEFAULT reaches no DDL")
+            allowed = re.findall(r"'([^']*)'", col.check_expression or "")
+            if allowed and " IN " in (col.check_expression or "").upper():
+                checked["check"] += 1
+                args = quality_args.get((entity.entity_name, col.name), [])
+                if not any(a.get("validValues") == allowed for a in args):
+                    missing.append(f"{where}: CHECK reaches no contract rule")
+                if dbt_values.get(col.name) != allowed:
+                    missing.append(f"{where}: CHECK reaches no dbt test")
+
+    assert not missing, missing
+    unexercised = sorted(kind for kind, n in checked.items() if not n)
+    assert not unexercised, f"fixture no longer exercises M13: {unexercised}"
 
 
 def test_seed_respects_quality_rules() -> None:

@@ -272,11 +272,27 @@ def test_quality_rules_propagate_to_exports() -> None:
         ]
     )
     props = {p["name"]: p for p in odcs["schema"][0]["properties"]}
-    assert props["score"]["quality"] == [
-        {"rule": "range", "mustBeGreaterThanOrEqualTo": 0, "mustBeLessThanOrEqualTo": 100}
-    ]
+    # H10. A numeric range is a bound on the domain, so ODCS puts it in
+    # logicalTypeOptions — not in `quality`, which carries measured assertions.
+    # The old expectation here (`{"rule": "range", ...}`) used a key that does
+    # not exist anywhere in the standard.
+    assert props["score"]["logicalTypeOptions"] == {"minimum": 0.0, "maximum": 100.0}
+    assert "quality" not in props["score"], (
+        "a range is a domain bound; asserting it as a quality metric would need "
+        "an argument the standard does not define"
+    )
+    # A pattern is documented in both places: it declares the domain and is
+    # separately measured, mustBe 0 invalid rows.
+    assert props["email"]["logicalTypeOptions"]["pattern"] == r"^[^@]+@[^@]+$"
     assert props["email"]["quality"] == [
-        {"rule": "regex", "pattern": r"^[^@]+@[^@]+$"}
+        {
+            "id": "email_pattern",
+            "metric": "invalidValues",
+            "mustBe": 0,
+            "unit": "rows",
+            "arguments": {"pattern": r"^[^@]+@[^@]+$"},
+            "description": r"Every value of email must match ^[^@]+@[^@]+$.",
+        }
     ]
 
 

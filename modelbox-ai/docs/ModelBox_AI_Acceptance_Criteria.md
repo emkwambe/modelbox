@@ -48,6 +48,7 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | B5 ◆ | Preview dialects are visibly labelled **before** export — grouped in the picker, with a standing warning while selected — and in the docs | `ExportPanel.tsx` picker optgroups + preview banner; README dialect section | 3 |
 | B6 ◆ | Protobuf tags **are** the stable identities, gaps included; and do not move when a column is inserted | `test_protobuf_tags_are_the_stable_ids` (primary), `test_protobuf_tags_stable_on_insert`, 5/5 each | 3 |
 | B7 ◆ | ODCS output validates as ODCS v3.1.0 — correct `apiVersion`, required `version` and `status` present, no foreign-spec `info:` block | `test_odcs_*`, 5/5 | 3 |
+| B15 ◆ | ODCS quality entries use v3.1.0 vocabulary **and carry the constraint's meaning** — conformance and correctness asserted separately, because a valid contract can say the wrong thing | `test_odcs_quality_entries_use_v3_vocabulary` (conformance), `test_odcs_carries_the_meaning_of_each_declared_constraint` (correctness). A mutant emitting a well-formed `nullValues` rule in place of the declared pattern passes the first and fails the second | 4 |
 | B8 ◆ | `required` in ODCS reflects declared nullability, not primary-key status | `test_odcs_required_reflects_nullability` | 3 |
 | B9 ◆ | DDL emits in topological order; a deliberately non-parent-first model still deploys | `test_ddl_order_is_topological` | 3 |
 | B10 | No Cube measure aggregates a key column — primary **or** foreign — and BOOLEAN columns are typed boolean. LookML is Preview and out of scope | `test_cube_no_measure_over_key`, `test_cube_boolean_dimensions_are_boolean` | 3 |
@@ -62,7 +63,7 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | ID | Criterion | Evidence | Sprint |
 |---|---|---|---|
 | C1 ◆ | A model with every field populated survives save → reload → export with zero loss | Round-trip test | 2 |
-| C2 ◆ | Nullability, uniqueness, default, and check are expressible and reach every consuming emitter | Field presence in DDL, ODCS, Avro, Protobuf output | 2–3 |
+| C2 ◆ | Nullability, uniqueness, default, and check are expressible and reach every consuming emitter | `test_default_and_check_reach_an_emitter` — asserted by *meaning*, not by substring: `default_value` reaches SQL `DEFAULT`, and an enumerated `check_expression` reaches the ODCS `invalidValues` rule and the dbt `accepted_values` test. Reopened in Sprint 4 (M13), when the claim proved false for two of the four | 2–4 |
 | C3 ◆ | Column identity is stable across canvas reorder | `stable_id` persistence test | 2 |
 | C4 | A renamed column reports as a rename, not drop-plus-add | Diff engine test | 4 |
 | C5 | Removing a foreign key produces a breaking-change statement | Diff engine test (currently yields zero) | 4 |

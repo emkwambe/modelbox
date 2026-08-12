@@ -269,6 +269,51 @@ existed. dbt was never asked, and H12 sat inside that gap for a release. Same
 class as B6 — a proof a defective implementation also satisfies. Corrected to
 require the project be handed to dbt.
 
+### H10 — a numeric range is not a quality rule in ODCS
+
+*Added 2026-08-11 during Sprint 4. Third correction to the ODCS reading, after
+C3 and C7-a.*
+
+The Sprint 4 scope said H10's fix was to re-express each quality entry as
+`{metric: invalidValues, mustBe: 0}` with the bound in `arguments`. **That is
+right for a regex and for an enumerated CHECK, and wrong for a range.**
+
+Verified against `data-quality.md` and `schema.md` via context7 on 2026-08-11:
+the documented `invalidValues` arguments are `validValues` (a list) and
+`pattern`. There is no documented argument for a numeric bound. Emitting one —
+`validMinimum`, say — would have produced a document that validates as ODCS and
+communicates nothing to any engine reading it, which is the failure mode the
+ruling on this finding named explicitly.
+
+Where each declared constraint actually belongs:
+
+| IR field | ODCS home | Why |
+| :-- | :-- | :-- |
+| `min_value` / `max_value` | `logicalTypeOptions.minimum` / `.maximum` | a bound on the domain |
+| `regex_pattern` | `logicalTypeOptions.pattern` **and** an `invalidValues` rule | the standard documents both; one declares the domain, the other measures it |
+| enumerated `check_expression` | `invalidValues` with `arguments.validValues` | documented exactly |
+
+`logicalTypeOptions` and `quality` are not interchangeable. The first declares
+what values the column may hold; the second declares a measured assertion with
+a threshold and a unit. Moving the range is a relocation rather than a loss —
+the constraint still reaches the contract, under the name the standard gives it.
+
+**This closed M13's other half for free.** `check_expression` had been assigned
+to Sprint 5 as a documented gap, on the grounds that its ODCS mapping was
+unresolved. It is resolved, and the mapping is the one H10's fix already emits.
+
+**Conformance and correctness are separate properties**, and the suite was only
+testing one. The old H10 test asserted vocabulary — no `rule` key, a `metric`
+present, a `mustBe*` comparator. A mutant that emits a structurally perfect
+`nullValues` rule in place of the declared pattern passes all of that while
+describing a different constraint entirely. Register criterion B15 now names
+both tests, and the mutant dies on the second.
+
+The old M13 test had the mirror-image flaw: it searched every artifact for the
+literal `check_expression` **text**, which would fail the correct emitter — ODCS
+renders the constraint's meaning in its own vocabulary, not as pasted SQL — and
+pass one that pasted the predicate somewhere harmless.
+
 ### Findings closed since the audit
 
 | Finding | Status |
