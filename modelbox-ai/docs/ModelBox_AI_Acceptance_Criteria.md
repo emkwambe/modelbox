@@ -84,7 +84,7 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | D7 | Every air-gapped provider resolves to a service in the compose file **or is declared bring-your-own**, and no air-gapped primary is BYO | `test_every_airgapped_provider_exists_or_is_declared_byo`, `test_no_airgapped_primary_is_bring_your_own`, `test_the_shipped_local_runtime_is_reachable_from_the_backend` | 5 |
 | D8 | Failover distinguishes auth failure, rate limit, and validation failure, and an **unclassified** failure abandons the chain rather than being retried as transient | `test_failures_classify_distinctly` (four inputs, four outputs), `test_an_unmapped_failure_abandons_the_chain`, `test_every_classification_has_a_declared_failover_decision`, `test_an_auth_failure_is_reported_ahead_of_a_rate_limit` | 5 |
 | D9 | JWT validates `aud` and `iss`; a token minted for another audience is rejected | Security test | 4 |
-| D10 | A conformance report exists comparing at least one local and one cloud provider, scored by the linter | Generated report artifact | 5 |
+| D10 | A conformance report exists comparing at least one local and one cloud provider, scored by the linter against a threshold fixed **before** the first provider call | **The generated report**, not the script — a harness that has never produced a number proves the method, not the claim. Threshold: `scripts/conformance_threshold.py` (commit `b6a3e1a`, into a tree with no code able to call a provider). Harness isolation: `test_conformance_isolation.py` | 5 |
 
 **D3 was re-specified in Sprint 5, and the new wording governs.** It previously
 read "a test proves no path bypasses it", which is a negative over the whole

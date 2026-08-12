@@ -18,7 +18,7 @@ every commit boundary, not at sprint end.
 
 ---
 
-## Current state — last verified 2026-08-12, at `Task 4`
+## Current state — last verified 2026-08-12, at `Task 5 harness`
 
 A recorded baseline, so a restart can tell whether a number *moved* rather than
 only what it is. A count that differs from this table is a finding, and the
@@ -26,7 +26,7 @@ commit that moved it is where to look.
 
 | Measure | Value | How |
 | :-- | :-- | :-- |
-| App suite | **519 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
+| App suite | **526 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
 | Fidelity, non-preview xfails | **0** | `MODELBOX_FIDELITY_STRICT=1 .venv-tools/Scripts/python -m pytest tests/test_artifact_fidelity.py -m "not preview" -q` |
 | Fidelity, preview xfails | **18** | same, with `-m "preview"` |
 | Ruff over `app` + `tests` | **69**, all pre-existing | `.venv/Scripts/python -m ruff check app tests` |
@@ -676,7 +676,56 @@ committed alone into a tree that contained no code able to contact a provider.
 a docstring — and the remaining work can happen in any session without weakening
 it, which was the entire reason for the ordering.
 
-**Outstanding:** the harness (synthesise the five gold graphs through each
+**Step two done:** `scripts/conformance_scoring.py` (pure, offline-testable),
+`scripts/run_provider_conformance.py` (the only script permitted to reach a
+provider), `tests/test_conformance_isolation.py` (7 tests).
+
+**Two opt-ins, not one.** `MODELBOX_ALLOW_PROVIDER_CALLS` is Task 1's
+appliance-wide fail-closed gate; `MODELBOX_RUN_CONFORMANCE` is the script's own.
+Either alone refuses, and all three insufficient combinations are asserted —
+checking only the all-unset case would pass on a runner needing just one flag,
+and one flag away from an accident is not far enough.
+
+Two structural guarantees beyond that: the runner makes no provider call at
+module scope (so importing or collecting it cannot cause egress), and **neither
+the runner nor the scorer may define a threshold constant** — they must import
+them. A harness carrying its own copy of a number would silently undo the
+guarantee the ordering bought, while the report still claimed the threshold was
+applied. The threshold module is also asserted unable to import the gateway, so
+its commit stays readable as one where nothing could call out.
+
+`test_neither_flag_is_set_in_this_environment` asserts the offline guarantee
+where it is relied on — the suite's zero-egress property is worth nothing if
+nobody checks the flags that would break it are unset while it runs.
+
+### Run instruction
+
+```bash
+# 1. local runtime up, with the router's default_model pulled
+docker compose -f docker/docker-compose.appliance.yml --profile airgap up -d ollama-engine
+docker exec modelbox-ollama-engine ollama pull qwen2.5-coder:32b
+
+# 2. at least one cloud key, so there is something to compare against
+export ANTHROPIC_API_KEY=...
+
+# 3. both opt-ins, deliberately, and never in CI
+cd backend
+MODELBOX_ALLOW_PROVIDER_CALLS=1 MODELBOX_RUN_CONFORMANCE=1     .venv/Scripts/python -m scripts.run_provider_conformance     --providers local_ollama,anthropic_cloud     --out ../docs/marketing/conformance-report.json
+```
+
+### Two acceptance events, deliberately separate
+
+* **The harness is done** — built, isolated, provably unable to run by accident.
+  All of that is verifiable offline and is verified.
+* **Sprint 5 is done** when the run has happened and the report exists.
+
+D10's register evidence must cite **the report**, not the script. A harness that
+has never produced a number proves the method, not the claim.
+
+**Outstanding:** the run itself. **Mutant 18:** requiring only one opt-in instead
+of both — killed by `test_the_runner_refuses_without_both_opt_ins`.
+
+**Superseded note — the harness (synthesise the five gold graphs through each
 configured provider, score, emit the report), and the isolation tests — opt-in,
 outside the CI gate set, incapable of running as a side effect of any test
 invocation. That last one is cheap now: Task 1's choke point refuses unless
