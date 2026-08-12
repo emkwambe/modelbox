@@ -10,6 +10,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -72,8 +73,147 @@ def _model(
     )
 
 
+def _identified(entity: EntitySchema, start: int = 1) -> EntitySchema:
+    """Assign stable_ids the way persistence does — one per column, in order.
+
+    Rename detection is only possible on a model that has been saved, because
+    `stable_id` is allocated by the repository. A model straight from synthesis
+    carries None on every column and must fall back to matching by name.
+    """
+    return entity.model_copy(
+        update={
+            "columns": [
+                col.model_copy(update={"stable_id": start + i})
+                for i, col in enumerate(entity.columns)
+            ]
+        }
+    )
+
+
 def _joined(statements: list[str]) -> str:
     return "\n".join(statements).upper()
+
+
+# ---------------------------------------------------------------------------
+# Identity, relationships and keys — C4, C5, M2
+# ---------------------------------------------------------------------------
+def test_renamed_column_is_a_rename_not_a_drop_and_add() -> None:
+    """A renamed column must preserve its data.
+
+    Asserted as the property rather than the keyword. An implementation that
+    emits RENAME *in addition to* the existing DROP and ADD satisfies "output
+    contains RENAME" while still destroying the column — and that is precisely
+    the smallest change that makes a keyword assertion pass.
+    """
+    src = _model([_identified(_entity("a", [_col("id", pk=True), _col("cust_email")]))])
+    tgt = _model(
+        [_identified(_entity("a", [_col("id", pk=True), _col("customer_email")]))]
+    )
+    statements, breaking, _ = DiffEngine().diff(src, tgt)
+    joined = _joined(statements)
+
+    assert "RENAME COLUMN CUST_EMAIL TO CUSTOMER_EMAIL" in joined
+    assert "DROP COLUMN CUST_EMAIL" not in joined, "the rename must replace the drop"
+    assert "ADD COLUMN CUSTOMER_EMAIL" not in joined, "no re-add; the data stays"
+    assert not any("Dropped column" in b for b in breaking), breaking
+
+
+def test_rename_is_not_inferred_without_identity() -> None:
+    """An unsaved model has no identities, so the same edit is a drop and an add.
+
+    The discriminating half of C4. An implementation that pairs columns by
+    position, or that treats two None identities as equal, passes the rename
+    test above and then reports renames that never happened on every model the
+    user has not saved yet.
+    """
+    src = _model([_entity("a", [_col("id", pk=True), _col("cust_email")])])
+    tgt = _model([_entity("a", [_col("id", pk=True), _col("customer_email")])])
+    statements, breaking, _ = DiffEngine().diff(src, tgt)
+    joined = _joined(statements)
+
+    assert "RENAME COLUMN" not in joined, "a rename was inferred from nothing"
+    assert "DROP COLUMN CUST_EMAIL" in joined
+    assert any("Dropped column" in b for b in breaking), breaking
+
+
+def test_removed_foreign_key_is_a_breaking_change() -> None:
+    """Dropping an FK relaxes a guarantee downstream consumers rely on."""
+    entities = [
+        _entity("dim_customer", [_col("customer_id", "INT", pk=True)]),
+        _entity(
+            "fact_orders",
+            [_col("order_id", "INT", pk=True), _col("customer_id", "INT")],
+        ),
+    ]
+    src = _model(
+        entities, [_rel("fact_orders.customer_id", "dim_customer.customer_id")]
+    )
+    tgt = _model(entities, [])
+    _, breaking, _ = DiffEngine().diff(src, tgt)
+    assert any(
+        "fact_orders.customer_id" in b and "dim_customer.customer_id" in b
+        for b in breaking
+    ), f"FK removal reported nothing: {breaking}"
+
+
+def test_added_foreign_key_is_not_breaking() -> None:
+    """The discriminating half of C5: tightening a constraint is not a break.
+
+    Without this, an implementation that reports every relationship difference
+    passes the removal test while crying wolf on every added join.
+    """
+    entities = [
+        _entity("dim_customer", [_col("customer_id", "INT", pk=True)]),
+        _entity(
+            "fact_orders",
+            [_col("order_id", "INT", pk=True), _col("customer_id", "INT")],
+        ),
+    ]
+    src = _model(entities, [])
+    tgt = _model(
+        entities, [_rel("fact_orders.customer_id", "dim_customer.customer_id")]
+    )
+    _, breaking, _ = DiffEngine().diff(src, tgt)
+    assert not any("customer_id" in b for b in breaking), breaking
+
+
+def test_changed_primary_key_is_a_breaking_change() -> None:
+    """Re-keying a table invalidates every foreign key pointing at it."""
+    src = _model(
+        [
+            _identified(
+                _entity("a", [_col("old_key", "INT", pk=True), _col("new_key", "INT")])
+            )
+        ]
+    )
+    tgt = _model(
+        [
+            _identified(
+                _entity("a", [_col("old_key", "INT"), _col("new_key", "INT", pk=True)])
+            )
+        ]
+    )
+    _, breaking, _ = DiffEngine().diff(src, tgt)
+    assert any("primary key" in b.lower() for b in breaking), (
+        f"the table was re-keyed and the diff said nothing: {breaking}"
+    )
+
+
+def test_renaming_the_primary_key_column_is_not_a_key_change() -> None:
+    """The key still sits on the same column; only its name moved.
+
+    Added because a mutant survived without it. `_key_breaks` compares the PK
+    as a set of names, so renaming the PK column reads as "old_key left the key,
+    new_key joined it" unless the rename is applied first — and reporting that
+    would make every rename destructive again through a second door, after C4
+    had just stopped it being destructive through the first.
+    """
+    src = _model([_identified(_entity("a", [_col("cust_id", "INT", pk=True)]))])
+    tgt = _model([_identified(_entity("a", [_col("customer_id", "INT", pk=True)]))])
+    statements, breaking, _ = DiffEngine().diff(src, tgt)
+
+    assert "RENAME COLUMN CUST_ID TO CUSTOMER_ID" in _joined(statements)
+    assert not any("primary key" in b.lower() for b in breaking), breaking
 
 
 # ---------------------------------------------------------------------------
