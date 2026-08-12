@@ -79,9 +79,9 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | D2 ◆ | Startup fails loudly if a governance flag is set that the code does not honour | Startup transcript | 1 |
 | D3 ◆ | Every outbound LLM request is recorded in an append-only ledger **before it is sent**, and no module outside the gateway can reach a provider at all | **Primary (structural):** `test_no_module_outside_the_gateway_imports_a_provider_sdk` + `test_only_one_function_reaches_the_provider_client` + `test_the_attempt_write_precedes_every_client_statement`. **Supporting:** `test_a_ledger_that_cannot_write_stops_the_request`; `test_migration_0015_egress_audit.py` (raw SQL, populated DB). PL-008 | 5 |
 | D4 ◆ | An operator can answer "what left our network, when, to whom" from the UI without engineering help | Ledger view screenshot | 5 |
-| D5 ◆ | A task pinned to an egress class cannot fail over outside it, and a task with no pin is a configuration error rather than an allowance | `test_egress_residency_and_failover.py` — `test_a_pin_strips_non_compliant_failover_targets` (the named mutation), `test_the_residency_check_lives_in_the_calling_function` (structural), `test_a_task_without_a_pin_is_a_configuration_error`, `test_the_production_router_pins_every_task` | 5 |
-| D6 ◆ | Air-gapped mode runs end-to-end with no cloud keys present in any container | `docker compose` with air-gap profile; env inspection | 5 |
-| D7 | Air-gapped route resolves to a service that exists in the compose file | Route resolution test | 5 |
+| D5 ◆ | A task pinned to an egress class cannot fail over outside it, and a task with no pin is a configuration error rather than an allowance. **The permitted set comes from a declared containment map, explicitly not from an ordering over class names** | `test_egress_residency_and_failover.py` — `test_a_pin_strips_non_compliant_failover_targets` (the named mutation), `test_an_eu_pin_does_not_admit_apac_and_an_apac_pin_does_not_admit_eu` (kills the scalar implementation), `test_the_residency_check_lives_in_the_calling_function` (structural), `test_a_task_without_a_pin_is_a_configuration_error`, `test_the_production_router_pins_every_task` | 5 |
+| D6 ◆ | Air-gapped mode runs end-to-end **with every provider key set to a sentinel**, uses none of them, and refuses any route that would | `test_airgap_routing.py` — `test_an_airgapped_run_sends_no_cloud_key`, `test_stripping_is_what_makes_a_fall_through_task_local` (the discriminating case), `test_a_route_that_would_use_a_cloud_key_is_refused_at_resolution`, `test_the_sentinels_are_actually_present` | 5 |
+| D7 | Every air-gapped provider resolves to a service in the compose file **or is declared bring-your-own**, and no air-gapped primary is BYO | `test_every_airgapped_provider_exists_or_is_declared_byo`, `test_no_airgapped_primary_is_bring_your_own`, `test_the_shipped_local_runtime_is_reachable_from_the_backend` | 5 |
 | D8 | Failover distinguishes auth failure, rate limit, and validation failure, and an **unclassified** failure abandons the chain rather than being retried as transient | `test_failures_classify_distinctly` (four inputs, four outputs), `test_an_unmapped_failure_abandons_the_chain`, `test_every_classification_has_a_declared_failover_decision`, `test_an_auth_failure_is_reported_ahead_of_a_rate_limit` | 5 |
 | D9 | JWT validates `aud` and `iss`; a token minted for another audience is rejected | Security test | 4 |
 | D10 | A conformance report exists comparing at least one local and one cloud provider, scored by the linter | Generated report artifact | 5 |
@@ -99,6 +99,24 @@ the ledger write precedes every statement in that function that does. Ledger
 completeness then follows by construction rather than by enumeration, and it
 fails loudly the day someone adds a sixth provider. A behavioural coverage test
 remains useful but cannot be the primary evidence for a universal.
+
+**D5's wording was a defect in this register, found in Sprint 5.** "Max egress
+class" encodes an ordering into a domain that has none. Over `local`,
+`cloud_eu`, `cloud_apac` and `cloud`, any total order asserts either
+`cloud_eu ≤ cloud_apac` or the reverse, and **both are false as residency
+controls**: an EU-pinned task must not fail over to APAC, and an APAC-pinned
+task must not fail over to the EU. A scalar comparison therefore gets exactly
+one of the two wrong — silently, and in the permissive direction.
+
+The name is kept because it is what the product configuration says. The
+semantics are not: `egress_policy` declares, per pin, the exact set of classes
+it admits. The criterion is amended rather than left to be caught by a test,
+because a criterion that misstates the property will be implemented from its own
+text — and the register is supposed to be the thing that does not lie.
+
+Related to standard 9: the ordering was a *consequence* that holds in the easy
+cases (`local` really is admitted everywhere, `cloud` really is the top) and
+fails on the pair that matters.
 
 ## E. Claim integrity — the trust gate
 

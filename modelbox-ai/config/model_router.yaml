@@ -77,12 +77,22 @@ providers:
     default_model: "qwen2.5-coder:32b"
     egress: "local"
 
+  # Bring-your-own endpoint (D7, Blueprint §3 Q1). The appliance ships no vLLM
+  # service — `vllm-server.internal` is a host the *operator* provides, on their
+  # own network, and the compose file deliberately contains no such container.
+  #
+  # `byo: true` is what makes that honest rather than broken. Until Sprint 5
+  # this provider was the air-gapped *primary*, so the out-of-the-box air-gap
+  # path pointed at a service that does not exist — the appliance's own default
+  # depended on infrastructure it neither shipped nor documented. It is now a
+  # fallback only, and `test_airgap_routing.py` asserts that no primary is BYO.
   airgapped_vllm:
     type: "openai_compatible"
     base_url: "http://vllm-server.internal:8000/v1"
     api_key_env: "INTERNAL_VLLM_KEY"
     default_model: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
     egress: "local"
+    byo: true
 
 # -----------------------------------------------------------------------------
 # Egress policy (D5) — what each residency pin permits.
@@ -161,16 +171,24 @@ task_routing:
 # Air-gapped override — applied when AIRGAPPED=true. Every task collapses to
 # local providers only; cloud fallbacks are dropped at resolution time.
 # -----------------------------------------------------------------------------
+# Every primary is `local_ollama`, which is the one local runtime the appliance
+# actually ships (`ollama-engine`, compose profile `airgap`). `airgapped_vllm`
+# remains as a fallback for operators who run their own vLLM, and is never a
+# primary — a default that depends on a container we do not ship is not a
+# default. See D7.
 airgapped_overrides:
   unstructured_doc_parsing:
-    primary: "airgapped_vllm"
-    fallback: ["local_ollama"]
+    primary: "local_ollama"
+    fallback: ["airgapped_vllm"]
   schema_reasoning_and_erd:
-    primary: "airgapped_vllm"
-    fallback: ["local_ollama"]
+    primary: "local_ollama"
+    fallback: ["airgapped_vllm"]
   ddl_code_generation:
     primary: "local_ollama"
     fallback: ["airgapped_vllm"]
   data_dictionary_enrichment:
+    primary: "local_ollama"
+    fallback: ["airgapped_vllm"]
+  socratic_tutoring:
     primary: "local_ollama"
     fallback: ["airgapped_vllm"]

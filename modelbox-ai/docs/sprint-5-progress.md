@@ -285,9 +285,24 @@ asserts it against the shipped file rather than a fixture (standard 11). All
 five are declared `cloud`, which is the truthful statement about where those
 chains route today — the pin strips nothing yet.
 
-**Tightening a task is a product decision, not a mechanical one, and is left
-open.** `unstructured_doc_parsing` carries customer PRD text and lists an APAC
-provider among its fallbacks; it is the first one worth a deliberate answer.
+### Decision deferred: tightening the pins waits for Task 5
+
+**Ruled, so it does not become permanent through inaction.**
+`unstructured_doc_parsing` carries customer PRD text and lists `kimi_cloud`
+(APAC) among its fallbacks. It is the right first candidate for a tighter pin
+and it is **not** being tightened yet.
+
+The reason is that narrowing a chain has a cost nobody has measured: removing
+fallbacks may degrade that task's output quality, and there is no data on how
+much until Task 5's conformance harness scores providers against the gold
+graphs. Tightening now would be guessing; tightening after conformance data
+would be informed. So the decision is deferred to **post-Task-5**, with the
+mechanism already built and proven.
+
+D5's mechanism being proven but unexercised in production is an honest state to
+be in for one more task. It is recorded here rather than left implicit, because
+a deferred decision that nobody wrote down is indistinguishable from a decision
+nobody made.
 
 ### `EGRESS_EVENTS` wired
 
@@ -331,13 +346,87 @@ whose fixture stops exercising the feature it names).
 
 ---
 
+## Task 3 — Air-gapped mode that proves itself (D6, D7, Q1)
+
+**Done.** `config/model_router.yaml`, `tests/test_airgap_routing.py`. No
+application code changed — the defects were in configuration and in what was
+being asserted about it.
+
+### D6 inverted
+
+The criterion read "runs end to end with no cloud keys present", which passes on
+a box that simply never had any keys configured. Green on a developer laptop for
+a reason unconnected to air-gapped mode working — standard 12, an absent input
+read as satisfaction.
+
+Inverted: the test **sets every provider key to a distinct sentinel** and
+asserts none was used, every route resolved local-only, and a route that would
+have needed one was refused. Absence is loud, because the keys are present,
+usable, and provably untouched. `test_the_sentinels_are_actually_present` guards
+the inversion itself — without it the whole file could pass on an empty
+environment, which would have rebuilt the original defect one level up.
+
+The leak assertion reads **what was handed to the provider call**, not what the
+router intended. Keys are attached in `_litellm_kwargs`, after resolution, so a
+resolution-only assertion cannot see one.
+
+### D7: the appliance's default pointed at a container it does not ship
+
+`airgapped_vllm` was the air-gapped primary for two tasks, and its host
+`vllm-server.internal` is not a service in
+`docker/docker-compose.appliance.yml` — nothing in this repository creates it.
+The out-of-the-box air-gap path depended on infrastructure the appliance neither
+shipped nor documented, and failed at runtime with a DNS error.
+
+Now: every primary is `local_ollama` (the shipped `ollama-engine`, compose
+profile `airgap`), `airgapped_vllm` is marked `byo: true` and is a fallback
+only, and `socratic_tutoring` gained an explicit override rather than falling
+through. Two tests hold it: every air-gapped provider is either a compose
+service or declared BYO, and **no primary may be BYO** — the discriminating
+half, since marking everything BYO would satisfy the first while leaving the
+appliance just as broken.
+
+`test_the_shipped_local_runtime_is_reachable_from_the_backend` asserts
+reachability rather than the service name, because a service can be present and
+unreachable. The default-network case is asserted as a property rather than
+skipped when trivially true: `if networks: assert ...` would verify nothing
+today and keep verifying nothing the day someone adds a network to one service
+only.
+
+### Mutation results — and one that found a defect in these tests
+
+| # | Mutant | Killed by |
+| :-- | :-- | :-- |
+| 11 | BYO provider restored as an air-gapped primary | `test_no_airgapped_primary_is_bring_your_own` |
+| 12 | `byo: true` removed from `airgapped_vllm` | `test_every_airgapped_provider_exists_or_is_declared_byo` |
+| 13 | Air-gap falls back to the cloud chain when nothing is local | `test_a_route_that_would_use_a_cloud_key_is_refused_at_resolution` |
+| 14 | Air-gap stripping disabled entirely | **initially only 1 test — see below**; now 2 |
+
+**Mutant 14 is the useful one.** Disabling air-gap stripping altogether left
+seven of eight tests green, because every task in `airgapped_overrides` already
+lists local providers only. The D6 assertions were passing for a reason that had
+nothing to do with air-gap enforcement working — standard 8, in tests written to
+close a standard 12 hole.
+
+The production config cannot supply the discriminating case, precisely because
+it is now correct. So `test_stripping_is_what_makes_a_fall_through_task_local`
+supplies it: a task with **no** override, falling through to `task_routing`,
+where stripping is the only thing between a cloud provider and a sentinel key.
+With it, mutant 14 dies twice.
+
+Worth stating as a general shape: **a config made correct stops being a test
+fixture for the mechanism that corrects it.** Fixing Task 3's routing removed
+the only case that exercised the stripping.
+
+---
+
 ## Remaining
 
 | Task | State |
 | :-- | :-- |
 | 2 — Per-task residency (D5, D8) | **done** |
-| 3 — Air-gapped mode that proves itself (D6, D7, Q1) | next |
-| 4 — Cross-artifact consistency gate (standard 10) | not started |
+| 3 — Air-gapped mode that proves itself (D6, D7, Q1) | **done** |
+| 4 — Cross-artifact consistency gate (standard 10) | next |
 | 5 — Provider conformance harness (D10) | not started; threshold must be written before the first call |
 | 6 — Security FAQ (G2) | not started |
 | 7 — Unassisted install (G1) | pending an evaluator; Eddy arranges |
