@@ -18,6 +18,26 @@ every commit boundary, not at sprint end.
 
 ---
 
+## Current state — last verified 2026-08-12, at `6863e07`
+
+A recorded baseline, so a restart can tell whether a number *moved* rather than
+only what it is. A count that differs from this table is a finding, and the
+commit that moved it is where to look.
+
+| Measure | Value | How |
+| :-- | :-- | :-- |
+| App suite | **480 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
+| Fidelity, non-preview xfails | **0** | `MODELBOX_FIDELITY_STRICT=1 .venv-tools/Scripts/python -m pytest tests/test_artifact_fidelity.py -m "not preview" -q` |
+| Fidelity, preview xfails | **18** | same, with `-m "preview"` |
+| Ruff over `app` + `tests` | **69**, all pre-existing | `.venv/Scripts/python -m ruff check app tests` |
+| Verification standards | **14** | `docs/ModelBox_AI_Acceptance_Criteria.md` |
+
+The app suite spins up a disposable PostgreSQL via Docker (migrations 0013 and
+0015) and takes ~2 minutes. The 36 skips are the fidelity tests, which need
+`.venv-tools`.
+
+---
+
 ## Task 0 — Verify the scorer, before anything depends on it
 
 **Done.** Commit `a42fbd4`. `backend/tests/test_linter_discrimination.py`.
