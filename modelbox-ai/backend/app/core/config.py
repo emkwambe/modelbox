@@ -12,7 +12,7 @@ import json
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn, field_validator
+from pydantic import AliasChoices, Field, PostgresDsn, RedisDsn, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 CostOptimizationMode = Literal[
@@ -91,6 +91,22 @@ class Settings(BaseSettings):
         ),
     )
     cost_optimization_mode: CostOptimizationMode = "balanced"
+
+    # Fail-closed egress (D3). Nothing reaches a provider unless the deployment
+    # has said so — the only construction under which "you know what leaves your
+    # network" is a property rather than a hope. The gateway is the single path
+    # out, enforced by an import scan, so this one flag governs all of it.
+    allow_provider_calls: bool = Field(
+        default=False,
+        # AliasChoices, not a bare validation_alias: a bare alias *replaces* the
+        # field name, so `Settings(allow_provider_calls=True)` silently bound
+        # nothing and returned the default. A security flag that cannot be set
+        # is safe; one that appears set and is not would be worse than absent.
+        validation_alias=AliasChoices(
+            "MODELBOX_ALLOW_PROVIDER_CALLS", "allow_provider_calls"
+        ),
+        description="Permit outbound LLM provider calls. Off by default.",
+    )
 
     # --- Authentication (Slice 3A) -------------------------------------------
     jwt_secret: str = Field(

@@ -29,8 +29,9 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.logging_config import configure_logging
-from app.services.llm_gateway import LLMGateway, LLMRouterError
 from app.schemas.data_model import SocraticStepResponse
+from app.services.llm_gateway import LLMGateway, LLMRouterError
+from tests._egress_doubles import RecordingLedger
 
 _ROUTER_CONFIG = "../config/model_router.yaml"
 
@@ -78,6 +79,12 @@ _DEAD_ROUTER = {
 
 def _settings(**overrides: object) -> Settings:
     overrides.setdefault("model_router_config_path", _ROUTER_CONFIG)
+    # This file is the one place that deliberately drives the gateway past its
+    # fail-closed gate (D3): it asserts what the *routing* records, and the
+    # router it uses points at dead endpoints, so nothing leaves the machine.
+    # Opting in explicitly is the point of the flag — a test that exercises the
+    # egress path has to say so, rather than inheriting permission.
+    overrides.setdefault("allow_provider_calls", True)
     return Settings(**overrides)  # type: ignore[arg-type]
 
 
@@ -147,6 +154,20 @@ def test_configure_logging_lets_gateway_info_through() -> None:
     assert handlers, "no handler is attached to the app logger tree"
 
 
+def _gateway(**overrides: object) -> tuple[LLMGateway, RecordingLedger]:
+    """A gateway wired to an in-memory ledger.
+
+    Needed since Sprint 5: the choke point records before it dials and refuses
+    the request if it cannot, so a gateway with the default database ledger
+    fails here with `EgressLedgerError` — there is no database in this suite —
+    rather than reaching the routing code these tests assert on. Supplying a
+    real sink keeps the failure that matters (routing) visible instead of being
+    masked by the one that does not (no database).
+    """
+    ledger = RecordingLedger()
+    return LLMGateway(_settings(**overrides), ledger=ledger), ledger
+
+
 async def _route_and_capture(gateway: LLMGateway, task: str) -> list[str]:
     """Attempt one routed completion and return what the app logger recorded."""
     capture = _Capture()
@@ -168,9 +189,7 @@ async def _route_and_capture(gateway: LLMGateway, task: str) -> list[str]:
 async def test_routing_a_task_emits_an_egress_record(dead_router: str) -> None:
     """Routing emits the provider it selected, before any network call."""
     configure_logging(_settings())
-    gateway = LLMGateway(
-        _settings(airgapped=True, model_router_config_path=dead_router)
-    )
+    gateway, ledger = _gateway(airgapped=True, model_router_config_path=dead_router)
 
     messages = await _route_and_capture(gateway, "socratic_tutoring")
     routed = [m for m in messages if "Routing task" in m]
@@ -180,16 +199,23 @@ async def test_routing_a_task_emits_an_egress_record(dead_router: str) -> None:
     assert "local_ollama" in routed[0], (
         "air-gapped routing must select a local provider"
     )
+    # The log line was the Sprint 1 record. The ledger is the Sprint 5 one, and
+    # it must agree with it: a log a human might read and a row an auditor can
+    # query should never disagree about where a prompt went.
+    assert [row["provider"] for row in ledger.attempts()] == ["local_ollama"]
 
 
 async def test_airgapped_routing_never_records_a_cloud_provider(
     dead_router: str,
 ) -> None:
-    """Whatever the Sprint 5 ledger records, it must not name a cloud provider."""
+    """Whatever the Sprint 5 ledger records, it must not name a cloud provider.
+
+    Written in Sprint 1 against the log line, because the ledger did not exist.
+    It does now, so the same claim is made against the ledger itself — the
+    artifact a regulated buyer is actually shown.
+    """
     configure_logging(_settings())
-    gateway = LLMGateway(
-        _settings(airgapped=True, model_router_config_path=dead_router)
-    )
+    gateway, ledger = _gateway(airgapped=True, model_router_config_path=dead_router)
     cloud = {
         name
         for name, provider in gateway.providers.items()
@@ -200,3 +226,11 @@ async def test_airgapped_routing_never_records_a_cloud_provider(
     messages = " ".join(await _route_and_capture(gateway, "unstructured_doc_parsing"))
     leaked = sorted(name for name in cloud if name in messages)
     assert not leaked, f"air-gapped run routed to cloud providers: {leaked}"
+
+    assert ledger.attempts(), (
+        "nothing was recorded, so this test would pass on a gateway that made "
+        "no request at all"
+    )
+    recorded = {str(row["provider"]) for row in ledger.attempts()}
+    assert not recorded & cloud, f"the ledger records cloud egress: {recorded & cloud}"
+    assert {str(row["egress_class"]) for row in ledger.attempts()} == {"local"}

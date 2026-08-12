@@ -257,6 +257,65 @@ writes a file into the project that the exporter did not emit.
 
 ---
 
+## PL-008 — Nothing reaches a model provider without being recorded first
+
+**Claim:** "Every request this appliance makes to a language model is written
+to an append-only ledger *before* it is sent. If the ledger cannot be written,
+the request is not made. And no code outside the single gateway can reach a
+provider at all — that is enforced structurally, not by review."
+
+**Evidence:** `test_egress_choke_point.py`, five tests carrying the claim:
+
+| Property | Test |
+| :-- | :-- |
+| No module outside the gateway imports a provider SDK | `test_no_module_outside_the_gateway_imports_a_provider_sdk` |
+| The scan is not vacuous — the gateway does import one | `test_the_gateway_itself_does_import_one` |
+| Exactly one function reaches the provider client | `test_only_one_function_reaches_the_provider_client` |
+| The ledger write precedes every statement that reaches it | `test_the_attempt_write_precedes_every_client_statement` |
+| A ledger that cannot write stops the request | `test_a_ledger_that_cannot_write_stops_the_request` |
+
+Schema and durability: `test_migration_0015_egress_audit.py`, against a
+populated PostgreSQL 16, verified with raw SQL rather than through the ORM.
+
+**Why it is stronger than it looks:** the register originally asked for "a test
+proves no path bypasses the ledger", which is a negative over the whole call
+graph. No amount of sampling earns it — a test exercising three call sites says
+nothing about a fourth added next year. So the claim was converted from
+behavioural to structural: if no module outside the gateway can *import* a
+provider SDK, and exactly one function inside it touches the client, and the
+ledger write precedes every statement in that function which reaches the
+client, then completeness holds by construction. The import scan walks the AST,
+so a deferred `import openai` inside a function body — the realistic shape of a
+bypass — is caught too, which was confirmed by mutation.
+
+All four structural claims were proven failable by mutation before being
+relied on. See `docs/sprint-5-progress.md`.
+
+**Honest limits**, each of which would otherwise be read into the claim:
+
+* **There is no operator-facing view yet.** The ledger is queryable SQL. "An
+  operator can answer *what left our network* without engineering help" is D4
+  and is not built, so this claim must not be stated as a UI capability.
+* **Attribution is not yet populated.** `model_id`, `user_id` and
+  `workspace_id` exist and are nullable, and the three call sites do not yet
+  pass them. Today the ledger answers *what, when, where to* — not *who*.
+* **Token counts are best-effort.** Read off the provider response when it is
+  shaped as expected, recorded as null when it is not. Recording "unknown"
+  honestly beats inventing a number, but they are not a billing record.
+* **A failed *outcome* write does not fail the request**, deliberately: by then
+  the request has already left, and the ATTEMPT row stands alone saying exactly
+  that. A lone ATTEMPT means "we tried and cannot say what happened", not "this
+  did not happen".
+
+**Verified:** 2026-08-12 · **Sprint:** 5 · **Version:** unreleased
+**Expires:** if any module outside `llm_gateway.py` gains a provider import, if
+a second function reaches the provider client, or if the ledger write stops
+preceding it. All three are asserted, so expiry is loud rather than silent.
+**Usable in:** security FAQ, landing page egress section, regulated-buyer
+review. **Not** usable as a claim about a ledger UI.
+
+---
+
 ## Claims explicitly NOT yet provable
 
 Recorded so nobody reaches for them early. Each becomes an entry when its test
@@ -268,5 +327,5 @@ passes.
 | "Data contracts are wire-stable" | H6 — Protobuf tags shift when a column is inserted | 3 |
 | "Our contracts are valid ODCS" | H2 — stamped v0.9.3, missing required v3.1.0 fields | 3 |
 | "Generated test data satisfies the generated contract" | H1 — seed ignores declared lengths and quality rules | 4 |
-| "We can show you everything that left your network" | B3 — egress ledger does not exist | 5 |
+| "We can *show you* everything that left your network" | D4 — the ledger exists and is recorded (PL-008), but there is no operator-facing view; it is queryable SQL only | 5 |
 | "Governed contracts and semantic layers, not just schemas" | B1 + H2 together | 3 |

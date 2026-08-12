@@ -77,7 +77,7 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 |---|---|---|---|
 | D1 ◆ | No claim of masking survives anywhere in the product or docs | Grep of README, router config, UI | 1 |
 | D2 ◆ | Startup fails loudly if a governance flag is set that the code does not honour | Startup transcript | 1 |
-| D3 ◆ | Every outbound LLM request is recorded in an append-only ledger; a test proves no path bypasses it | `egress_audit` coverage test | 5 |
+| D3 ◆ | Every outbound LLM request is recorded in an append-only ledger **before it is sent**, and no module outside the gateway can reach a provider at all | **Primary (structural):** `test_no_module_outside_the_gateway_imports_a_provider_sdk` + `test_only_one_function_reaches_the_provider_client` + `test_the_attempt_write_precedes_every_client_statement`. **Supporting:** `test_a_ledger_that_cannot_write_stops_the_request`; `test_migration_0015_egress_audit.py` (raw SQL, populated DB). PL-008 | 5 |
 | D4 ◆ | An operator can answer "what left our network, when, to whom" from the UI without engineering help | Ledger view screenshot | 5 |
 | D5 ◆ | A task pinned to an egress class cannot fail over outside it | Residency enforcement test | 5 |
 | D6 ◆ | Air-gapped mode runs end-to-end with no cloud keys present in any container | `docker compose` with air-gap profile; env inspection | 5 |
@@ -85,6 +85,20 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | D8 | Failover distinguishes auth failure, rate limit, and validation failure | Typed exception handling test | 5 |
 | D9 | JWT validates `aud` and `iss`; a token minted for another audience is rejected | Security test | 4 |
 | D10 | A conformance report exists comparing at least one local and one cloud provider, scored by the linter | Generated report artifact | 5 |
+
+**D3 was re-specified in Sprint 5, and the new wording governs.** It previously
+read "a test proves no path bypasses it", which is a negative over the whole
+call graph and cannot be earned by sampling: a test exercising three call sites
+says nothing about a fourth added next year. Same error as B6 and B11 — a
+criterion written past what its evidence could establish.
+
+The evidence is therefore structural, and that is why three tests are named as
+primary rather than one. Together they say: nothing outside the gateway can
+import a provider SDK, exactly one function inside it reaches the client, and
+the ledger write precedes every statement in that function that does. Ledger
+completeness then follows by construction rather than by enumeration, and it
+fails loudly the day someone adds a sixth provider. A behavioural coverage test
+remains useful but cannot be the primary evidence for a universal.
 
 ## E. Claim integrity — the trust gate
 

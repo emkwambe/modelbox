@@ -21,6 +21,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -543,8 +544,82 @@ class TrainerSubmission(Base):
     )
 
 
+EGRESS_EVENTS = ("ATTEMPT", "SUCCESS", "FAILURE")
+
+
+class EgressAudit(Base):
+    """Append-only record of every outbound provider request (D3, D4).
+
+    **Append-only, and one row per event rather than one per request.** The
+    attempt is written *before* the call and never updated; the outcome is a
+    second row correlated by ``attempt_id``. An UPDATE would have been simpler
+    and wrong — it lets a later write revise the record of what already left,
+    which is the one thing an audit trail must not permit.
+
+    **Written before the call, deliberately.** A request that leaves the
+    network and then fails is still a request that left, so a ledger recording
+    only successes is not an audit trail — it is a success log. If the process
+    dies mid-flight the ATTEMPT row survives alone, which states precisely what
+    is known: we tried, and we cannot say what happened.
+
+    **Committed in its own transaction**, independent of the caller's. Egress
+    is not undone by a rollback, so the record of it must not be either. A
+    ledger enlisted in the caller's transaction would quietly erase exactly the
+    requests made during work that later failed.
+
+    ``prompt_sha256`` rather than the prompt. The ledger answers what left,
+    when, to whom, and lets an operator prove a specific text was or was not
+    sent — without becoming a second copy of the data the governance story
+    exists to protect.
+    """
+
+    __tablename__ = "egress_audit"
+    __table_args__ = (
+        CheckConstraint(
+            "event IN ('ATTEMPT', 'SUCCESS', 'FAILURE')",
+            name="ck_egress_audit_event",
+        ),
+        Index("ix_egress_audit_attempt", "attempt_id"),
+        Index("ix_egress_audit_occurred", "occurred_at"),
+    )
+
+    egress_id: Mapped[uuid.UUID] = _uuid_pk()
+    # Correlates the ATTEMPT with its SUCCESS or FAILURE. Not a foreign key:
+    # the rows are peers, and a constraint would make the outcome row's write
+    # depend on the attempt row still existing.
+    attempt_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    event: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    task: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    egress_class: Mapped[str] = mapped_column(String(32), nullable=False)
+    prompt_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt_chars: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Nullable throughout: the gateway is a process-wide singleton and does not
+    # always know who is asking. Recording "unknown" honestly beats inventing
+    # an attribution the ledger cannot support.
+    model_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+
+    # Known only on the outcome row.
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    occurred_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+        index=True,
+    )
+
+
 __all__ = [
     "Base",
+    "EgressAudit",
+    "EGRESS_EVENTS",
     "User",
     "Workspace",
     "WorkspaceMember",
