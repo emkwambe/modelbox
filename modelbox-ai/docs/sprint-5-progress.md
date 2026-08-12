@@ -583,6 +583,32 @@ is the one that cannot be rushed.
 
 ---
 
+## For the sprint-close retro — not a verification standard
+
+**A correct generalisation is not automatically due now. The work it was meant
+to serve has first claim.**
+
+Not a verification standard: it is not about a test meaning nothing. It is about
+scope, and this programme is structurally prone to it — every sprint has
+produced a genuine generalisation, and each arrives with momentum attached.
+Acting immediately *feels* like rigour and is the scope drift that the
+burn-down invariants and the preview-count discipline exist to prevent.
+
+Two instances, one from each direction:
+
+* **Sprint 5, the removal sweep.** Venue five was real, the wider aperture was
+  the right conclusion, and widening the scope there and then would have traded
+  a bounded sweep for an open-ended audit with four tasks and the sprint's only
+  unknown still ahead. The insight was right; the timing would have been wrong.
+* **The LookML deferral** — the same call made correctly, under less pressure,
+  which is why it did not feel like a decision at the time.
+
+The tell is that the generalisation is *sound*. An unsound one gets argued
+down. A sound one arrives with its own justification attached and has to be
+timed rather than refuted.
+
+---
+
 ## Remaining
 
 | Task | State |
