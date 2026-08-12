@@ -420,13 +420,94 @@ the only case that exercised the stripping.
 
 ---
 
+## Task 4 — Cross-artifact consistency gate (standard 10) — DESIGN, not built
+
+Scoped and unblocked, not implemented. Written down so the next session starts
+from a decision rather than a blank file.
+
+### The constraint that shapes it
+
+The gate must **derive** the pairs from the IR field, not enumerate them. A list
+of two comparisons behind a pleasant interface is the pair-checking version
+wearing the category's clothes, and standard 11 says the breadth itself has to
+be asserted.
+
+### Shape
+
+A *projection* is `(artifact, ir_field) → {(entity, column): normalised value}`.
+One registry of projections; the gate groups them **by IR field** and asserts
+every projection of the same field agrees, on every gold model.
+
+```
+Projection(artifact="ddl:postgres", field="is_nullable", read=…)
+Projection(artifact="odcs",         field="is_nullable", read=…)
+Projection(artifact="avro",         field="is_nullable", read=…)
+Projection(artifact="protobuf",     field="is_nullable", read=…)
+```
+
+Adding a fourth artifact that projects `is_nullable` is covered the moment its
+projection is registered — no pair is named anywhere.
+
+### The breadth assertions — closed from both ends
+
+* **From the IR:** enumerate `ColumnSchema.model_fields` (derived, never hand
+  listed). Every field must either carry ≥2 projections or appear in an
+  `EXEMPT` map with a written reason. A new IR field then *forces a decision*
+  rather than silently arriving uncovered.
+* **From the artifacts:** every contract format `export_data_contract` accepts,
+  and every DDL dialect `generate_ddl` accepts, must appear as an `artifact` in
+  the registry. A fifth contract format added without projections fails here.
+* **A field with exactly one projection is a failure**, not a pass — it asserts
+  nothing while looking registered.
+
+### Two traps already identified
+
+**Standard 14 applies before a line is written.** The gold graphs will not
+discriminate on their own: `ColumnSchema` defaults make `is_nullable` and
+`is_primary_key` uniform across all five (this is correction C7, and it already
+cost one sprint a meaningless assertion). The gate needs **mutated copies** —
+a nullable PK, a non-nullable non-PK — or it measures the defaults.
+
+**Type equality is not the property.** `data_type` renders legitimately
+differently per dialect and per contract format, so it belongs in `EXEMPT` with
+that reason rather than in a comparison that would have to be loosened until it
+proved nothing.
+
+### Venue: `.venv-tools`, not the app suite
+
+Decided by what can parse the artifacts:
+
+| Parser | app `.venv` | `.venv-tools` |
+| :-- | :-- | :-- |
+| `sqlglot` (DDL) | ✅ 30.16.0 | ✅ 30.16.0 |
+| `yaml`/`json` (ODCS) | ✅ | ✅ |
+| `fastavro` (Avro) | ❌ | ✅ |
+| `protoc` (Protobuf) | ❌ | system binary, resolved by the harness |
+
+Avro and Protobuf — the pair with a track record of disagreeing, since Sprint 3's
+NUMERIC defect — are only parseable in the fidelity toolchain. So the gate lives
+beside `test_artifact_fidelity.py`, runs under `.venv-tools`, and is guarded by
+`MODELBOX_FIDELITY_STRICT` so a missing toolchain fails loudly instead of
+skipping (standard 4).
+
+**Projections must parse, never substring-match.** The whole programme exists
+because 76 defects hid behind string assertions.
+
+### Known first pairs
+
+`is_nullable` → DDL `NOT NULL` / ODCS `required` / Avro union-with-null /
+Protobuf optionality. `is_primary_key` → DDL `PRIMARY KEY` / ODCS `primaryKey`.
+Both sides already exist; this is comparison, not generation.
+
+---
+
 ## Remaining
 
 | Task | State |
 | :-- | :-- |
 | 2 — Per-task residency (D5, D8) | **done** |
 | 3 — Air-gapped mode that proves itself (D6, D7, Q1) | **done** |
-| 4 — Cross-artifact consistency gate (standard 10) | next |
+| 4 — Cross-artifact consistency gate (standard 10) | **next** — designed above, not built |
 | 5 — Provider conformance harness (D10) | not started; threshold must be written before the first call |
 | 6 — Security FAQ (G2) | not started |
 | 7 — Unassisted install (G1) | pending an evaluator; Eddy arranges |
