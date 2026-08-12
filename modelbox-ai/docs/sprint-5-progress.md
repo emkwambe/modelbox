@@ -775,7 +775,61 @@ Until both are done, **any conformance number is uninterpretable** and D10 stays
 open. This is a fixture defect, not a harness defect: the harness, its isolation
 and its scoring are complete and verified.
 
-**Outstanding:** the prompt fix above, then the run itself. **Mutant 18:** requiring only one opt-in instead
+### The calibration rule — write the descriptions to this, not to a feel
+
+Fixed before authoring any description, for the same reason the threshold was
+fixed before any call: a description written while looking at the gold entity
+list will drift toward naming it.
+
+> **State the business domain, each entity's purpose, and the grain of the
+> central fact. Do not name entities, columns, or relationships.**
+> Pass `target_paradigm` explicitly, since the product's own API carries it.
+
+**Exclusion rule.** If `banking-datavault` or `marketing-attribution` cannot be
+made well-posed without naming entities, **exclude them from conformance with
+the reason recorded** rather than including them at a discount. A graph scored
+against a prompt that had to give away the answer measures transcription, and
+averaging it with the others hides that inside a mean.
+
+**The paradigm fix** is mechanical and unblocked: pass each graph's `paradigm`
+into the prompt. Withholding it tests something the product never asks a model
+to do.
+
+---
+
+## Two product items surfaced by a user question
+
+Neither is Sprint 5 scope. Recorded because both are derived from shipped code
+rather than opinion, which is what makes them cheap and defensible.
+
+**1. The thirteen-code table is an input specification.** "Here is precisely
+what to provide, and here is which check fires if you don't" — grain, entity and
+column descriptions, PII designation, freshness SLA, quality rules, keys and
+references, naming convention, relationship structure. Derived from
+`GraphEngine.validate`, the same instrument that grades Trainer labs and scores
+provider conformance. It belongs in `docs/USER_GUIDE.md`, with a compressed
+version in the synthesis UI. That is the honest answer to "what should a user
+provide": not intuition and not a gate, but the product stating its own
+requirements, sourced from the thing that will judge the result.
+
+**2. "Omit rather than guess" is a stated product property and a Proof Log
+candidate.** The synthesis system prompt already instructs it — an omission
+costs nothing, a guess is exported into a data contract as fact — so
+under-specification yields a *sparser* model rather than a wrong one. Safe
+failure direction, and the reason iteration works.
+
+**Checked, and it is partially proven only.** `test_unbounded_pattern_is_not_guessed_at`
+covers one linter path; `test_a_response_omitting_every_new_field_still_validates`
+covers IR-level omission. Neither proves the end-to-end claim — that a sparse
+input yields a sparse-but-correct model rather than a wrong one. **No Proof Log
+entry until a test does**, which is the rule the document exists to enforce.
+
+**Not claimed anywhere yet**, and it should not be until then.
+
+---
+
+**Outstanding:** the paradigm fix, the descriptions written to the calibration
+rule above, then the run itself. **Mutant 18:** requiring only one opt-in instead
 of both — killed by `test_the_runner_refuses_without_both_opt_ins`.
 
 **Superseded note — the harness (synthesise the five gold graphs through each
