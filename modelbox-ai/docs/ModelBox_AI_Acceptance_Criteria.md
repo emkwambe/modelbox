@@ -135,7 +135,13 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 ## Verification standard
 
 Three times in Sprint 2 an assertion was written that could not have failed for
-the reason it claimed to test. Stated once here rather than rediscovered again:
+the reason it claimed to test. Stated once here rather than rediscovered again.
+
+There are now thirteen, and **nine were earned rather than designed** — written
+after something went wrong, not before. That ratio is the most useful fact
+about this list: it is a record of how verification actually fails here, not a
+theory of how it might. Treat a new one as evidence about the *category* rather
+than the instance.
 
 1. **Verify from outside the layer under test.** A backfill checked through the
    ORM can be satisfied by a mapping bug; check it with raw SQL. An emitter rule
@@ -265,6 +271,40 @@ the reason it claimed to test. Stated once here rather than rediscovered again:
     it enumerates the rules the suite asserts and fails when no fixture
     declares one. It fails on a *fixture* regression rather than a code
     regression, which is a category the suite previously had no member of.
+
+12. **A comparison against an absent or empty expected value passes vacuously.
+    Assert that the expected value itself exists.** Two instances in Sprint 4,
+    in unrelated code, with nothing in common but the shape:
+
+    * `decode_access_token` pinned the JWT audience, and python-jose treats a
+      *missing* `aud` claim as nothing to compare rather than as a failure. A
+      token carrying no audience at all passed the audience check — the check
+      succeeded on the exact input it exists to reject (D9).
+    * `_upgrade_to` asserted the stamped alembic revision, but computed the
+      expectation as `"" if revision == "head" else revision`. `"" in stamped`
+      is unconditionally true, and every forward upgrade in that file targets
+      head (M1).
+
+    The first was found by writing the absence case *before* implementing, on
+    the prior that this is where such checks usually fail. The prior was right
+    and it is not about libraries — the second has no dependency involved at
+    all. What generalises is the empty expectation, wherever it comes from.
+
+13. **A guard is a claim about behaviour, and needs the same discrimination
+    test as the code it guards.** Point it at something that must fail and
+    confirm that it does. That is cheap, and nothing else establishes that a
+    gate can fail at all.
+
+    Stated because remedies in this codebase have three times carried the
+    defect they were written to prevent: the `stable_id` high-water mark lived
+    on a row its own persistence path deleted; the H4 nullability validator
+    never fired on an unsupplied field; and `_upgrade_to` — written precisely
+    to stop an exit code being mistaken for arrival — mistook an exit code for
+    arrival, in a new disguise. It ran on every migration test and could not
+    fail.
+
+    The fix is not more care when writing guards. It is that a guard which has
+    never been observed failing is an untested claim, whatever it looks like.
 
 A criterion whose evidence violates any of these is NOT MET, whatever the test
 reports.
