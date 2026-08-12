@@ -501,6 +501,36 @@ Both sides already exist; this is comparison, not generation.
 
 ---
 
+## Proposed follow-on, for sprint close: the removal sweep
+
+**Proposed, not decided.** Recorded here so it survives the sprint.
+
+Standards 8, 11, 12 and 14 are four variations on one theme — *a test that
+passes without the thing it names ever happening.* Each was found separately, in
+unrelated code, by tripping over it. Four independent discoveries of one shape
+is strong evidence there is a fifth, and that hunting it deliberately beats
+waiting to find it.
+
+All four share a single detector, and it is cheap to apply:
+
+> **Of every gate in the suite: what still fails if the mechanism is removed?**
+>
+> If the answer is "nothing", the gate is one of these four — the fixture never
+> exercised the feature (8), the parameterisation never covered it (11), the
+> expected value was absent, empty or unsettable (12), or a later fix removed
+> the discriminating case (14).
+
+It is the question that killed mutant 14, and it would have found the
+`_upgrade_to` empty-string defect, the `field_validator` that never fired, and
+the `stable_id` high-water mark on a row its own path deleted. Those were each
+found by a different accident.
+
+Scope when it runs: mechanical, one pass over the suite, no fixes in the same
+commit as the finding. Anything it turns up is a register entry before it is a
+repair.
+
+---
+
 ## Remaining
 
 | Task | State |
