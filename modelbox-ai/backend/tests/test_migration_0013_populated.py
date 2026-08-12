@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -136,7 +137,19 @@ def _upgrade_to(backend: Path, dsn: str, revision: str) -> None:
     )
     current = _alembic(backend, dsn, "current")
     stamped = current.stdout + current.stderr
-    expected = "" if revision == "head" else revision
+    expected = revision
+    if revision == "head":
+        # `expected = ""` used to stand here, which made `"" in stamped` true
+        # unconditionally — the read-back was a no-op on the one call that
+        # matters most, since every forward upgrade in this file targets head.
+        # A gate that cannot fail is worse than no gate; resolve what head
+        # actually is and assert the database reached it.
+        heads = _alembic(backend, dsn, "heads")
+        ids = re.findall(r"^([0-9a-z_]+)\s", heads.stdout, re.MULTILINE)
+        assert len(ids) == 1, (
+            f"expected exactly one alembic head, got {ids}:\n{heads.stdout}"
+        )
+        expected = ids[0]
     assert expected in stamped, (
         f"asked for revision {revision!r} but the database reports:\n"
         f"{stamped[-1500:]}\n"

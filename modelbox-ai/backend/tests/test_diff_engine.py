@@ -464,3 +464,65 @@ async def test_diff_endpoint_reports_migration_and_breaking(
     assert "ADD COLUMN PHONE" in joined
     assert "ADD COLUMN AMOUNT" in joined
     assert "Dropped table: legacy_log" in body["breaking_changes"]
+
+
+@pytest.mark.asyncio
+async def test_metric_formula_break_survives_persistence(
+    session: AsyncSession,
+) -> None:
+    """M1: a metric's formula reaches the diff after a save.
+
+    `DiffEngine._semantic_breaks` has always carried the branch that reports
+    "this metric's formula references a column you just dropped". It has also
+    always been unreachable through the API: `SynthesisEngine._to_response`
+    returned `suggested_metrics=[]` unconditionally, so a diff of two persisted
+    models compared two empty formula lists and the branch never fired.
+
+    Working code that cannot execute in production is worse than absent code,
+    because the test suite reports it as covered. This asserts the whole path —
+    synthesise, persist, reload, diff — rather than the unit behaviour, which
+    already passed throughout.
+    """
+    from app.api.v1.dependencies import get_current_user, get_synthesis_engine
+    from app.core.database import get_db_session
+    from app.main import create_app
+
+    user, workspace_id = await _seed_user_workspace(session, "metrics@example.com")
+
+    v1 = _model(
+        [_entity("fact_orders", [_col("order_id", pk=True), _col("total", "NUMERIC")])],
+        metrics=[SuggestedMetric(name="Revenue", formula="SUM(fact_orders.total)")],
+    )
+    v2 = _model([_entity("fact_orders", [_col("order_id", pk=True)])])
+
+    source_id = await _persist(session, workspace_id, v1)
+    target_id = await _persist(session, workspace_id, v2)
+
+    app = create_app()
+
+    async def _session_override() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    app.dependency_overrides[get_db_session] = _session_override
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_synthesis_engine] = lambda: SynthesisEngine(
+        session, _StubGateway(v1)
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/v1/model/diff",
+            json={
+                "source_model_id": source_id,
+                "target_model_id": target_id,
+                "dialect": "postgres",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200, resp.text
+    semantic = resp.json()["semantic_breaks"]
+    assert any("Revenue" in s and "total" in s for s in semantic), (
+        f"the dropped column is referenced by a persisted metric formula and "
+        f"the diff said nothing: {semantic}"
+    )
