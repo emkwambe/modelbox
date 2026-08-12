@@ -4,9 +4,16 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.venv-tools/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+
+# Offline dbt package cache for the fidelity harness. Populated once by
+# backend/scripts/refresh_dbt_packages.py; reproducible from the committed
+# backend/tests/fixtures/dbt/package-lock.yml. Not vendored — 6.6 MB of
+# third-party SQL buys hermeticity the strict flag already provides.
+backend/.dbt-packages/
 
 # --- Node / Next.js ---
 node_modules/

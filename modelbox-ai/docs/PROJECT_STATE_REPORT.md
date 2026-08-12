@@ -223,6 +223,97 @@ by `test_export_ui_offers_exactly_the_dialects_the_backend_supports`, which
 compares the panel's two lists against the harness's and against
 `_SQLGLOT_DIALECTS`, so an eighth dialect cannot drift in on one side only.
 
+### H11, H12, M14, M15 — four defects in one blind spot, found by `dbt build`
+
+*Added 2026-08-11 during Sprint 4, when execution replaced parsing.*
+
+Every dbt gate in the harness was parameterised over the five gold graphs, and
+**no gold graph declares a quality rule.** So no project dbt had ever been
+handed contained a `dbt_expectations` test, and none contained a `packages.yml`
+at all. Four defects lived in that single gap through a release whose dbt gates
+were all green:
+
+| ID | Defect | Severity |
+| :-- | :-- | :-- |
+| **H11** | `_accepted_values` emits `ACTIVE/INACTIVE/PENDING` for a column whose model declares `CHECK (status IN ('PENDING','DONE'))` | High |
+| **H12** | `packages.yml` writes each version bound as a single-key map; dbt requires a list of strings and **refuses to load the project** | High |
+| **M14** | dbt_expectations test arguments sit at the top level instead of under `arguments:` — two deprecations | Medium |
+| **M15** | `calogica/dbt_expectations` is redirected on dbt Hub; resolving it deprecates twice | Medium |
+
+Two things generalise beyond the instances.
+
+**H11 is H1 in a second subsystem.** The seed generator had a hard-coded
+`status` vocabulary that beat the model's declared `CHECK`; so did the dbt
+exporter, with the same three values. Neither overlooked the constraint — both
+read the model and disagreed with it. The rule is now stated once, for the whole
+product, in the `exporter_service` module docstring: **declared IR outranks
+heuristics.** Finding the same violation twice in two sprints is the evidence
+that it needed to be a rule rather than two fixes.
+
+**H11 is also the first defect no single-artifact gate could see.** The dbt
+contract was valid dbt. The seed data was valid against the model. Each passed
+its own consumer, and they contradicted each other — the exported test rejected
+the exported data, from one model. `dbt build` is the first gate that makes two
+artifacts meet, and it found this on its first run. Recorded as verification
+standard 10.
+
+The fixture gap itself is standard 11, and the structural repair is to
+parameterise the dbt gates over the synthetic fixture rather than to fix four
+instances. `test_seed_fixtures_exercise_every_declared_rule` is the executable
+form of the guard: it fails when the *fixtures* stop exercising a rule, which is
+a failure mode the suite previously had no member of.
+
+**Register correction.** B11's criterion is that a project emitted with quality
+rules *resolves*; its evidence asserted only that a file named `packages.yml`
+existed. dbt was never asked, and H12 sat inside that gap for a release. Same
+class as B6 — a proof a defective implementation also satisfies. Corrected to
+require the project be handed to dbt.
+
+### H10 — a numeric range is not a quality rule in ODCS
+
+*Added 2026-08-11 during Sprint 4. Third correction to the ODCS reading, after
+C3 and C7-a.*
+
+The Sprint 4 scope said H10's fix was to re-express each quality entry as
+`{metric: invalidValues, mustBe: 0}` with the bound in `arguments`. **That is
+right for a regex and for an enumerated CHECK, and wrong for a range.**
+
+Verified against `data-quality.md` and `schema.md` via context7 on 2026-08-11:
+the documented `invalidValues` arguments are `validValues` (a list) and
+`pattern`. There is no documented argument for a numeric bound. Emitting one —
+`validMinimum`, say — would have produced a document that validates as ODCS and
+communicates nothing to any engine reading it, which is the failure mode the
+ruling on this finding named explicitly.
+
+Where each declared constraint actually belongs:
+
+| IR field | ODCS home | Why |
+| :-- | :-- | :-- |
+| `min_value` / `max_value` | `logicalTypeOptions.minimum` / `.maximum` | a bound on the domain |
+| `regex_pattern` | `logicalTypeOptions.pattern` **and** an `invalidValues` rule | the standard documents both; one declares the domain, the other measures it |
+| enumerated `check_expression` | `invalidValues` with `arguments.validValues` | documented exactly |
+
+`logicalTypeOptions` and `quality` are not interchangeable. The first declares
+what values the column may hold; the second declares a measured assertion with
+a threshold and a unit. Moving the range is a relocation rather than a loss —
+the constraint still reaches the contract, under the name the standard gives it.
+
+**This closed M13's other half for free.** `check_expression` had been assigned
+to Sprint 5 as a documented gap, on the grounds that its ODCS mapping was
+unresolved. It is resolved, and the mapping is the one H10's fix already emits.
+
+**Conformance and correctness are separate properties**, and the suite was only
+testing one. The old H10 test asserted vocabulary — no `rule` key, a `metric`
+present, a `mustBe*` comparator. A mutant that emits a structurally perfect
+`nullValues` rule in place of the declared pattern passes all of that while
+describing a different constraint entirely. Register criterion B15 now names
+both tests, and the mutant dies on the second.
+
+The old M13 test had the mirror-image flaw: it searched every artifact for the
+literal `check_expression` **text**, which would fail the correct emitter — ODCS
+renders the constraint's meaning in its own vocabulary, not as pasted SQL — and
+pass one that pasted the predicate somewhere harmless.
+
 ### Findings closed since the audit
 
 | Finding | Status |

@@ -174,6 +174,13 @@ class DataModel(Base):
     version_number: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("1")
     )
+    # Suggested metrics, as a JSON list of {name, formula, description} (M1).
+    # Stored on the model rather than decomposed into rows: a metric is an
+    # opaque formula string with no foreign keys into the graph, so a table
+    # would buy joins nobody performs. Nullable because every row that predates
+    # migration 0014 legitimately has none — an empty list and "never persisted"
+    # are the same thing here, and inventing a distinction would be worse.
+    suggested_metrics: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.current_timestamp(),

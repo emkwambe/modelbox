@@ -103,6 +103,20 @@ class Settings(BaseSettings):
     )
     # PEM public key for RS256/OIDC verification (enterprise identity).
     jwt_public_key: str | None = None
+    # Audience and issuer pinning (D9). A signature proves only that the token
+    # came from a key holder — not that it was minted for THIS service. An IdP
+    # signing tokens for a dozen applications signs them all with the same key,
+    # so without `aud` an access token for any other tenant of that IdP is a
+    # valid token here. `iss` is the matching question for federation: which
+    # provider was it.
+    jwt_audience: str | None = Field(
+        default=None,
+        description="Expected `aud` claim. Required when jwt_algorithm is RS*.",
+    )
+    jwt_issuer: str | None = Field(
+        default=None,
+        description="Expected `iss` claim. Required when jwt_algorithm is RS*.",
+    )
     access_token_expire_minutes: int = 60
     # Key material for AES-256-GCM encryption of stored secrets (connection URIs).
     encryption_key: str = Field(

@@ -132,6 +132,24 @@ HAVE_SQLFLUFF = find_spec("sqlfluff") is not None
 PROTOC = shutil.which("protoc")
 NODE = shutil.which("node")
 
+# `dbt build` needs the project's packages installed, and `dbt deps` fetches
+# them over the network. Downloading inside a test would make this gate able to
+# fail because a registry is slow, which is not a gate. The cache is populated
+# once by `scripts/refresh_dbt_packages.py` — the same treatment protoc and node
+# already get, and `_need` makes its absence fatal under strict mode rather than
+# a silent skip.
+_DBT_PACKAGE_CACHE = Path(__file__).resolve().parent.parent / ".dbt-packages"
+HAVE_DBT_PACKAGES = _DBT_PACKAGE_CACHE.is_dir() and any(
+    _DBT_PACKAGE_CACHE.iterdir()
+)
+_DBT_LOCK_FIXTURE = (
+    Path(__file__).resolve().parent / "fixtures" / "dbt" / "package-lock.yml"
+)
+_DBT_PACKAGES_HINT = (
+    "dbt package cache (run: .venv-tools/Scripts/python "
+    "scripts/refresh_dbt_packages.py)"
+)
+
 
 def _need(available: object, tool: str) -> None:
     """Skip when a toolchain is absent — unless strict mode forbids skipping.
@@ -163,6 +181,7 @@ def test_strict_mode_has_the_full_toolchain() -> None:
             ("sqlfluff", HAVE_SQLFLUFF),
             ("protoc", PROTOC),
             ("node", NODE),
+            (_DBT_PACKAGES_HINT, HAVE_DBT_PACKAGES),
         )
         if not present
     ]
@@ -272,6 +291,13 @@ def _write_dbt_project(
 
     What reaches dbt is therefore the exporter's output plus only
     ``dbt_project.yml`` and ``profiles.yml``, which are the consumer's to write.
+
+    The installed packages are copied from the offline cache rather than
+    fetched. That is not scaffolding in the H9 sense: the *declaration* is still
+    the exporter's own ``packages.yml``, and the cache was built from that same
+    file. dbt refuses to load a project whose packages.yml names an uninstalled
+    package, so without this the extended gates would fail before reaching the
+    defect they exist to catch.
     """
     staging = root / "models" / "staging"
     staging.mkdir(parents=True, exist_ok=True)
@@ -281,6 +307,9 @@ def _write_dbt_project(
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
+
+    if "packages.yml" in files and HAVE_DBT_PACKAGES:
+        shutil.copytree(_DBT_PACKAGE_CACHE, root / "dbt_packages")
 
     (root / "dbt_project.yml").write_text(
         f"name: 'fidelity_{fixture.id.replace('-', '_')}'\n"
@@ -368,6 +397,133 @@ def _run_dbt_parse(project: Path) -> DbtResult:
         error=raw["error"],
         events=[(name, msg) for name, msg in raw["events"]],
     )
+
+
+# `dbt build` needs a warehouse. DuckDB is in-process and file-backed, so the
+# gate stays offline and needs no container — the same reason
+# `test_ddl_executes_on_duckdb` uses it to prove execution rather than parsing.
+_DBT_DUCKDB_PROFILE = """modelbox:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: '{path}'
+      threads: 1
+"""
+
+# dbt derives a schema by concatenating target and custom schema. The seeds
+# have to land in exactly the schema the exporter's own `_sources.yml` declares,
+# so the harness overrides the macro to use the custom name verbatim. This is
+# consumer configuration — where raw tables live is the deployer's decision,
+# which is precisely what the emitted sources file says in its description.
+_GENERATE_SCHEMA_NAME = """
+{% macro generate_schema_name(custom_schema_name, node) -%}
+    {%- if custom_schema_name is none -%}
+        {{ target.schema }}
+    {%- else -%}
+        {{ custom_schema_name | trim }}
+    {%- endif -%}
+{%- endmacro %}
+"""
+
+_DBT_BUILD_SUBPROCESS = """
+import json, sys
+from dbt.cli.main import dbtRunner
+
+project = sys.argv[1]
+events = []
+runner = dbtRunner(callbacks=[lambda e: events.append((e.info.name, e.info.msg))])
+base = [
+    "--project-dir", project,
+    "--profiles-dir", project,
+    "--target-path", project + "/target",
+    "--log-path", project + "/logs",
+    "--no-partial-parse",
+]
+# Seeds first, deliberately as a separate invocation. The staging models read
+# `source()`, not `ref()`, so dbt has no dependency edge from a seed to the
+# model that consumes it and would otherwise build the model before the table
+# exists. That is correct dbt modelling on the exporter's part -- staging models
+# should read sources -- so the ordering is the harness's problem to solve.
+seed = runner.invoke(["seed"] + base)
+build = runner.invoke(["build"] + base) if seed.success else seed
+sys.stdout.write("@@FIDELITY@@" + json.dumps({
+    "success": bool(seed.success and build.success),
+    "error": (type(build.exception).__name__ + ": " + str(build.exception))
+             if build.exception else "",
+    "events": events,
+}))
+"""
+
+
+def _write_dbt_seeds(root: Path, fixture: Fixture, rows: int = 8) -> None:
+    """Write the product's own generated seed data into the project.
+
+    The whole point of B13: the CSVs are what `SyntheticSeedGenerator` produces
+    for this model, and the tests they must survive are what `ExporterService`
+    exports for the same model. Neither side is adjusted to suit the other.
+    """
+    seeds = root / "seeds"
+    seeds.mkdir(parents=True, exist_ok=True)
+    result = SyntheticSeedGenerator().generate(fixture.model, rows, fmt="csv")
+    for name, body in result.files.items():
+        (seeds / name).write_text(body, encoding="utf-8")
+
+    macros = root / "macros"
+    macros.mkdir(parents=True, exist_ok=True)
+    (macros / "generate_schema_name.sql").write_text(
+        _GENERATE_SCHEMA_NAME, encoding="utf-8"
+    )
+    source_schema = yaml.safe_load(
+        (root / "models" / "staging" / "_sources.yml").read_text(encoding="utf-8")
+    )["sources"][0]["schema"]
+    (root / "dbt_project.yml").write_text(
+        f"name: 'fidelity_{fixture.id.replace('-', '_')}'\n"
+        "version: '1.0'\nprofile: 'modelbox'\nmodel-paths: ['models']\n"
+        "seed-paths: ['seeds']\nmacro-paths: ['macros']\n"
+        f"seeds:\n  fidelity_{fixture.id.replace('-', '_')}:\n"
+        f"    +schema: {source_schema}\n",
+        encoding="utf-8",
+    )
+    (root / "profiles.yml").write_text(
+        _DBT_DUCKDB_PROFILE.format(path=(root / "warehouse.duckdb").as_posix()),
+        encoding="utf-8",
+    )
+
+
+def _run_dbt_build(project: Path) -> DbtResult:
+    env = {**os.environ, "DBT_SEND_ANONYMOUS_USAGE_STATS": "False"}
+    proc = subprocess.run(
+        [sys.executable, "-c", _DBT_BUILD_SUBPROCESS, str(project)],
+        capture_output=True, text=True, env=env, cwd=str(project),
+    )
+    _, marker, payload = proc.stdout.partition("@@FIDELITY@@")
+    if not marker:
+        raise AssertionError(
+            f"dbt build subprocess produced no result (exit {proc.returncode}):\n"
+            f"{proc.stdout[-1500:]}\n{proc.stderr[-1500:]}"
+        )
+    raw = json.loads(payload)
+    return DbtResult(
+        success=raw["success"],
+        error=raw["error"],
+        events=[(name, msg) for name, msg in raw["events"]],
+    )
+
+
+_DBT_BUILD_CACHE: dict[str, DbtResult] = {}
+
+
+def dbt_build(
+    fixture: Fixture, tmp_path_factory: pytest.TempPathFactory
+) -> DbtResult:
+    """Seed the product's rows, run every model and every exported test."""
+    if fixture.id not in _DBT_BUILD_CACHE:
+        root = tmp_path_factory.mktemp(f"build-{fixture.id[:12]}")
+        _write_dbt_project(root, fixture, with_semantic=False)
+        _write_dbt_seeds(root, fixture)
+        _DBT_BUILD_CACHE[fixture.id] = _run_dbt_build(root)
+    return _DBT_BUILD_CACHE[fixture.id]
 
 
 _DBT_CACHE: dict[tuple[str, bool], DbtResult] = {}
@@ -702,15 +858,39 @@ def test_ddl_order_is_topological(gid: str) -> None:
 # ===========================================================================
 # 2. dbt
 # ===========================================================================
-@pytest.mark.parametrize("gid", GOLD_IDS)
+# Every dbt gate below ran on the gold graphs alone, and no gold graph declares
+# a quality rule — so no project dbt had ever been handed contained a
+# dbt_expectations test or a `packages.yml` at all. Four defects (H11, H12, M14,
+# M15) lived in that single blind spot and were found only when `dbt build`
+# forced the synthetic fixture through. Parameterising over that fixture too is
+# the structural repair; fixing the four instances is not.
+_DBT_FIXTURES = {**GOLD, "quality-rules": SYNTHETIC["quality-rules"]}
+_DBT_IDS = sorted(_DBT_FIXTURES)
+
+
+
+def _need_dbt(fixture: Fixture) -> None:
+    """Require dbt, and the package cache only when the project needs packages.
+
+    The gold graphs declare no quality rules, so their projects depend on
+    nothing and must not be gated on a cache they never read. Requiring it
+    unconditionally would make five green tests fail for a reason that has
+    nothing to do with what they assert.
+    """
+    _need(HAVE_DBT, "dbt-core")
+    if "packages.yml" in exporter().generate_dbt_project(fixture.model):
+        _need(HAVE_DBT_PACKAGES, _DBT_PACKAGES_HINT)
+
+
+@pytest.mark.parametrize("gid", _DBT_IDS)
 def test_dbt_parses(gid: str, tmp_path_factory: pytest.TempPathFactory) -> None:
     """The generated dbt project must parse (harness-supplied sources aside)."""
-    _need(HAVE_DBT, "dbt-core")
-    result = dbt_parse(GOLD[gid], tmp_path_factory, with_semantic=False)
+    _need_dbt(_DBT_FIXTURES[gid])
+    result = dbt_parse(_DBT_FIXTURES[gid], tmp_path_factory, with_semantic=False)
     assert result.success, result.error
 
 
-@pytest.mark.parametrize("gid", GOLD_IDS)
+@pytest.mark.parametrize("gid", _DBT_IDS)
 def test_dbt_project_is_self_contained(
     gid: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
@@ -722,33 +902,156 @@ def test_dbt_project_is_self_contained(
     rather than completed by scaffolding — the sources file the harness used to
     synthesise has been deleted, not merely left unused.
     """
-    _need(HAVE_DBT, "dbt-core")
-    files = exporter().generate_dbt_project(GOLD[gid].model)
+    _need_dbt(_DBT_FIXTURES[gid])
+    files = exporter().generate_dbt_project(_DBT_FIXTURES[gid].model)
     assert any(p.endswith("_sources.yml") for p in files), (
         "no sources declaration emitted; the project cannot stand alone"
     )
-    result = dbt_parse(GOLD[gid], tmp_path_factory, with_semantic=False)
+    result = dbt_parse(_DBT_FIXTURES[gid], tmp_path_factory, with_semantic=False)
     assert result.success, result.error
 
 
-@pytest.mark.parametrize("gid", GOLD_IDS)
+@pytest.mark.parametrize("gid", _DBT_IDS)
 def test_dbt_no_deprecations(
     gid: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     """A generated project must not rely on deprecated dbt syntax."""
-    _need(HAVE_DBT, "dbt-core")
-    result = dbt_parse(GOLD[gid], tmp_path_factory, with_semantic=False)
+    _need_dbt(_DBT_FIXTURES[gid])
+    result = dbt_parse(_DBT_FIXTURES[gid], tmp_path_factory, with_semantic=False)
     deprecations = sorted(n for n in result.event_names() if "Deprecation" in n)
     assert not deprecations, f"dbt reported {deprecations}"
 
 
-def test_dbt_declares_packages_yml() -> None:
-    """A project using dbt_expectations must declare it in packages.yml."""
+def test_dbt_declares_packages_yml(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """A project using dbt_expectations must declare it *and* dbt must accept it.
+
+    Register correction: B11's criterion is that a project emitted with quality
+    rules **resolves**, and the evidence named here asserted only that a file
+    with the right name existed. dbt was never asked. That is the same class as
+    B6 — a proof that a defective implementation also satisfies — and H12 lived
+    inside the gap for a full release: the emitted packages.yml was malformed
+    badly enough that dbt refuses to load the project, and this test was green.
+
+    The resolution assertion now lives in `test_dbt_parses[quality-rules]`,
+    which hands the file to dbt. What remains here is the narrower claim that
+    the declaration is emitted at all (M7).
+    """
+    _need_dbt(SYNTHETIC["quality-rules"])
     files = exporter().generate_dbt_project(SYNTHETIC["quality-rules"].model)
     schema_yml = files["models/staging/schema.yml"]
     assert "dbt_expectations." in schema_yml, "fixture no longer exercises M7"
     assert any(p.endswith("packages.yml") for p in files), (
         "emits dbt_expectations tests but declares no packages.yml"
+    )
+    result = dbt_parse(
+        SYNTHETIC["quality-rules"], tmp_path_factory, with_semantic=False
+    )
+    assert result.success, (
+        f"packages.yml is emitted but dbt will not load the project: "
+        f"{result.error}"
+    )
+
+
+def test_dbt_packages_match_the_verified_lock() -> None:
+    """The declared package must be the one that resolved without deprecation.
+
+    M15. `calogica/dbt_expectations` is redirected on dbt Hub, and resolving it
+    raises PackageRedirectDeprecation twice — once for itself and once for its
+    transitive `dbt_date`. Neither is visible offline: the deprecation fires
+    against the registry, so no command this harness can run would ever see it.
+
+    The enforcement therefore lives in `scripts/refresh_dbt_packages.py`, which
+    resolves the exporter's own packages.yml over the network and **fails** on
+    any deprecation. `package-lock.yml` is the artifact that run produced. This
+    test asserts the emitter still names what that verified run resolved, which
+    is what makes the committed lock evidence rather than decoration — the same
+    relationship `requirements.lock` has to the environment it describes.
+    """
+    lock = yaml.safe_load(_DBT_LOCK_FIXTURE.read_text(encoding="utf-8"))
+    resolved = {entry["package"] for entry in lock["packages"]}
+    emitted = yaml.safe_load(
+        exporter().generate_dbt_project(SYNTHETIC["quality-rules"].model)[
+            "packages.yml"
+        ]
+    )
+    declared = {entry["package"] for entry in emitted["packages"]}
+    # A subset assertion is vacuously true on an empty set, which would make
+    # this pass hardest exactly when the exporter has stopped declaring
+    # anything at all.
+    assert declared, "packages.yml declares no packages"
+    assert declared <= resolved, (
+        f"packages.yml declares {sorted(declared - resolved)}, which the "
+        f"verified resolution in package-lock.yml does not contain. Re-run "
+        f"scripts/refresh_dbt_packages.py — it fails on a deprecated package, "
+        f"so a passing run is the evidence this assertion stands on."
+    )
+
+
+def test_dbt_accepted_values_agree_with_a_declared_check() -> None:
+    """An emitted accepted_values test must not contradict the model's CHECK.
+
+    Asserted as a set relation against the declared literals rather than
+    against a specific list, so it states the property — the exported contract
+    agrees with the model — rather than restating the fix.
+    """
+    fixture = SYNTHETIC["quality-rules"]
+    files = exporter().generate_dbt_project(fixture.model)
+    schema = yaml.safe_load(files["models/staging/schema.yml"])
+    by_column = {
+        col["name"]: col
+        for model in schema["models"]
+        for col in model.get("columns", [])
+    }
+
+    checked = 0
+    for entity in fixture.model.entities:
+        for column in entity.columns:
+            declared = re.findall(r"'([^']*)'", column.check_expression or "")
+            if not declared or " IN " not in (column.check_expression or "").upper():
+                continue
+            emitted = [
+                test["accepted_values"]["arguments"]["values"]
+                for test in by_column.get(column.name, {}).get("data_tests", [])
+                if isinstance(test, dict) and "accepted_values" in test
+            ]
+            if not emitted:
+                continue
+            checked += 1
+            assert set(emitted[0]) <= set(declared), (
+                f"{column.name}: the exported dbt test accepts {emitted[0]} but "
+                f"the model declares only {declared}. The contract and the "
+                f"model disagree about the same column."
+            )
+    assert checked, "fixture no longer exercises H11"
+
+
+def test_dbt_build_succeeds_on_generated_seed_data(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """B13, and the distance between "our exports parse" and "our exports run".
+
+    `dbt parse` proves a project resolves. This executes it: the seed rows the
+    product generates are loaded into DuckDB, every model the product exports is
+    built against them, and every test the product exports is run.
+
+    It is the first gate that can see a **cross-artifact** defect. Every other
+    check in this file asks whether one artifact satisfies its own consumer, and
+    both halves of H11 passed that bar individually — the seed was valid against
+    the model, the dbt contract was valid dbt. They disagreed with each other,
+    and nothing that examines one artifact at a time can notice.
+    """
+    _need_dbt(SYNTHETIC["quality-rules"])
+    result = dbt_build(SYNTHETIC["quality-rules"], tmp_path_factory)
+    failures = [
+        msg for name, msg in result.events
+        if name in ("LogTestResult", "LogModelResult") and " ERROR " not in msg
+        and ("FAIL" in msg or "ERROR" in msg)
+    ]
+    assert result.success, (
+        f"dbt build failed on the product's own fixtures: {result.error} "
+        f"{failures[:4]}"
     )
 
 
@@ -1095,16 +1398,6 @@ def test_odcs_required_reflects_nullability(gid: str) -> None:
             )
 
 
-@pytest.mark.xfail(
-    reason="H10: quality entries are emitted as {'rule': 'range', "
-           "'mustBeGreaterThanOrEqualTo': ...}. `rule` is not an ODCS key. A "
-           "v3.1.0 property-level entry is {id, metric, mustBe*, arguments, "
-           "unit, description} with an optional type of library|sql|custom. "
-           "Reachable only through the synthetic fixture, since no gold graph "
-           "declares a quality rule — which is why the audit missed it. "
-           "Assigned to Sprint 4.",
-    strict=True,
-)
 def test_odcs_quality_entries_use_v3_vocabulary() -> None:
     """Quality blocks must speak ODCS, not an invented dialect.
 
@@ -1142,6 +1435,93 @@ def test_odcs_quality_entries_use_v3_vocabulary() -> None:
         if not any(k == "mustBe" or k.startswith("mustBe") for k in entry):
             offending.append(f"{where}: no mustBe* comparator ({entry})")
     assert not offending, offending
+
+
+def test_odcs_carries_the_meaning_of_each_declared_constraint() -> None:
+    """Every declared constraint reaches the contract with its meaning intact.
+
+    The vocabulary check above asks whether the document speaks ODCS. This asks
+    whether it says the right thing — the distinction the H10 ruling turned on,
+    because a contract that is valid and wrong is worse than one that is
+    invalid. An emitter that dropped every bound and emitted a syntactically
+    perfect `nullValues` entry instead would pass the vocabulary test outright.
+
+    Where each constraint belongs, verified against Bitol's `schema.md` and
+    `data-quality.md` via context7 on 2026-08-11:
+
+    * a **numeric range** is a bound on the domain — `logicalTypeOptions`
+      `minimum`/`maximum`. It is deliberately *not* a quality entry: the
+      documented `invalidValues` arguments are `validValues` and `pattern`, and
+      there is no argument for a numeric bound. Inventing one would produce a
+      document that validates and communicates nothing.
+    * a **regex** is documented in both places, so it appears in both: as
+      `logicalTypeOptions.pattern` (the domain) and as an `invalidValues`
+      quality entry with `mustBe: 0` (the measured assertion).
+    * an **enumerated CHECK** is `invalidValues` with `arguments.validValues`.
+    """
+    fixture = SYNTHETIC["quality-rules"]
+    contract = yaml.safe_load(
+        exporter().export_data_contract(fixture.model, "odcs", fixture.dataset_name)[
+            "datacontract.yaml"
+        ]
+    )
+    props = {
+        (table["name"], prop["name"]): prop
+        for table in contract["schema"]
+        for prop in table["properties"]
+    }
+
+    checked = {"range": 0, "regex": 0, "enum": 0}
+    missing: list[str] = []
+    for entity in fixture.model.entities:
+        for column in entity.columns:
+            prop = props[(entity.entity_name, column.name)]
+            options = prop.get("logicalTypeOptions", {})
+            arguments = [
+                entry.get("arguments", {})
+                for entry in prop.get("quality", [])
+                if entry.get("metric") == "invalidValues"
+                and entry.get("mustBe") == 0
+            ]
+            where = f"{entity.entity_name}.{column.name}"
+
+            if column.min_value is not None:
+                checked["range"] += 1
+                if options.get("minimum") != column.min_value:
+                    missing.append(
+                        f"{where}: declares min {column.min_value}, contract "
+                        f"says {options.get('minimum')!r}"
+                    )
+            if column.max_value is not None:
+                if options.get("maximum") != column.max_value:
+                    missing.append(
+                        f"{where}: declares max {column.max_value}, contract "
+                        f"says {options.get('maximum')!r}"
+                    )
+            if column.regex_pattern:
+                checked["regex"] += 1
+                if options.get("pattern") != column.regex_pattern:
+                    missing.append(f"{where}: pattern absent from the domain")
+                if not any(
+                    a.get("pattern") == column.regex_pattern for a in arguments
+                ):
+                    missing.append(f"{where}: pattern is asserted by no rule")
+            declared = re.findall(r"'([^']*)'", column.check_expression or "")
+            if declared and " IN " in (column.check_expression or "").upper():
+                checked["enum"] += 1
+                if not any(
+                    a.get("validValues") == declared for a in arguments
+                ):
+                    missing.append(
+                        f"{where}: CHECK allows {declared}, contract asserts "
+                        f"{[a.get('validValues') for a in arguments]}"
+                    )
+
+    assert not missing, missing
+    unexercised = sorted(kind for kind, n in checked.items() if not n)
+    assert not unexercised, (
+        f"the fixture declares no {unexercised}, so that branch asserts nothing"
+    )
 
 
 @pytest.mark.parametrize("gid", GOLD_IDS)
@@ -1404,14 +1784,61 @@ def test_seed_generation_order_is_fk_safe(gid: str) -> None:
         )
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    "healthcare-ehr":
-        "H1: the seed generator never reads a column's declared length, so "
-        "diagnosis.icd10_code VARCHAR(10) receives 'icd10_code_1' (12 chars) "
-        "and the seed cannot be inserted into the DDL emitted beside it.",
-}))
+# Seed constraints are exercised across the gold graphs *and* the synthetic
+# constraints fixture. Parameterising over gold alone is register standard 8:
+# no gold graph declares a range, a pattern, uniqueness, a default or a check,
+# so every one of those rules would have been asserted against data that never
+# contains it.
+_SEED_FIXTURES = {**GOLD, "quality-rules": SYNTHETIC["quality-rules"]}
+_SEED_IDS = sorted(_SEED_FIXTURES)
+
+
+def test_seed_fixtures_exercise_every_declared_rule() -> None:
+    """Standard 8: no seed rule may be asserted against data lacking it.
+
+    Every test below walks the columns and `continue`s past any that does not
+    declare the rule it checks, so a fixture edit that drops the only column
+    carrying a constraint turns a real assertion into a green no-op — silently,
+    and in the direction that looks like success. This is the one test in the
+    group that fails when the *fixtures* regress rather than the generator.
+    """
+    columns = [
+        col
+        for fixture in _SEED_FIXTURES.values()
+        for entity in fixture.model.entities
+        for col in entity.columns
+    ]
+    exercised = {
+        "declared length": any(_declared_length(c.data_type) for c in columns),
+        "range": any(
+            c.min_value is not None or c.max_value is not None for c in columns
+        ),
+        "regex": any(c.regex_pattern for c in columns),
+        "precision/scale": any(
+            re.search(r"\(\s*\d+\s*,\s*\d+\s*\)", c.data_type)
+            and "NUMERIC" in c.data_type.upper()
+            for c in columns
+        ),
+        "enumerated check": any(
+            c.check_expression and " IN " in c.check_expression.upper()
+            for c in columns
+        ),
+        "uniqueness": any(c.is_unique and not c.is_primary_key for c in columns),
+        "non-nullability": any(
+            not c.is_nullable and not c.is_primary_key for c in columns
+        ),
+        "default": any(c.default_value for c in columns),
+    }
+    unexercised = sorted(rule for rule, seen in exercised.items() if not seen)
+    assert not unexercised, (
+        f"no seed fixture declares: {unexercised}. The tests for these rules "
+        f"still pass, and they mean nothing."
+    )
+
+
+@pytest.mark.parametrize("gid", _SEED_IDS)
 def test_seed_respects_declared_length(gid: str) -> None:
-    fixture = GOLD[gid]
+    fixture = _SEED_FIXTURES[gid]
     rows = _seed_rows(fixture)
     for entity in fixture.model.entities:
         for column in entity.columns:
@@ -1426,13 +1853,152 @@ def test_seed_respects_declared_length(gid: str) -> None:
                 )
 
 
-@pytest.mark.xfail(
-    reason="H1: the seed generator ignores min_value, max_value and "
-           "regex_pattern, so it emits rows that fail the dbt and ODCS "
-           "assertions exported from the same model — `dbt build` fails on the "
-           "product's own fixtures.",
-    strict=True,
-)
+def test_seed_respects_declared_precision_and_scale() -> None:
+    """Generated numerics must fit the declared NUMERIC(p, s)."""
+    fixture = SYNTHETIC["quality-rules"]
+    rows = _seed_rows(fixture)
+    violations: list[str] = []
+    for entity in fixture.model.entities:
+        for column in entity.columns:
+            match = re.search(r"\(\s*(\d+)\s*,\s*(\d+)\s*\)", column.data_type)
+            if not match or "NUMERIC" not in column.data_type.upper():
+                continue
+            precision, scale = int(match.group(1)), int(match.group(2))
+            for row in rows.get(entity.entity_name, []):
+                digits = row[column.name].lstrip("-").replace(".", "")
+                whole, _, frac = row[column.name].lstrip("-").partition(".")
+                if len(digits) > precision or len(frac) > scale:
+                    violations.append(
+                        f"{column.name}={row[column.name]} against "
+                        f"{column.data_type}"
+                    )
+                    break
+    assert not violations, f"values overflow their declared scale: {violations}"
+
+
+def test_seed_satisfies_an_enumerated_check_expression() -> None:
+    """A simple `col IN (...)` check must constrain the generated values.
+
+    Scoped deliberately. A value generator cannot evaluate an arbitrary SQL
+    predicate, and pretending otherwise would be untested handling. An
+    enumerated IN-list is the case that actually occurs, is unambiguous to
+    parse, and is precisely where the generator already guesses — it has a
+    hard-coded status vocabulary that the model may contradict.
+    """
+    fixture = SYNTHETIC["quality-rules"]
+    rows = _seed_rows(fixture)
+    violations: list[str] = []
+    for entity in fixture.model.entities:
+        for column in entity.columns:
+            if not column.check_expression:
+                continue
+            allowed = re.findall(r"'([^']*)'", column.check_expression)
+            if " IN " not in column.check_expression.upper() or not allowed:
+                continue  # not an enumeration; out of scope by design
+            for row in rows.get(entity.entity_name, []):
+                if row[column.name] not in allowed:
+                    violations.append(
+                        f"{column.name}={row[column.name]!r} not in {allowed}"
+                    )
+                    break
+    assert not violations, f"seed violates a declared CHECK: {violations}"
+
+
+@pytest.mark.parametrize("gid", _SEED_IDS)
+def test_seed_values_are_unique_where_declared(gid: str) -> None:
+    """A column declared UNIQUE must not repeat a value in the seed."""
+    fixture = _SEED_FIXTURES[gid]
+    rows = _seed_rows(fixture)
+    for entity in fixture.model.entities:
+        for column in entity.columns:
+            if not (column.is_unique or column.is_primary_key):
+                continue
+            values = [r[column.name] for r in rows.get(entity.entity_name, [])]
+            assert len(values) == len(set(values)), (
+                f"{entity.entity_name}.{column.name} is declared unique but "
+                f"the seed repeats a value"
+            )
+
+
+@pytest.mark.parametrize("gid", _SEED_IDS)
+def test_seed_never_nulls_a_non_nullable_column(gid: str) -> None:
+    """No NULL where the model declares the column mandatory."""
+    fixture = _SEED_FIXTURES[gid]
+    rows = _seed_rows(fixture)
+    for entity in fixture.model.entities:
+        for column in entity.columns:
+            if column.is_nullable:
+                continue
+            for row in rows.get(entity.entity_name, []):
+                assert row[column.name] not in ("", "NULL"), (
+                    f"{entity.entity_name}.{column.name} is NOT NULL but the "
+                    f"seed emitted {row[column.name]!r}"
+                )
+
+
+def test_default_and_check_reach_an_emitter() -> None:
+    """A declared DEFAULT and CHECK must reach a consuming emitter (M13).
+
+    Asserted by meaning, not by substring. The first version of this test
+    searched every artifact for the literal `check_expression` text, and that
+    is the wrong question: ODCS expresses an enumerated CHECK as an
+    `invalidValues` rule carrying `validValues`, which is the constraint's
+    meaning rendered in the standard's own vocabulary. A test demanding the raw
+    SQL string back would fail the correct emitter and pass one that pasted the
+    predicate somewhere harmless.
+
+    `default_value` is emitted verbatim because SQL `DEFAULT` takes the literal
+    the model authored — there the text *is* the meaning.
+    """
+    fixture = SYNTHETIC["quality-rules"]
+    svc = exporter()
+    ddl = svc.generate_ddl(fixture.model, "postgres")
+    contract = yaml.safe_load(
+        svc.export_data_contract(fixture.model, "odcs", fixture.dataset_name)[
+            "datacontract.yaml"
+        ]
+    )
+    dbt_schema = yaml.safe_load(
+        svc.generate_dbt_project(fixture.model)["models/staging/schema.yml"]
+    )
+    quality_args = {
+        (table["name"], prop["name"]): [
+            entry.get("arguments", {}) for entry in prop.get("quality", [])
+        ]
+        for table in contract["schema"]
+        for prop in table["properties"]
+    }
+    dbt_values = {
+        col["name"]: test["accepted_values"]["arguments"]["values"]
+        for model in dbt_schema["models"]
+        for col in model.get("columns", [])
+        for test in col.get("data_tests", [])
+        if isinstance(test, dict) and "accepted_values" in test
+    }
+
+    checked = {"default": 0, "check": 0}
+    missing: list[str] = []
+    for entity in fixture.model.entities:
+        for col in entity.columns:
+            where = f"{entity.entity_name}.{col.name}"
+            if col.default_value:
+                checked["default"] += 1
+                if f"DEFAULT {col.default_value}" not in ddl:
+                    missing.append(f"{where}: DEFAULT reaches no DDL")
+            allowed = re.findall(r"'([^']*)'", col.check_expression or "")
+            if allowed and " IN " in (col.check_expression or "").upper():
+                checked["check"] += 1
+                args = quality_args.get((entity.entity_name, col.name), [])
+                if not any(a.get("validValues") == allowed for a in args):
+                    missing.append(f"{where}: CHECK reaches no contract rule")
+                if dbt_values.get(col.name) != allowed:
+                    missing.append(f"{where}: CHECK reaches no dbt test")
+
+    assert not missing, missing
+    unexercised = sorted(kind for kind, n in checked.items() if not n)
+    assert not unexercised, f"fixture no longer exercises M13: {unexercised}"
+
+
 def test_seed_respects_quality_rules() -> None:
     """Generated rows must satisfy the contract the same model exports."""
     fixture = SYNTHETIC["quality-rules"]

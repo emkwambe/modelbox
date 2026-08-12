@@ -250,7 +250,12 @@ def test_quality_rules_propagate_to_exports() -> None:
         if isinstance(t, dict)
         and "dbt_expectations.expect_column_values_to_be_between" in t
     )
-    assert between == {"min_value": 0, "max_value": 100}
+    # Nested under `arguments:` since M14 — dbt deprecates top-level args on a
+    # generic test, and this assertion previously locked in the deprecated
+    # shape. Values compared as floats: the IR carries the bounds as numbers,
+    # and re-asserting the literal ints would be asserting the YAML round-trip
+    # rather than the emitted contract.
+    assert between == {"arguments": {"min_value": 0.0, "max_value": 100.0}}
     email_tests = cols["email"]["data_tests"]
     regex = next(
         t["dbt_expectations.expect_column_values_to_match_regex"]
@@ -258,7 +263,7 @@ def test_quality_rules_propagate_to_exports() -> None:
         if isinstance(t, dict)
         and "dbt_expectations.expect_column_values_to_match_regex" in t
     )
-    assert regex == {"regex": r"^[^@]+@[^@]+$"}
+    assert regex == {"arguments": {"regex": r"^[^@]+@[^@]+$"}}
 
     # ODCS: column-level quality assertions.
     odcs = yaml.safe_load(
@@ -267,11 +272,27 @@ def test_quality_rules_propagate_to_exports() -> None:
         ]
     )
     props = {p["name"]: p for p in odcs["schema"][0]["properties"]}
-    assert props["score"]["quality"] == [
-        {"rule": "range", "mustBeGreaterThanOrEqualTo": 0, "mustBeLessThanOrEqualTo": 100}
-    ]
+    # H10. A numeric range is a bound on the domain, so ODCS puts it in
+    # logicalTypeOptions — not in `quality`, which carries measured assertions.
+    # The old expectation here (`{"rule": "range", ...}`) used a key that does
+    # not exist anywhere in the standard.
+    assert props["score"]["logicalTypeOptions"] == {"minimum": 0.0, "maximum": 100.0}
+    assert "quality" not in props["score"], (
+        "a range is a domain bound; asserting it as a quality metric would need "
+        "an argument the standard does not define"
+    )
+    # A pattern is documented in both places: it declares the domain and is
+    # separately measured, mustBe 0 invalid rows.
+    assert props["email"]["logicalTypeOptions"]["pattern"] == r"^[^@]+@[^@]+$"
     assert props["email"]["quality"] == [
-        {"rule": "regex", "pattern": r"^[^@]+@[^@]+$"}
+        {
+            "id": "email_pattern",
+            "metric": "invalidValues",
+            "mustBe": 0,
+            "unit": "rows",
+            "arguments": {"pattern": r"^[^@]+@[^@]+$"},
+            "description": r"Every value of email must match ^[^@]+@[^@]+$.",
+        }
     ]
 
 

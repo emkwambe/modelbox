@@ -2,8 +2,8 @@
   "id": "quality-rules",
   "title": "Quality Rules (defect fixture)",
   "paradigm": "3NF",
-  "defect": "H1, M7",
-  "rationale": "The seed generator must honour the same min_value/max_value/regex_pattern/length the model exports as dbt and ODCS assertions, and the dbt project must declare the dbt_expectations package it depends on.",
+  "defect": "H1, M7, M13",
+  "rationale": "Declares every physical constraint the IR can express, so no constraint is reachable by nothing. The seed generator must honour the same rules the model exports as dbt and ODCS assertions; the dbt project must declare the dbt_expectations package it depends on; and default_value and check_expression must reach some emitter rather than round-tripping into a void (M13).",
   "entities": [
     {
       "entity_name": "order_scores",
@@ -74,6 +74,55 @@
           "min_value": null,
           "max_value": null,
           "regex_pattern": null
+        },
+        {
+          "name": "external_ref",
+          "data_type": "VARCHAR(12)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": "Business key: the seed must not repeat a value here.",
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null,
+          "is_unique": true
+        },
+        {
+          "name": "status",
+          "data_type": "VARCHAR(16)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": "Carries a DEFAULT and a CHECK, so both reach an emitter.",
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null,
+          "default_value": "'PENDING'",
+          "check_expression": "status IN ('PENDING', 'DONE')"
+        },
+        {
+          "name": "notes",
+          "data_type": "VARCHAR(40)",
+          "is_primary_key": false,
+          "is_foreign_key": false,
+          "is_pii": false,
+          "pii_type": null,
+          "description": "Non-key and non-nullable \u2014 the counterexample a correct model rarely contains.",
+          "references": null,
+          "is_metric": false,
+          "aggregation": null,
+          "min_value": null,
+          "max_value": null,
+          "regex_pattern": null,
+          "is_nullable": false
         }
       ]
     }

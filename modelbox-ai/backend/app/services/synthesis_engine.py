@@ -203,7 +203,13 @@ class SynthesisEngine:
             paradigm=model.current_paradigm or Paradigm.THREE_NF,  # type: ignore[arg-type]
             entities=entity_schemas,
             relationships=rel_schemas,
-            suggested_metrics=[],
+            # M1. This was `[]`, unconditionally, which is what made the
+            # persisted column pointless before it existed: metrics were
+            # discarded on the way out even when they had been stored.
+            suggested_metrics=[
+                SuggestedMetric.model_validate(m)
+                for m in (model.suggested_metrics or [])
+            ],
             validation=report,
         )
 
@@ -262,6 +268,13 @@ class SynthesisEngine:
             title=title,
             current_paradigm=str(synthesized.paradigm),
             target_dialect=dialect,
+            # M1. Without this the metrics reached the canvas and vanished on
+            # save, and `DiffEngine._semantic_breaks`' formula branch could
+            # never fire through the API.
+            suggested_metrics=[
+                m.model_dump() for m in synthesized.suggested_metrics
+            ]
+            or None,
         )
         self._session.add(model)
         await self._session.flush()
