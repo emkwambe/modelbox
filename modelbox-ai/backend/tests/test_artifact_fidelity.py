@@ -1404,14 +1404,65 @@ def test_seed_generation_order_is_fk_safe(gid: str) -> None:
         )
 
 
-@pytest.mark.parametrize("gid", gold_params({
-    "healthcare-ehr":
-        "H1: the seed generator never reads a column's declared length, so "
-        "diagnosis.icd10_code VARCHAR(10) receives 'icd10_code_1' (12 chars) "
-        "and the seed cannot be inserted into the DDL emitted beside it.",
-}))
+# Seed constraints are exercised across the gold graphs *and* the synthetic
+# constraints fixture. Parameterising over gold alone is register standard 8:
+# no gold graph declares a range, a pattern, uniqueness, a default or a check,
+# so every one of those rules would have been asserted against data that never
+# contains it.
+_SEED_FIXTURES = {**GOLD, "quality-rules": SYNTHETIC["quality-rules"]}
+_SEED_IDS = sorted(_SEED_FIXTURES)
+
+
+def _seed_param(defects: dict[str, str]) -> list[Any]:
+    return [_param(fid, defect=defects.get(fid)) for fid in _SEED_IDS]
+
+
+def test_seed_fixtures_exercise_every_declared_rule() -> None:
+    """Standard 8: no seed rule may be asserted against data lacking it.
+
+    Every test below walks the columns and `continue`s past any that does not
+    declare the rule it checks, so a fixture edit that drops the only column
+    carrying a constraint turns a real assertion into a green no-op — silently,
+    and in the direction that looks like success. This is the one test in the
+    group that fails when the *fixtures* regress rather than the generator.
+    """
+    columns = [
+        col
+        for fixture in _SEED_FIXTURES.values()
+        for entity in fixture.model.entities
+        for col in entity.columns
+    ]
+    exercised = {
+        "declared length": any(_declared_length(c.data_type) for c in columns),
+        "range": any(
+            c.min_value is not None or c.max_value is not None for c in columns
+        ),
+        "regex": any(c.regex_pattern for c in columns),
+        "precision/scale": any(
+            re.search(r"\(\s*\d+\s*,\s*\d+\s*\)", c.data_type)
+            and "NUMERIC" in c.data_type.upper()
+            for c in columns
+        ),
+        "enumerated check": any(
+            c.check_expression and " IN " in c.check_expression.upper()
+            for c in columns
+        ),
+        "uniqueness": any(c.is_unique and not c.is_primary_key for c in columns),
+        "non-nullability": any(
+            not c.is_nullable and not c.is_primary_key for c in columns
+        ),
+        "default": any(c.default_value for c in columns),
+    }
+    unexercised = sorted(rule for rule, seen in exercised.items() if not seen)
+    assert not unexercised, (
+        f"no seed fixture declares: {unexercised}. The tests for these rules "
+        f"still pass, and they mean nothing."
+    )
+
+
+@pytest.mark.parametrize("gid", _SEED_IDS)
 def test_seed_respects_declared_length(gid: str) -> None:
-    fixture = GOLD[gid]
+    fixture = _SEED_FIXTURES[gid]
     rows = _seed_rows(fixture)
     for entity in fixture.model.entities:
         for column in entity.columns:
@@ -1426,13 +1477,133 @@ def test_seed_respects_declared_length(gid: str) -> None:
                 )
 
 
+def test_seed_respects_declared_precision_and_scale() -> None:
+    """Generated numerics must fit the declared NUMERIC(p, s)."""
+    fixture = SYNTHETIC["quality-rules"]
+    rows = _seed_rows(fixture)
+    violations: list[str] = []
+    for entity in fixture.model.entities:
+        for column in entity.columns:
+            match = re.search(r"\(\s*(\d+)\s*,\s*(\d+)\s*\)", column.data_type)
+            if not match or "NUMERIC" not in column.data_type.upper():
+                continue
+            precision, scale = int(match.group(1)), int(match.group(2))
+            for row in rows.get(entity.entity_name, []):
+                digits = row[column.name].lstrip("-").replace(".", "")
+                whole, _, frac = row[column.name].lstrip("-").partition(".")
+                if len(digits) > precision or len(frac) > scale:
+                    violations.append(
+                        f"{column.name}={row[column.name]} against "
+                        f"{column.data_type}"
+                    )
+                    break
+    assert not violations, f"values overflow their declared scale: {violations}"
+
+
+def test_seed_satisfies_an_enumerated_check_expression() -> None:
+    """A simple `col IN (...)` check must constrain the generated values.
+
+    Scoped deliberately. A value generator cannot evaluate an arbitrary SQL
+    predicate, and pretending otherwise would be untested handling. An
+    enumerated IN-list is the case that actually occurs, is unambiguous to
+    parse, and is precisely where the generator already guesses — it has a
+    hard-coded status vocabulary that the model may contradict.
+    """
+    fixture = SYNTHETIC["quality-rules"]
+    rows = _seed_rows(fixture)
+    violations: list[str] = []
+    for entity in fixture.model.entities:
+        for column in entity.columns:
+            if not column.check_expression:
+                continue
+            allowed = re.findall(r"'([^']*)'", column.check_expression)
+            if " IN " not in column.check_expression.upper() or not allowed:
+                continue  # not an enumeration; out of scope by design
+            for row in rows.get(entity.entity_name, []):
+                if row[column.name] not in allowed:
+                    violations.append(
+                        f"{column.name}={row[column.name]!r} not in {allowed}"
+                    )
+                    break
+    assert not violations, f"seed violates a declared CHECK: {violations}"
+
+
+@pytest.mark.parametrize("gid", _SEED_IDS)
+def test_seed_values_are_unique_where_declared(gid: str) -> None:
+    """A column declared UNIQUE must not repeat a value in the seed."""
+    fixture = _SEED_FIXTURES[gid]
+    rows = _seed_rows(fixture)
+    for entity in fixture.model.entities:
+        for column in entity.columns:
+            if not (column.is_unique or column.is_primary_key):
+                continue
+            values = [r[column.name] for r in rows.get(entity.entity_name, [])]
+            assert len(values) == len(set(values)), (
+                f"{entity.entity_name}.{column.name} is declared unique but "
+                f"the seed repeats a value"
+            )
+
+
+@pytest.mark.parametrize("gid", _SEED_IDS)
+def test_seed_never_nulls_a_non_nullable_column(gid: str) -> None:
+    """No NULL where the model declares the column mandatory."""
+    fixture = _SEED_FIXTURES[gid]
+    rows = _seed_rows(fixture)
+    for entity in fixture.model.entities:
+        for column in entity.columns:
+            if column.is_nullable:
+                continue
+            for row in rows.get(entity.entity_name, []):
+                assert row[column.name] not in ("", "NULL"), (
+                    f"{entity.entity_name}.{column.name} is NOT NULL but the "
+                    f"seed emitted {row[column.name]!r}"
+                )
+
+
 @pytest.mark.xfail(
-    reason="H1: the seed generator ignores min_value, max_value and "
-           "regex_pattern, so it emits rows that fail the dbt and ODCS "
-           "assertions exported from the same model — `dbt build` fails on the "
-           "product's own fixtures.",
+    reason="M13: default_value and check_expression reach no emitter at all. "
+           "Sprint 2 added them and only persistence and read-back consume "
+           "them, so they round-trip into a void. Register C2 claims all four "
+           "constraints 'reach every consuming emitter'; two of them reach "
+           "none. Assigned within Sprint 4.",
     strict=True,
 )
+def test_default_and_check_reach_an_emitter() -> None:
+    """A declared DEFAULT and CHECK must appear in some emitted artifact."""
+    fixture = SYNTHETIC["quality-rules"]
+    svc = exporter()
+    artifacts = {
+        "ddl/postgres": svc.generate_ddl(fixture.model, "postgres"),
+        **{
+            f"odcs/{k}": v
+            for k, v in svc.export_data_contract(
+                fixture.model, "odcs", fixture.dataset_name
+            ).items()
+        },
+        **{
+            f"dbt/{k}": v
+            for k, v in svc.generate_dbt_project(fixture.model).items()
+        },
+    }
+    blob = "\n".join(artifacts.values())
+    declared = [
+        (c.name, c.default_value, c.check_expression)
+        for e in fixture.model.entities for c in e.columns
+        if c.default_value or c.check_expression
+    ]
+    assert declared, "fixture no longer exercises M13"
+    missing = [
+        f"{name}: {kind}"
+        for name, default, check in declared
+        for kind, value in (("default", default), ("check", check))
+        if value and value not in blob
+    ]
+    assert not missing, (
+        f"declared constraints reach no artifact: {missing}. Emitted: "
+        f"{sorted(artifacts)}"
+    )
+
+
 def test_seed_respects_quality_rules() -> None:
     """Generated rows must satisfy the contract the same model exports."""
     fixture = SYNTHETIC["quality-rules"]
