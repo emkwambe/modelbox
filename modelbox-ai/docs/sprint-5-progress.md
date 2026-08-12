@@ -668,6 +668,30 @@ is the one that cannot be rushed.
 
 ---
 
+## Task 5 — threshold banked, harness and run outstanding
+
+**Step one done:** `backend/scripts/conformance_threshold.py`, commit `b6a3e1a`,
+committed alone into a tree that contained no code able to contact a provider.
+"Threshold before output" is therefore a property of git history, not a claim in
+a docstring — and the remaining work can happen in any session without weakening
+it, which was the entire reason for the ordering.
+
+**Outstanding:** the harness (synthesise the five gold graphs through each
+configured provider, score, emit the report), and the isolation tests — opt-in,
+outside the CI gate set, incapable of running as a side effect of any test
+invocation. That last one is cheap now: Task 1's choke point refuses unless
+`MODELBOX_ALLOW_PROVIDER_CALLS` is set deliberately, so isolation is inherited
+rather than rebuilt.
+
+**Blocking dependency, so the next session plans around it rather than
+discovering it:** the run needs a working `ollama-engine` with the router's
+`default_model` pulled, and at least one cloud key. Neither is available in the
+agent environment. The harness can be built and its isolation proven without
+them; **the numbers themselves need Eddy's box.** Expect the next session to
+deliver a runnable harness and a run instruction, not a report.
+
+---
+
 ## Scoped and ready: make the C7 fixture structural
 
 **Not started. Small, well-defined, and third-time-lucky evidence behind it.**
