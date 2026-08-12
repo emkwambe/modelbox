@@ -79,10 +79,10 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | D2 ◆ | Startup fails loudly if a governance flag is set that the code does not honour | Startup transcript | 1 |
 | D3 ◆ | Every outbound LLM request is recorded in an append-only ledger **before it is sent**, and no module outside the gateway can reach a provider at all | **Primary (structural):** `test_no_module_outside_the_gateway_imports_a_provider_sdk` + `test_only_one_function_reaches_the_provider_client` + `test_the_attempt_write_precedes_every_client_statement`. **Supporting:** `test_a_ledger_that_cannot_write_stops_the_request`; `test_migration_0015_egress_audit.py` (raw SQL, populated DB). PL-008 | 5 |
 | D4 ◆ | An operator can answer "what left our network, when, to whom" from the UI without engineering help | Ledger view screenshot | 5 |
-| D5 ◆ | A task pinned to an egress class cannot fail over outside it | Residency enforcement test | 5 |
+| D5 ◆ | A task pinned to an egress class cannot fail over outside it, and a task with no pin is a configuration error rather than an allowance | `test_egress_residency_and_failover.py` — `test_a_pin_strips_non_compliant_failover_targets` (the named mutation), `test_the_residency_check_lives_in_the_calling_function` (structural), `test_a_task_without_a_pin_is_a_configuration_error`, `test_the_production_router_pins_every_task` | 5 |
 | D6 ◆ | Air-gapped mode runs end-to-end with no cloud keys present in any container | `docker compose` with air-gap profile; env inspection | 5 |
 | D7 | Air-gapped route resolves to a service that exists in the compose file | Route resolution test | 5 |
-| D8 | Failover distinguishes auth failure, rate limit, and validation failure | Typed exception handling test | 5 |
+| D8 | Failover distinguishes auth failure, rate limit, and validation failure, and an **unclassified** failure abandons the chain rather than being retried as transient | `test_failures_classify_distinctly` (four inputs, four outputs), `test_an_unmapped_failure_abandons_the_chain`, `test_every_classification_has_a_declared_failover_decision`, `test_an_auth_failure_is_reported_ahead_of_a_rate_limit` | 5 |
 | D9 | JWT validates `aud` and `iss`; a token minted for another audience is rejected | Security test | 4 |
 | D10 | A conformance report exists comparing at least one local and one cloud provider, scored by the linter | Generated report artifact | 5 |
 

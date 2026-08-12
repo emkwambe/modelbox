@@ -85,7 +85,38 @@ providers:
     egress: "local"
 
 # -----------------------------------------------------------------------------
+# Egress policy (D5) — what each residency pin permits.
+#
+# **Declared, never inferred from an ordering.** `max_egress_class` reads like a
+# scalar on a scale, and residency is not a scale: an EU-pinned task must not
+# fail over to APAC, and an APAC-pinned task must not fail over to the EU. Any
+# total order over these four classes gets one of those two wrong, silently, in
+# the permissive direction. So each pin lists exactly what it admits.
+#
+# `local` appears in every set because a local provider is at least as
+# restrictive as any cloud one. `cloud` is the top: unrestricted egress.
+#
+# A class named by a provider but absent from this map is a hard configuration
+# error, not an implicit allow — see LLMGateway._permitted_egress_classes.
+# -----------------------------------------------------------------------------
+egress_policy:
+  local: ["local"]
+  cloud_eu: ["local", "cloud_eu"]
+  cloud_apac: ["local", "cloud_apac"]
+  cloud: ["local", "cloud_eu", "cloud_apac", "cloud"]
+
+# -----------------------------------------------------------------------------
 # Task routing — bind modeling tasks to providers with ordered failover.
+#
+# Every task MUST declare `max_egress_class`. A task without one fails at load
+# rather than defaulting to permissive: an absent residency constraint read as
+# "anything is allowed" is standard 12 in the venue where it costs most.
+#
+# The declarations below are all `cloud`, which is the truthful statement about
+# where these chains route today — the pin strips nothing. Tightening a task is
+# a product decision, not a mechanical one; the mechanism is here and tested,
+# and `unstructured_doc_parsing` (customer PRD text, with an APAC fallback) is
+# the first one worth a decision.
 # -----------------------------------------------------------------------------
 task_routing:
   # Unstructured PRD/BRD parsing -> high-reasoning, large-context model.
@@ -94,12 +125,14 @@ task_routing:
     primary: "anthropic_cloud"
     fallback: ["openai_cloud", "kimi_cloud", "airgapped_vllm"]
     temperature: 0.1
+    max_egress_class: "cloud"
 
   # Schema normalization, ERD synthesis & constraint checking -> reasoning-heavy.
   schema_reasoning_and_erd:
     primary: "airgapped_vllm"
     fallback: ["anthropic_cloud", "openai_cloud", "deepseek_cloud"]
     temperature: 0.0
+    max_egress_class: "cloud"
 
   # High-volume SQL DDL generation & dialect transpilation -> fast code model.
   # DeepSeek is a cost-effective, code-strong fallback here.
@@ -107,12 +140,14 @@ task_routing:
     primary: "local_ollama"
     fallback: ["deepseek_cloud", "openai_cloud", "mistral_cloud"]
     temperature: 0.0
+    max_egress_class: "cloud"
 
   # Business description & data-dictionary enrichment -> cost-effective LLM.
   data_dictionary_enrichment:
     primary: "local_ollama"
     fallback: ["gemini_cloud", "kimi_cloud", "openai_cloud"]
     temperature: 0.3
+    max_egress_class: "cloud"
 
   # ModelBox Trainer Socratic tutoring (Pillar 3) — isolated task route.
   # local_ollama fallback keeps a path under AIRGAPPED=true.
@@ -120,6 +155,7 @@ task_routing:
     primary: "anthropic_cloud"
     fallback: ["openai_cloud", "local_ollama"]
     temperature: 0.4
+    max_egress_class: "cloud"
 
 # -----------------------------------------------------------------------------
 # Air-gapped override — applied when AIRGAPPED=true. Every task collapses to

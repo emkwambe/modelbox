@@ -75,6 +75,13 @@ leave a file half-edited.
 What made both serious incidents cheap was the file being committed, not the
 guidance. Commit before a mechanical edit.
 
+**Commit messages go through `git commit -F <file>`, never inline quoting.** A
+PowerShell here-string passed to the Bash tool put a stray `@` on the subject
+line of a Sprint 5 commit; the message was correct and the transport mangled it.
+Fourth venue for the same class, and the same remedy: write the message with
+`Write`, pass the path. Inline `-m` is fine only for a single line with no
+quotes, backticks or `$`.
+
 ## Environments
 
 - `backend/.venv` — the application and `pytest`.

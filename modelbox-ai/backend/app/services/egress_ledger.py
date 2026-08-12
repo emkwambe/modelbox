@@ -37,6 +37,16 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+# The event vocabulary, imported rather than restated. `metadata_store` imports
+# only sqlalchemy, so this costs nothing that would break the deferral of
+# `app.core.database` below — which is about the async driver, not the models.
+from app.models.metadata_store import (
+    EGRESS_ATTEMPT,
+    EGRESS_EVENTS,
+    EGRESS_FAILURE,
+    EGRESS_SUCCESS,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -123,6 +133,15 @@ class DatabaseEgressLedger:
         from app.core.database import get_sessionmaker
         from app.models.metadata_store import EgressAudit
 
+        if columns.get("event") not in EGRESS_EVENTS:
+            # Caught here rather than at the database. The CHECK constraint
+            # would reject it too, but only after the request had been made in
+            # the ATTEMPT case — and the error would name a constraint rather
+            # than the vocabulary.
+            raise ValueError(
+                f"unknown egress event {columns.get('event')!r}; "
+                f"expected one of {EGRESS_EVENTS}"
+            )
         async with get_sessionmaker()() as session:
             session.add(EgressAudit(**columns))
             await session.commit()
@@ -143,7 +162,7 @@ class DatabaseEgressLedger:
 
     async def record_attempt(self, attempt: EgressAttempt) -> None:
         try:
-            await self._insert(event="ATTEMPT", **self._columns(attempt))
+            await self._insert(event=EGRESS_ATTEMPT, **self._columns(attempt))
         except Exception as exc:
             # Any failure must stop the call, whatever its cause.
             # Fail closed. Letting the request proceed here is the one thing
@@ -212,6 +231,10 @@ def usage_tokens(result: Any) -> tuple[int | None, int | None]:
 
 
 __all__ = [
+    "EGRESS_ATTEMPT",
+    "EGRESS_EVENTS",
+    "EGRESS_FAILURE",
+    "EGRESS_SUCCESS",
     "DatabaseEgressLedger",
     "EgressAttempt",
     "EgressLedger",

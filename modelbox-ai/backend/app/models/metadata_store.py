@@ -544,7 +544,26 @@ class TrainerSubmission(Base):
     )
 
 
-EGRESS_EVENTS = ("ATTEMPT", "SUCCESS", "FAILURE")
+EGRESS_ATTEMPT = "ATTEMPT"
+EGRESS_SUCCESS = "SUCCESS"
+EGRESS_FAILURE = "FAILURE"
+
+# The one place this vocabulary is written down. It previously existed three
+# times — here, as string literals in the sink, and again in the migration's
+# CHECK constraint — with nothing enforcing agreement between them. That is the
+# shape that drifts: the same class as the three private `_is_temporal_type`
+# predicates whose disagreement was the Cube bug.
+#
+# The constraint below is generated from this tuple, the sink imports these
+# names, and `test_the_migration_check_matches_the_declared_vocabulary` holds
+# the migration's frozen literal against it.
+EGRESS_EVENTS = (EGRESS_ATTEMPT, EGRESS_SUCCESS, EGRESS_FAILURE)
+
+
+def _egress_event_check() -> str:
+    """Render the CHECK expression from the declared vocabulary."""
+    values = ", ".join(f"'{event}'" for event in EGRESS_EVENTS)
+    return f"event IN ({values})"
 
 
 class EgressAudit(Base):
@@ -575,10 +594,7 @@ class EgressAudit(Base):
 
     __tablename__ = "egress_audit"
     __table_args__ = (
-        CheckConstraint(
-            "event IN ('ATTEMPT', 'SUCCESS', 'FAILURE')",
-            name="ck_egress_audit_event",
-        ),
+        CheckConstraint(_egress_event_check(), name="ck_egress_audit_event"),
         Index("ix_egress_audit_attempt", "attempt_id"),
         Index("ix_egress_audit_occurred", "occurred_at"),
     )
@@ -619,7 +635,10 @@ class EgressAudit(Base):
 __all__ = [
     "Base",
     "EgressAudit",
+    "EGRESS_ATTEMPT",
     "EGRESS_EVENTS",
+    "EGRESS_FAILURE",
+    "EGRESS_SUCCESS",
     "User",
     "Workspace",
     "WorkspaceMember",

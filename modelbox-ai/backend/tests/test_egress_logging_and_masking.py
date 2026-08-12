@@ -64,14 +64,21 @@ _DEAD_ROUTER = {
             "egress": "cloud_apac",
         },
     },
+    "egress_policy": {
+        "local": ["local"],
+        "cloud_apac": ["local", "cloud_apac"],
+        "cloud": ["local", "cloud_eu", "cloud_apac", "cloud"],
+    },
     "task_routing": {
         "socratic_tutoring": {
             "primary": "anthropic_cloud",
             "fallback": ["local_ollama"],
+            "max_egress_class": "cloud",
         },
         "unstructured_doc_parsing": {
             "primary": "anthropic_cloud",
             "fallback": ["kimi_cloud", "airgapped_vllm"],
+            "max_egress_class": "cloud",
         },
     },
 }

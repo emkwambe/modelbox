@@ -14,7 +14,12 @@ fails loudly by design.
 
 from __future__ import annotations
 
-from app.services.egress_ledger import EgressAttempt, EgressLedgerError
+from app.services.egress_ledger import (
+    EGRESS_ATTEMPT,
+    EGRESS_EVENTS,
+    EgressAttempt,
+    EgressLedgerError,
+)
 
 
 class RecordingLedger:
@@ -30,6 +35,10 @@ class RecordingLedger:
         self.rows: list[dict[str, object]] = []
 
     def _append(self, attempt: EgressAttempt, event: str, **extra: object) -> None:
+        # The double validates the vocabulary too. A recording sink that
+        # accepted anything would let a typo'd event name pass every test here
+        # and fail only against the real CHECK constraint, in production.
+        assert event in EGRESS_EVENTS, f"unknown egress event {event!r}"
         self.rows.append(
             {
                 "attempt_id": attempt.attempt_id,
@@ -44,7 +53,7 @@ class RecordingLedger:
         )
 
     async def record_attempt(self, attempt: EgressAttempt) -> None:
-        self._append(attempt, "ATTEMPT")
+        self._append(attempt, EGRESS_ATTEMPT)
 
     async def record_outcome(
         self,
@@ -68,7 +77,7 @@ class RecordingLedger:
         return [str(row["event"]) for row in self.rows]
 
     def attempts(self) -> list[dict[str, object]]:
-        return [row for row in self.rows if row["event"] == "ATTEMPT"]
+        return [row for row in self.rows if row["event"] == EGRESS_ATTEMPT]
 
 
 class FailingLedger:
@@ -92,4 +101,41 @@ class FailingLedger:
         self.outcome_calls += 1
 
 
-__all__ = ["FailingLedger", "RecordingLedger"]
+class _StubCompletions:
+    def __init__(self, outcomes: list[object]) -> None:
+        self._outcomes = list(outcomes)
+        self.calls: list[dict[str, object]] = []
+
+    async def create(self, **kwargs: object) -> object:
+        self.calls.append(kwargs)
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+class _StubChat:
+    def __init__(self, completions: _StubCompletions) -> None:
+        self.completions = completions
+
+
+class StubProviderClient:
+    """A provider client that never opens a socket.
+
+    Replaces the provider rather than pointing it somewhere dead: a dead
+    endpoint makes every outcome a FAILURE, and the SUCCESS path would go
+    untested. Outcomes are consumed in order, and an ``Exception`` in the list
+    is raised rather than returned, so a failover chain can be scripted.
+    """
+
+    def __init__(self, outcomes: list[object]) -> None:
+        self.completions = _StubCompletions(outcomes)
+        self.chat = _StubChat(self.completions)
+
+    @property
+    def calls(self) -> list[dict[str, object]]:
+        """Every request that reached the provider layer, in order."""
+        return self.completions.calls
+
+
+__all__ = ["FailingLedger", "RecordingLedger", "StubProviderClient"]

@@ -38,7 +38,11 @@ from app.services.llm_gateway import (
     LLMRouterError,
     ProviderCallsDisabledError,
 )
-from tests._egress_doubles import FailingLedger, RecordingLedger
+from tests._egress_doubles import (
+    FailingLedger,
+    RecordingLedger,
+    StubProviderClient,
+)
 
 APP = Path(__file__).resolve().parent.parent / "app"
 GATEWAY = APP / "services" / "llm_gateway.py"
@@ -293,9 +297,17 @@ _ROUTER = {
             "egress": "local",
         },
     },
+    "egress_policy": {
+        "local": ["local"],
+        "cloud": ["local", "cloud"],
+    },
     "task_routing": {
-        "one_provider": {"primary": "cloud_primary"},
-        "two_providers": {"primary": "cloud_primary", "fallback": ["local_fallback"]},
+        "one_provider": {"primary": "cloud_primary", "max_egress_class": "cloud"},
+        "two_providers": {
+            "primary": "cloud_primary",
+            "fallback": ["local_fallback"],
+            "max_egress_class": "cloud",
+        },
     },
 }
 
@@ -321,42 +333,6 @@ class _Result:
     _raw_response = _Raw()
 
 
-class _StubCompletions:
-    def __init__(self, outcomes: list[object]) -> None:
-        self._outcomes = list(outcomes)
-        self.calls: list[dict[str, object]] = []
-
-    async def create(self, **kwargs: object) -> object:
-        self.calls.append(kwargs)
-        outcome = self._outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-
-class _StubChat:
-    def __init__(self, completions: _StubCompletions) -> None:
-        self.completions = completions
-
-
-class _StubClient:
-    """A client that never opens a socket.
-
-    The point of these tests is what the ledger records, so the provider is
-    replaced rather than merely pointed somewhere dead — a dead endpoint would
-    make every outcome a FAILURE and the SUCCESS path would go untested.
-    """
-
-    def __init__(self, outcomes: list[object]) -> None:
-        self.completions = _StubCompletions(outcomes)
-        self.chat = _StubChat(self.completions)
-
-    @property
-    def calls(self) -> list[dict[str, object]]:
-        """Every request that reached the provider layer, in order."""
-        return self.completions.calls
-
-
 @pytest.fixture
 def router_config(tmp_path: Path) -> str:
     path = tmp_path / "model_router.yaml"
@@ -366,13 +342,13 @@ def router_config(tmp_path: Path) -> str:
 
 def _wired(
     router_config: str, outcomes: list[object], ledger: object
-) -> tuple[LLMGateway, _StubClient]:
+) -> tuple[LLMGateway, StubProviderClient]:
     settings = Settings(  # type: ignore[call-arg]
         model_router_config_path=router_config,
         allow_provider_calls=True,
     )
     gateway = LLMGateway(settings, ledger=ledger)  # type: ignore[arg-type]
-    client = _StubClient(outcomes)
+    client = StubProviderClient(outcomes)
     gateway._client = client
     return gateway, client
 
@@ -435,8 +411,14 @@ async def test_failover_records_each_provider_as_its_own_request(
     understating egress in exactly the direction that flatters the product.
     """
     ledger = RecordingLedger()
+    # A *classified* transient failure. Since Task 2 an unrecognised exception
+    # abandons the chain rather than failing over, so a bare RuntimeError here
+    # would test the abort path while claiming to test failover.
+    class RateLimitError(Exception):
+        pass
+
     gateway, client = _wired(
-        router_config, [RuntimeError("primary down"), _Result()], ledger
+        router_config, [RateLimitError("primary throttled"), _Result()], ledger
     )
 
     await gateway.structured_completion("two_providers", PROMPT, Trivial)

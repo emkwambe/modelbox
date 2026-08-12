@@ -204,12 +204,139 @@ provider"; it now does exactly that.
 
 ---
 
+## Task 2 — Per-task residency (D5) and typed failover (D8)
+
+**Done.** `config/model_router.yaml`, `app/services/llm_gateway.py`,
+`tests/test_egress_residency_and_failover.py`.
+
+D5 and D8 look independent and share a failure mode: **something absent read as
+something permitted.** D5's version is a task with no residency pin routing
+wherever it likes; D8's is an unclassified exception retried as though it were
+transient. Both are standard 12, and both are now asserted explicitly rather
+than inferred from a happy path.
+
+### The finding: `max_egress_class` cannot be a scalar
+
+The prompt specifies `max_egress_class`, which reads as a position on a scale.
+**Residency is not a scale.** Over `{local, cloud_eu, cloud_apac, cloud}` any
+total order asserts either `cloud_eu ≤ cloud_apac` or the reverse, and both are
+false as residency controls: an EU-pinned task must not fail over to APAC, and
+an APAC-pinned task must not fail over to the EU. A scalar comparison gets
+exactly one of those wrong, silently, in the permissive direction.
+
+So the permitted set comes from a **declared containment map** in
+`egress_policy`, never from an inferred ordering. `local` appears in every set
+because a local provider is at least as restrictive as any cloud one; `cloud` is
+the top. `test_an_eu_pin_does_not_admit_apac_and_an_apac_pin_does_not_admit_eu`
+is the assertion a scalar implementation cannot pass.
+
+The name `max_egress_class` is kept — it is what the register and the prompt
+say, and the semantics are documented where it is declared.
+
+### Enforced twice, deliberately
+
+`resolve_route` filters the chain; `_call_provider` re-checks the individual
+request. Not redundant: the first proves the *chain* is compliant, the second
+proves the *request* is, in the same function that reaches the provider and
+after every other decision. A check living only upstream is defeated by anything
+mutating the chain in between, and nothing at the call site can distinguish
+"validated" from "never validated".
+`test_the_residency_check_lives_in_the_calling_function` pins it there by AST —
+the instrument built for D3, applied to a different claim.
+
+### Rulings
+
+**A task with no pin fails loudly.** There is no permissive default. An absent
+residency constraint read as "no constraint" is indistinguishable at the call
+site from a constraint that was checked and passed.
+
+**A pin naming an undeclared class fails loudly**, rather than admitting
+everything or nothing. Both silent readings of a typo are wrong.
+
+**Governance refusals never fail over.** `EgressLedgerError`,
+`EgressResidencyError` and `EgressPolicyError` propagate past the failover
+handler. A residency refusal that failed over would walk the chain looking for
+someone to take the request — the breach the pin exists to prevent, performed by
+the enforcement mechanism.
+
+**An unclassified provider failure abandons the chain.** The reflex is to treat
+an unrecognised failure as transient and try the next provider. We do not know
+that continuing is safe, so we do not continue. The remedy is a one-line entry
+in `_FAILURE_SIGNATURES`, which leaves a record of the decision.
+
+**Failover decisions are looked up by subscript, not `.get()`.** A
+classification added without deciding its failover behaviour raises at the
+decision point instead of inheriting "retry".
+
+**The reported error is the one that most needs acting on, not the last one.**
+A chain ending on a 429 whose first provider had an invalid key is reported as
+`ProviderAuthError` — otherwise an operator goes to a quota dashboard for a
+problem in their environment file. That is the concrete harm D8 names.
+
+**Classification is by exception class name, walking the MRO**, so the gateway
+stays importable without the provider SDKs. The cost is that a renamed provider
+exception drops to unclassified — which aborts rather than fails over, so the
+failure direction of the shortcut is safe.
+
+### Production config
+
+Every task now declares a pin, and `test_the_production_router_pins_every_task`
+asserts it against the shipped file rather than a fixture (standard 11). All
+five are declared `cloud`, which is the truthful statement about where those
+chains route today — the pin strips nothing yet.
+
+**Tightening a task is a product decision, not a mechanical one, and is left
+open.** `unstructured_doc_parsing` carries customer PRD text and lists an APAC
+provider among its fallbacks; it is the first one worth a deliberate answer.
+
+### `EGRESS_EVENTS` wired
+
+The vocabulary had three homes — the constant, string literals in the sink, and
+the migration's CHECK — with nothing enforcing agreement. Same shape as the
+three `_is_temporal_type` predicates whose disagreement was the Cube bug.
+
+Now: the model generates its `CheckConstraint` from the tuple, the sink and the
+test doubles import the names, the sink rejects an unknown event before it
+reaches the database, and the recording double asserts the vocabulary too — a
+double that accepted anything would let a typo pass every test here and fail
+only against the real constraint, in production.
+
+The migration keeps its frozen literal, because a migration must not import
+application code that can change under it.
+`test_the_migration_check_matches_the_declared_vocabulary` holds the two
+together instead.
+
+### Mutation results
+
+| # | Mutant | Killed by |
+| :-- | :-- | :-- |
+| 6 | Residency checked on `chain[0]` only | 3 tests, incl. the prompt-named `test_a_pin_strips_non_compliant_failover_targets` |
+| 7 | Residency check removed from `_call_provider` | the AST test *and* both behavioural refusal tests |
+| 8 | `UnclassifiedProviderError: True` in `_MAY_FAIL_OVER` | `test_an_unmapped_failure_abandons_the_chain` |
+| 9 | Missing pin defaults to `"cloud"` | `test_a_task_without_a_pin_is_a_configuration_error` |
+| 10 | A fourth event added to `EGRESS_EVENTS` | `test_the_migration_check_matches_the_declared_vocabulary` |
+
+Both mutated files were restored and diffed byte-identical against a
+pre-mutation copy before the suite was re-run.
+
+### Suite effect
+
+Two router fixtures gained an `egress_policy` block and per-task pins, because
+the fail-loud policy refuses an unpinned task — the rule working, observed in
+the suite before any production config saw it. One failover test was switched
+from a bare `RuntimeError` to a name-classified `RateLimitError`: since Task 2
+an unrecognised exception abandons the chain, so the old fixture would have
+tested the abort path while claiming to test failover (standard 8 — a test
+whose fixture stops exercising the feature it names).
+
+---
+
 ## Remaining
 
 | Task | State |
 | :-- | :-- |
-| 2 — Per-task residency (D5, D8) | next |
-| 3 — Air-gapped mode that proves itself (D6, D7, Q1) | not started |
+| 2 — Per-task residency (D5, D8) | **done** |
+| 3 — Air-gapped mode that proves itself (D6, D7, Q1) | next |
 | 4 — Cross-artifact consistency gate (standard 10) | not started |
 | 5 — Provider conformance harness (D10) | not started; threshold must be written before the first call |
 | 6 — Security FAQ (G2) | not started |
