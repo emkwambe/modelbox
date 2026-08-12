@@ -169,11 +169,16 @@ fails on the pair that matters.
 Three times in Sprint 2 an assertion was written that could not have failed for
 the reason it claimed to test. Stated once here rather than rediscovered again.
 
-There are now thirteen, and **nine were earned rather than designed** — written
+There are now fourteen, and **ten were earned rather than designed** — written
 after something went wrong, not before. That ratio is the most useful fact
 about this list: it is a record of how verification actually fails here, not a
 theory of how it might. Treat a new one as evidence about the *category* rather
 than the instance.
+
+Four of the fourteen (8, 11, 12, 14) are now variations on one theme: a test
+that passes without the thing it names ever happening. That they were found
+separately, in unrelated code, is the argument for looking specifically for this
+shape rather than waiting to trip over it.
 
 1. **Verify from outside the layer under test.** A backfill checked through the
    ORM can be satisfied by a mapping bug; check it with raw SQL. An emitter rule
@@ -349,6 +354,39 @@ than the instance.
 
     The fix is not more care when writing guards. It is that a guard which has
     never been observed failing is an untested claim, whatever it looks like.
+
+14. **A configuration made correct stops being a test fixture for the mechanism
+    that corrects it.** Coverage and correctness come into tension the moment a
+    fix lands: the production config that used to contain the discriminating
+    case no longer contains it, *because the case was the defect.* The
+    discriminating case has to move to a synthetic fixture in the same commit as
+    the fix, or the tests quietly stop testing.
+
+    Distinct from standard 11, and worse. There, a fixture never exercised the
+    feature and the gap was present from the start. Here the coverage existed
+    when the test was written and erodes later — silently, in a commit that
+    looks like an improvement, reviewed as an improvement, and correctly
+    described as one.
+
+    Found in Sprint 5, in tests written specifically to close a standard 12
+    hole. D6 had been re-specified to set sentinel provider keys rather than
+    rely on their absence. Task 3 then fixed the air-gapped routing so every
+    task in `airgapped_overrides` listed local providers only — which is right,
+    and which removed the only case where air-gap *stripping* did any work.
+    Disabling the stripping entirely left seven of the eight new tests green.
+    The suite was asserting that local-only routes resolve to local providers,
+    which is true of a gateway with no air-gap enforcement at all.
+
+    `test_stripping_is_what_makes_a_fall_through_task_local` is the remedy: a
+    synthetic router with a task carrying **no** air-gapped override, so
+    resolution falls through to `task_routing` and the stripping is the only
+    thing standing between a cloud provider and a sentinel key. With it, the
+    mutation dies twice instead of once.
+
+    The trigger to watch for is a fix that makes a real-world input stop
+    exhibiting the behaviour under test. Ask, at that moment, what still fails
+    if the mechanism is removed — and if the answer is "nothing", the fixture
+    left with the defect.
 
 A criterion whose evidence violates any of these is NOT MET, whatever the test
 reports.
