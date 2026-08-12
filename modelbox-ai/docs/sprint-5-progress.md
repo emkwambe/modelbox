@@ -722,7 +722,60 @@ MODELBOX_ALLOW_PROVIDER_CALLS=1 MODELBOX_RUN_CONFORMANCE=1     .venv/Scripts/pyt
 D10's register evidence must cite **the report**, not the script. A harness that
 has never produced a number proves the method, not the claim.
 
-**Outstanding:** the run itself. **Mutant 18:** requiring only one opt-in instead
+### BLOCKING: the prompts are underspecified — do not run yet
+
+Written before the first call, as a judgement rather than a glance, because
+after numbers exist the ambiguity resolves in whichever direction is convenient:
+a poor local score reads as "local models are worse", a poor cloud score reads as
+"the prompt needs work". Both are available after the fact. That is the shape the
+threshold ordering exists to prevent, arriving through a door the threshold does
+not cover.
+
+**Two defects, found by running the check.**
+
+1. **No gold graph has a `description` field at all.** The keys are `id`,
+   `title`, `paradigm`, `entities`, `relationships`. So the runner's fallback
+   fires on all five and the prompt becomes the filename with hyphens replaced —
+   "banking datavault", "ecommerce orders". `title` exists and is better
+   ("Retail Banking & Ledger") but is still four words.
+2. **The paradigm is never communicated**, and the five graphs span four of
+   them. The product's own `SynthesizeRequest` carries `target_paradigm`
+   precisely because it is not inferable. A model asked for a banking schema
+   with no paradigm stated cannot produce `hub_` / `lnk_` / `sat_` naming — that
+   is Data Vault convention, not a fact about banking.
+
+**Per-graph judgement.** Could a competent human data modeller, given only the
+prompt text, plausibly produce the gold entity set?
+
+| Graph | Paradigm | Verdict |
+| :-- | :-- | :-- |
+| `banking-datavault` | DATA_VAULT | **No.** hub/lnk/sat naming is unrecoverable from "Retail Banking & Ledger" |
+| `marketing-attribution` | OBT | **No.** A single wide `obt_touchpoints` table is a deliberate modelling choice; the default answer is a star schema |
+| `ecommerce-orders` | KIMBALL | **Only if the paradigm is stated.** `dim_`/`fact_` naming is a coin flip otherwise |
+| `saas-subscription` | KIMBALL | **Only if the paradigm is stated.** Same as above |
+| `healthcare-ehr` | 3NF | **Entities plausible** (patient/provider/encounter/diagnosis are canonical), naming still paradigm-dependent |
+
+**Zero of five are well-posed as they stand. Two are not well-posed at all.**
+Running now would produce five numbers measuring prompt poverty and report them
+as model quality — against a threshold that cannot tell the difference.
+
+**The fix, in two parts.**
+
+* *Mechanical, and clearly correct:* pass the graph's `paradigm` into the
+  prompt. The product's own API carries it, so withholding it tests something
+  the product never asks a model to do.
+* *A content decision, deliberately not made here:* author a domain description
+  per graph. This needs calibration and is the reason it is not being guessed
+  at — **too thin measures prompt poverty, too rich measures transcription.**
+  The target is a description from which a competent modeller could plausibly
+  arrive at the gold entity set without being handed it. Whoever writes them
+  should record that judgement per graph, as above, before the run.
+
+Until both are done, **any conformance number is uninterpretable** and D10 stays
+open. This is a fixture defect, not a harness defect: the harness, its isolation
+and its scoring are complete and verified.
+
+**Outstanding:** the prompt fix above, then the run itself. **Mutant 18:** requiring only one opt-in instead
 of both — killed by `test_the_runner_refuses_without_both_opt_ins`.
 
 **Superseded note — the harness (synthesise the five gold graphs through each
