@@ -290,6 +290,18 @@ than the instance.
     and it is not about libraries — the second has no dependency involved at
     all. What generalises is the empty expectation, wherever it comes from.
 
+    A third form, found in Sprint 5 and the hardest to see: **unreachability.**
+    `allow_provider_calls` was declared with a bare `validation_alias`, which
+    *replaces* the field name, so `Settings(allow_provider_calls=True)` bound
+    nothing and returned the default. The flag was not absent and not empty —
+    it was unsettable, while the calling code read as entirely correct. A
+    security flag that appears set and is not is worse than one obviously
+    missing, and the failure direction was permissive.
+
+    So: absence, emptiness and unreachability all produce the same vacuous
+    satisfaction. Assert the expected value exists **and that setting it
+    changes the outcome.**
+
 13. **A guard is a claim about behaviour, and needs the same discrimination
     test as the code it guards.** Point it at something that must fail and
     confirm that it does. That is cheap, and nothing else establishes that a
