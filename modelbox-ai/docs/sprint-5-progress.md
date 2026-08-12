@@ -668,6 +668,39 @@ is the one that cannot be rushed.
 
 ---
 
+## Scoped and ready: make the C7 fixture structural
+
+**Not started. Small, well-defined, and third-time-lucky evidence behind it.**
+
+`not is_nullable` and `is_primary_key` are the same partition across all five
+gold graphs. That coincidence has now cost three things:
+
+1. a non-discriminating ODCS test (correction C7, Sprint 3);
+2. a silent DDL risk, noted at the time and never exercised;
+3. a **live Avro defect** shipped for four sprints (Task 4).
+
+The remedy has been the same every time — a mutated copy where the two fields
+disagree — and it keeps having to be *rediscovered* by whoever writes the next
+nullability-touching test. Three recurrences is enough to stop relying on memory.
+
+**The change.** Promote `_discriminating()` from
+`tests/test_cross_artifact_consistency.py` into a shared fixture module
+(`tests/_gold_fixtures.py`), exposing gold models *and* their mutated
+counterparts as one parameter set. Every test that touches nullability
+parameterises over that set by default, so the discrimination is **inherited
+rather than remembered**.
+
+Add the standard-11 half: a test asserting that the shared set contains at least
+one model where the two fields disagree. Otherwise the fixture can silently stop
+discriminating — which is standard 14, and would be the fourth recurrence of the
+same coincidence wearing a fourth disguise.
+
+Deliberately **not** done in the Task 4 commit: it is a refactor across several
+test files, and Task 5 has the next claim on the sprint's budget. Recorded here
+so it is a decision rather than an intention.
+
+---
+
 ## For the sprint-close retro — not a verification standard
 
 **A correct generalisation is not automatically due now. The work it was meant
