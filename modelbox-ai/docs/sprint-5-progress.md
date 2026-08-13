@@ -26,7 +26,7 @@ commit that moved it is where to look.
 
 | Measure | Value | How |
 | :-- | :-- | :-- |
-| App suite | **565 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
+| App suite | **572 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
 | App-suite non-preview xfails | **0** — S5-1 and S5-2 fixed | markers removed; the tests now assert the fixed behaviour |
 | Fidelity, non-preview xfails | **0** | `MODELBOX_FIDELITY_STRICT=1 .venv-tools/Scripts/python -m pytest tests/test_artifact_fidelity.py -m "not preview" -q` |
 | Fidelity, preview xfails | **18** | same, with `-m "preview"` |
@@ -604,6 +604,70 @@ because 76 defects hid behind string assertions.
 `is_nullable` → DDL `NOT NULL` / ODCS `required` / Avro union-with-null /
 Protobuf optionality. `is_primary_key` → DDL `PRIMARY KEY` / ODCS `primaryKey`.
 Both sides already exist; this is comparison, not generation.
+
+---
+
+## S5-3 — the appliance refused its own core function
+
+**Found by asking a product question, not by a gate.** "Can we create a data
+model from business requirements?" led to checking whether the deployment
+actually enables the path, and it did not.
+
+`MODELBOX_ALLOW_PROVIDER_CALLS` defaults to `False` in `Settings` — correctly,
+since that default is what keeps this suite offline by construction — and
+appeared **nowhere** in `docker-compose.appliance.yml`. All three call sites of
+`structured_completion` route through the choke point, so a fresh install would
+have refused synthesis, paradigm translation and the Trainer with a governance
+error.
+
+**The isolation was structural, so it isolated the product too.** The defect is
+Task 1 working exactly as designed, in a venue nobody pointed it at.
+
+### Why nothing caught it
+
+* The app suite runs with the flag unset **on purpose**, and asserts so.
+* The fidelity harness never starts the appliance.
+* A container smoke test would only have caught it by exercising synthesis —
+  the one thing the programme's zero-egress constraint forbids.
+
+So the check must be static: read what the deployment supplies, hold it against
+what the code demands.
+
+### The fix
+
+The code default stays fail-closed; **the deployment opts in**, on both the
+backend and the worker, defaulting on with an operator override
+(`${MODELBOX_ALLOW_PROVIDER_CALLS:-1}`). That keeps the library safe for the
+test suite and for anything embedding it, while the appliance — the thing that
+actually intends to call providers — says so explicitly.
+
+`AIRGAPPED` remains the residency control and is unchanged. Collapsing the two
+into one flag is what produced this, so a test now asserts both are present and
+distinct.
+
+### The general guard matters more than the instance
+
+`test_every_modelbox_env_var_binds_to_a_real_setting` reads the accepted
+environment names **off `Settings` itself**, aliases included, and fails on any
+`MODELBOX_`-prefixed compose variable that binds to nothing. A typo or a renamed
+field otherwise produces a variable the application silently ignores, falling
+back to whatever the code default is — **standard 12's unreachability form,
+arriving through the deployment instead of through a `validation_alias`.** It is
+the same defect that produced that standard, one layer out.
+
+Guarded against its own vacuity too: `test_the_accepted_name_set_is_not_empty`
+fails if pydantic introspection ever stops resolving `AliasChoices`, which would
+otherwise leave the compose check passing while checking nothing about aliases.
+
+### Mutation results
+
+| # | Mutant | Killed by |
+| :-- | :-- | :-- |
+| 20 | The opt-in removed from the backend service — the original defect | `test_the_appliance_supplies_the_egress_opt_in[modelbox-backend]` |
+| 21 | `MODELBOX_ALOW_PROVIDER_CALLS` — one letter, binds to nothing | the opt-in test **and** the general binding test |
+
+Mutant 21 is the one worth keeping: it is silent in production, permissive in
+direction, and invisible to every other gate.
 
 ---
 

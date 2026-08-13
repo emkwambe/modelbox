@@ -47,6 +47,17 @@ services:
       # list fields from env as JSON). UI may run on 3000 or remapped (13000).
       - 'CORS_ORIGINS=["http://localhost:3000","http://localhost:13000"]'
       - AIRGAPPED=${AIRGAPPED:-false}
+      # The gateway is fail-closed by default (D3): the library refuses to
+      # reach a provider unless something says so, which is what keeps the test
+      # suite offline by construction. The *appliance* is the thing that says
+      # so, here and deliberately — synthesis, paradigm translation and the
+      # Trainer all route through that choke point, so without this line a
+      # fresh install refuses its own core function.
+      #
+      # This is not the residency control. AIRGAPPED above is, and it strips
+      # every non-local provider at route resolution. Set this to 0 to hard-
+      # disable outbound calls regardless of keys or routing.
+      - MODELBOX_ALLOW_PROVIDER_CALLS=${MODELBOX_ALLOW_PROVIDER_CALLS:-1}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-dev-encryption-key-change-me}
       # Provider keys for the backend's direct LiteLLM calls (from .env).
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
@@ -87,6 +98,10 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis-cache:6379/1
       - MODEL_ROUTER_CONFIG_PATH=/app/config/model_router.yaml
       - AIRGAPPED=${AIRGAPPED:-false}
+      # As above. The worker runs the same synthesis path off the queue, so it
+      # needs the same opt-in — a backend that works and a worker that silently
+      # refuses would be worse than both failing.
+      - MODELBOX_ALLOW_PROVIDER_CALLS=${MODELBOX_ALLOW_PROVIDER_CALLS:-1}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-dev-encryption-key-change-me}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
