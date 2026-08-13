@@ -26,7 +26,7 @@ commit that moved it is where to look.
 
 | Measure | Value | How |
 | :-- | :-- | :-- |
-| App suite | **526 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
+| App suite | **549 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
 | Fidelity, non-preview xfails | **0** | `MODELBOX_FIDELITY_STRICT=1 .venv-tools/Scripts/python -m pytest tests/test_artifact_fidelity.py -m "not preview" -q` |
 | Fidelity, preview xfails | **18** | same, with `-m "preview"` |
 | Ruff over `app` + `tests` | **69**, all pre-existing | `.venv/Scripts/python -m ruff check app tests` |
@@ -828,8 +828,72 @@ entry until a test does**, which is the rule the document exists to enforce.
 
 ---
 
-**Outstanding:** the paradigm fix, the descriptions written to the calibration
-rule above, then the run itself. **Mutant 18:** requiring only one opt-in instead
+### Done: paradigm supplied, five descriptions written
+
+`scripts/conformance_prompts.py` and `tests/test_conformance_prompts.py` (23
+tests). The prompt now states the paradigm and a description written to the
+calibration rule. A graph with no description is a **hard error**, never a
+fallback to the filename — that fallback is what made every prompt two words,
+and degrading to it again would be the same defect wearing the word "default".
+
+Descriptions live in the harness, **not in the gold fixtures**: those are
+extracted from `templates.ts` behind a drift guard that re-extracts and diffs, so
+a `description` field added to the JSON would fail it, and the graphs are a
+curriculum asset that must not be edited to suit a harness.
+
+**No graph is excluded.** `banking-datavault` and `marketing-attribution` were
+judged not well-posed *because the paradigm was missing*. Supplying it makes both
+answerable without naming an entity — "two business concepts, an association
+between them, descriptive attributes historised separately" maps onto
+hub/link/satellite by Data Vault convention, and OBT plus a single interaction
+row is the One Big Table answer. Recorded per graph in the module docstring.
+
+The rule is **enforced, not stated**: no snake_case token, no entity name
+verbatim, a grain in every description, a 40-word floor against regression to
+the filename fallback, and the paradigm present in the built prompt.
+
+### The rule caught its own author
+
+The first draft failed on three graphs — `balance`, `status`, `campaign`,
+`channel`, `device`, `month`. All single-word **column** names that are also
+ordinary nouns of their domain. You cannot describe a bank account without
+"balance", and banning the noun produces evasive prose ("the hardware the
+prospect used") that tests whether a model can decode circumlocution. That is
+prompt poverty wearing a rule's clothing.
+
+**The principle, stated so it is not re-derived to suit whatever failed last:**
+a prompt may use the domain's vocabulary; it may not disclose the schema's
+structure. Entity names are structure. Multi-token identifiers are structure. A
+single common noun any requirements document in that domain would contain is
+vocabulary.
+
+The allowance is an explicit per-graph list with its own guard —
+`test_the_vocabulary_allowance_is_narrow_and_justified` rejects any entry that
+is multi-token, an identifier, or an entity name — because "we allowed a few
+words" is how a rule stops being one.
+
+**The honest consequence, recorded rather than hidden:** column F1 is partly
+credited for domain vocabulary and is a weaker signal than entity F1. The
+threshold already rated it lower — 0.70 against 0.80 — and those numbers were
+fixed in `b6a3e1a` before any of this was written, which is the one reassurance
+that the refinement is a principle rather than a rationalisation.
+
+### Mutation results
+
+| # | Mutant | Killed by |
+| :-- | :-- | :-- |
+| 19 | A description names `fact_order_line` | `test_no_description_leaks_a_schema_identifier[ecommerce-orders]` |
+| — | *(first attempt was a silent no-op)* | see below |
+
+**Mutant 19's first attempt applied nothing** — the anchor phrase spanned a line
+break in source, so `str.replace` matched nothing and the suite passed. Without
+a precondition assert that reads as *a surviving mutant*, which would have been
+recorded as evidence the leak test was weak. Standard 2, in the mutation
+procedure rather than in the code under test: an operation that ran is not an
+operation that did anything. **Every mutation script from here asserts its
+anchor is present before writing.**
+
+**Outstanding:** the run itself, on a box with `ollama-engine` up and a cloud key. **Mutant 18:** requiring only one opt-in instead
 of both — killed by `test_the_runner_refuses_without_both_opt_ins`.
 
 **Superseded note — the harness (synthesise the five gold graphs through each

@@ -51,10 +51,10 @@ GOLD = BACKEND / "tests" / "fixtures" / "gold"
 RUN_FLAG = "MODELBOX_RUN_CONFORMANCE"
 EGRESS_FLAG = "MODELBOX_ALLOW_PROVIDER_CALLS"
 
-PROMPT_TEMPLATE = (
-    "Design a warehouse schema for the following domain. Return entities with "
-    "columns and the relationships between them.\n\nDomain: {domain}"
-)
+# Prompts live in `conformance_prompts`, with the calibration rule they were
+# written to and a per-graph well-posedness judgement recorded before the run.
+# Not in the gold fixtures: those are extracted from templates.ts behind a drift
+# guard, and are a curriculum asset that must not be edited to suit a harness.
 
 
 def _refuse_unless_opted_in() -> None:
@@ -69,8 +69,21 @@ def _refuse_unless_opted_in() -> None:
 
 
 def _gold_graphs() -> list[tuple[str, object, str]]:
-    """(id, model, domain description) for each gold graph."""
+    """(id, model, prompt) for each gold graph.
+
+    The prompt supplies the paradigm explicitly. Withholding it would score the
+    model's guess at a naming convention rather than its schema design —
+    `hub_`/`lnk_`/`sat_` is Data Vault convention, not a fact about banking, and
+    `SynthesizeRequest` carries `target_paradigm` precisely because it is not
+    inferable from content.
+
+    A graph with no description is a hard error, never a fallback to the
+    filename. That fallback is what made every prompt two words and every score
+    uninterpretable; silently degrading to it again would be the same defect
+    wearing the word "default".
+    """
     from app.schemas.data_model import SynthesizedModel
+    from scripts.conformance_prompts import DESCRIPTIONS, build_prompt
 
     out = []
     for path in sorted(GOLD.glob("*.json")):
@@ -84,10 +97,16 @@ def _gold_graphs() -> list[tuple[str, object, str]]:
                 "relationships": raw["relationships"],
             }
         )
-        # The domain description is the graph's own title/id, so the prompt
-        # carries no hint of the expected answer beyond the subject matter.
-        # Feeding the gold entities back in would measure transcription.
-        out.append((path.stem, model, raw.get("description") or path.stem.replace("-", " ")))
+        if path.stem not in DESCRIPTIONS:
+            raise SystemExit(
+                f"no conformance description for gold graph '{path.stem}'. Write "
+                f"one to the calibration rule in scripts/conformance_prompts.py, "
+                f"or exclude the graph with the reason recorded — never fall back "
+                f"to the filename."
+            )
+        out.append(
+            (path.stem, model, build_prompt(raw["paradigm"], DESCRIPTIONS[path.stem]))
+        )
     return out
 
 
@@ -120,8 +139,7 @@ async def main(argv: list[str] | None = None) -> int:
         egress_class = gateway._egress_class(provider)
         model_identifier = gateway.providers[provider]["default_model"]
         scores = []
-        for graph_id, gold, domain in graphs:
-            prompt = PROMPT_TEMPLATE.format(domain=domain)
+        for graph_id, gold, prompt in graphs:
             candidate: SynthesizedModel = await gateway.structured_completion(
                 task="unstructured_doc_parsing",
                 prompt=prompt,
