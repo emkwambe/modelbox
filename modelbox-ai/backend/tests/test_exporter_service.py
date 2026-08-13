@@ -26,6 +26,7 @@ def _col(
     min_value: float | None = None,
     max_value: float | None = None,
     regex_pattern: str | None = None,
+    check: str | None = None,
 ) -> ColumnSchema:
     return ColumnSchema(
         name=name,
@@ -38,6 +39,7 @@ def _col(
         min_value=min_value,
         max_value=max_value,
         regex_pattern=regex_pattern,
+        check_expression=check,
     )
 
 
@@ -156,9 +158,16 @@ def test_dbt_accepted_values_for_categorical_columns() -> None:
                 entity_type="TABLE",  # type: ignore[arg-type]
                 columns=[
                     _col("id", "INT", pk=True),
-                    _col("order_status", "VARCHAR(32)"),  # categorical -> accepted_values
-                    _col("amount", "NUMERIC(12,2)"),  # numeric -> no accepted_values
-                    _col("note", "VARCHAR(255)"),  # non-categorical string -> none
+                    # Declared vocabulary -> accepted_values, from the model.
+                    _col(
+                        "order_status",
+                        "VARCHAR(32)",
+                        check="order_status IN ('OPEN', 'SHIPPED')",
+                    ),
+                    # Categorical *name*, no declaration -> nothing (S5-1).
+                    _col("payment_status", "VARCHAR(32)"),
+                    _col("amount", "NUMERIC(12,2)"),  # numeric -> none
+                    _col("note", "VARCHAR(255)"),  # free text -> none
                 ],
             )
         ],
@@ -168,19 +177,36 @@ def test_dbt_accepted_values_for_categorical_columns() -> None:
     )
     cols = {c["name"]: c for c in schema["models"][0]["columns"]}
 
-    status_tests = cols["order_status"].get("data_tests", [])
-    accepted = next(
-        (t["accepted_values"] for t in status_tests if isinstance(t, dict) and "accepted_values" in t),
-        None,
-    )
-    assert accepted == {"arguments": {"values": ["ACTIVE", "INACTIVE", "PENDING"]}}
-
-    # Numeric and free-text columns get no accepted_values test.
-    for other in ("amount", "note"):
-        tests = cols[other].get("data_tests", [])
-        assert not any(
-            isinstance(t, dict) and "accepted_values" in t for t in tests
+    def _accepted(column: str) -> dict | None:
+        return next(
+            (
+                t["accepted_values"]
+                for t in cols[column].get("data_tests", [])
+                if isinstance(t, dict) and "accepted_values" in t
+            ),
+            None,
         )
+
+    # A declaration becomes a contract term, and says what the model said.
+    assert _accepted("order_status") == {
+        "arguments": {"values": ["OPEN", "SHIPPED"]}
+    }
+
+    # **This test used to assert the opposite** — that `order_status` with no
+    # declaration acquired ACTIVE/INACTIVE/PENDING — and so it protected the
+    # defect it now guards against (S5-1). A test written to match current
+    # behaviour cannot fail for the right reason, and this one made the
+    # fabrication look intentional for two sprints.
+    #
+    # The harm was never abstract: a user whose payment statuses are PENDING and
+    # DONE received a dbt project asserting three values they do not use, and a
+    # red build on their own correct data.
+    assert _accepted("payment_status") is None, (
+        "a categorical column name is not a declaration; only the model may "
+        "supply a vocabulary that ships as a contract term"
+    )
+    for other in ("amount", "note"):
+        assert _accepted(other) is None
 
 
 def test_governance_metadata_propagates_to_exports() -> None:

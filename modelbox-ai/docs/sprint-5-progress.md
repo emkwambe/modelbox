@@ -26,8 +26,8 @@ commit that moved it is where to look.
 
 | Measure | Value | How |
 | :-- | :-- | :-- |
-| App suite | **561 passed, 36 skipped, 22 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
-| App-suite non-preview xfails | **4** — open defects S5-1, S5-2 | in `test_omission_is_not_fabrication.py`, all `strict=True` |
+| App suite | **565 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
+| App-suite non-preview xfails | **0** — S5-1 and S5-2 fixed | markers removed; the tests now assert the fixed behaviour |
 | Fidelity, non-preview xfails | **0** | `MODELBOX_FIDELITY_STRICT=1 .venv-tools/Scripts/python -m pytest tests/test_artifact_fidelity.py -m "not preview" -q` |
 | Fidelity, preview xfails | **18** | same, with `-m "preview"` |
 | Ruff over `app` + `tests` | **69**, all pre-existing | `.venv/Scripts/python -m ruff check app tests` |
@@ -960,10 +960,44 @@ defects, which is itself the point — the fidelity harness hands each artifact 
 its own parser, and a *fabricated but well-formed* `accepted_values` block parses
 perfectly. Same blindness as the Avro nullability defect in Task 4.
 
-Register A6 ("no non-preview xfail at Phase I exit") now has two open items.
-Neither is fixed here, because every defect in this programme becomes a failing
-test before it becomes a fix, and both fixes belong with their emitters and
-their own gates. **Mutant 18:** requiring only one opt-in instead
+### Both fixed
+
+**S5-1.** The name-driven fallback is gone from the `accepted_values` path. A
+declared `check_expression` becomes the vocabulary; **nothing else does.**
+`_CATEGORICAL_VALUES` is retained for seed *scaffolding*, where a plausible
+sample value asserts nothing and is the whole point — the distinction now stated
+at the constant: **guess freely for sample data, never for a contract term.**
+
+**S5-2.** The synthesis prompt now instructs omit-rather-than-guess for
+`min_value`, `max_value` and `regex_pattern`, each with the reason a guess is
+harmful there rather than a bare rule — an age is not automatically 0-120, and a
+conventional email pattern rejects the customer's own valid data.
+
+**The defect was protected by a test.**
+`test_dbt_accepted_values_for_categorical_columns` asserted that a column named
+`order_status` *with no declaration* acquired ACTIVE/INACTIVE/PENDING. It was a
+test written to match current behaviour, so it could not fail for the right
+reason, and it made the fabrication look intentional for two sprints. Rewritten
+to the discriminating pair: a declared vocabulary reaches dbt and says what the
+model said; a categorical *name* with no declaration yields nothing.
+
+That is the sharpest instance yet of stop condition 4. The gate that should have
+caught the defect was the thing certifying it.
+
+**Failability is already proven** and did not need a mutant: both tests were
+`strict=True` xfails that failed before the fix and pass after. The transition is
+the discrimination.
+
+| | Before fix | After fix |
+| :-- | :-- | :-- |
+| App suite | 561 passed, 22 xfailed | **565 passed, 18 xfailed** |
+| App-suite non-preview xfails | 4 | **0** |
+| Fidelity non-preview / preview | 0 / 18 | **0 / 18 — unmoved throughout** |
+| Ruff | 69 | **69 — unchanged** |
+
+Register A6 is clean again. The fidelity inventory never moved in either
+direction, which remains the finding worth carrying: it could not see these
+defects arriving and could not see them leaving. **Mutant 18:** requiring only one opt-in instead
 of both — killed by `test_the_runner_refuses_without_both_opt_ins`.
 
 **Superseded note — the harness (synthesise the five gold graphs through each

@@ -251,16 +251,6 @@ def test_odcs_invents_no_quality_rule_for_a_bare_column() -> None:
     assert not invented, f"ODCS invented rules nobody declared: {invented}"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "S5-1: the dbt exporter emits accepted_values ACTIVE/INACTIVE/PENDING for "
-        "any column named 'status', whether or not the model declares a "
-        "check_expression. A guess shipped as a contract term — the exact harm "
-        "the synthesis prompt names. Same family as H11, which fixed the seed "
-        "side of this triple while leaving the fabrication-from-nothing case."
-    ),
-)
 def test_dbt_invents_no_test_for_a_bare_column() -> None:
     """`accepted_values` on an undeclared `status` is the classic fabrication.
 
@@ -345,31 +335,7 @@ def test_declared_constraints_do_reach_the_contract() -> None:
 # ---------------------------------------------------------------------------
 # The instruction itself
 # ---------------------------------------------------------------------------
-QUALITY_RULE_FIELDS = ("regex_pattern", "min_value", "max_value")
-
-
-@pytest.mark.parametrize(
-    "field",
-    [
-        f
-        if f not in QUALITY_RULE_FIELDS
-        else pytest.param(
-            f,
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "S5-2: the synthesis prompt instructs omit-rather-than-guess for "
-                    "is_nullable, is_unique, default_value, check_expression and "
-                    "references, but says nothing about the three quality-rule "
-                    "fields. A model inventing a 0-120 range or an email regex is "
-                    "obeying the prompt, because the prompt never covered them — and "
-                    "those are the fields that become ODCS quality terms."
-                ),
-            ),
-        )
-        for f in OPTIONAL_CONSTRAINTS
-    ],
-)
+@pytest.mark.parametrize("field", OPTIONAL_CONSTRAINTS)
 def test_the_system_prompt_names_every_constraint_it_asks_to_be_omitted(
     field: str,
 ) -> None:

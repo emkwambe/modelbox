@@ -63,9 +63,18 @@ from app.schemas.data_model import (
 if TYPE_CHECKING:
     from app.services.seed_generator import SeedResult
 
-# Conventional value sets for common categorical columns. Used to scaffold dbt
-# accepted_values tests only where the values are well-known — we never fabricate
-# a values list we can't stand behind.
+# Conventional value sets for common categorical columns.
+#
+# **Not used for any contract term** (S5-1). This once fed the dbt
+# `accepted_values` test, which meant a column named `status` acquired three
+# permitted values the model never declared. A name is evidence about intent; it
+# is not a declaration, and only a declaration may become a term the customer's
+# data is tested against.
+#
+# Retained for seed *scaffolding*, where a plausible sample value is the whole
+# point and asserts nothing. Kept deliberately rather than deleted, because the
+# distinction — guess freely for sample data, never for a contract — is the rule
+# worth keeping visible.
 _CATEGORICAL_VALUES: dict[str, list[str]] = {
     "status": ["ACTIVE", "INACTIVE", "PENDING"],
     "tier": ["BRONZE", "SILVER", "GOLD", "PLATINUM"],
@@ -1472,15 +1481,21 @@ class ExporterService:
         if not cls._is_string_type(col):
             return None
 
-        declared = cls._check_enum_literals(col.check_expression)
-        if declared:
-            return declared
-
-        name = col.name.lower()
-        for key, values in _CATEGORICAL_VALUES.items():
-            if name == key or name.endswith(f"_{key}"):
-                return values
-        return None
+        # S5-1. **Declared or nothing.** The name-driven fallback that used to
+        # stand here returned ACTIVE/INACTIVE/PENDING for any column called
+        # `status`, whether or not the model declared a vocabulary — so a model
+        # that said nothing acquired three permitted values it never had, and
+        # they shipped as a dbt test run against the customer's own data. A user
+        # whose statuses are PENDING and DONE got a red build on correct data.
+        #
+        # H11 fixed the half where a guess *overrode* a declaration. This is the
+        # other half: a guess *filling a silence*. The module docstring above
+        # says guesses are useful "only where the model has said nothing" — true
+        # for scaffolding seed data, which is sample data, and false here,
+        # because an `accepted_values` test is a contract term. A guess exported
+        # as a contract is worse than saying nothing, which is exactly what the
+        # synthesis prompt tells the model and what the emitter must also obey.
+        return cls._check_enum_literals(col.check_expression)
 
     @staticmethod
     def _check_enum_literals(expression: str | None) -> list[str] | None:

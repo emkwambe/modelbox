@@ -64,6 +64,18 @@ _SYSTEM_PROMPT = (
     "- is_unique: true only for a natural or business key that must not "
     "repeat.\n"
     "- default_value, check_expression: only when the requirements state one.\n"
+    # S5-2. These three were absent from this list while the IR accepted them,
+    # so a model inventing a 0-120 age range or an email regex was obeying the
+    # prompt — the instruction simply did not cover them. They are also the
+    # fields that become ODCS quality terms, which makes them the worst place
+    # for a silent guess: an invented rule ships as a contract the customer's
+    # data is tested against.
+    "- min_value, max_value: only for a range the requirements actually give. "
+    "Do not infer one from the column's name or from what is physically "
+    "plausible — an age is not automatically 0-120.\n"
+    "- regex_pattern: only for a format the requirements state. Do not supply a "
+    "conventional pattern for a name like 'email' or 'phone'; a wrong pattern "
+    "rejects the customer's own valid data.\n"
     "- references: the qualified 'entity.column' that a foreign key points at.\n"
     "- agg_time_column (on the entity, not the column): the name of the date "
     "or time column this entity's measures are aggregated over. It must be one "
