@@ -26,7 +26,8 @@ commit that moved it is where to look.
 
 | Measure | Value | How |
 | :-- | :-- | :-- |
-| App suite | **549 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
+| App suite | **561 passed, 36 skipped, 22 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
+| App-suite non-preview xfails | **4** — open defects S5-1, S5-2 | in `test_omission_is_not_fabrication.py`, all `strict=True` |
 | Fidelity, non-preview xfails | **0** | `MODELBOX_FIDELITY_STRICT=1 .venv-tools/Scripts/python -m pytest tests/test_artifact_fidelity.py -m "not preview" -q` |
 | Fidelity, preview xfails | **18** | same, with `-m "preview"` |
 | Ruff over `app` + `tests` | **69**, all pre-existing | `.venv/Scripts/python -m ruff check app tests` |
@@ -893,7 +894,76 @@ procedure rather than in the code under test: an operation that ran is not an
 operation that did anything. **Every mutation script from here asserts its
 anchor is present before writing.**
 
-**Outstanding:** the run itself, on a box with `ollama-engine` up and a cloud key. **Mutant 18:** requiring only one opt-in instead
+**Outstanding:** the run itself, on a box with `ollama-engine` up and a cloud key.
+
+---
+
+## "Omit rather than guess" — tested, and it found two defects
+
+`tests/test_omission_is_not_fabrication.py`. The claim was previously
+*partially* proven — one linter path, one IR-level omission — and partially
+proven means not proven.
+
+**The claim is about the export, not the model.** The harm the system prompt
+names is a guess *exported into a data contract as fact*, so the property is:
+when an IR field is unset, no emitter invents a value for it. That is entirely
+offline — the question is what the deterministic pipeline does with a sparse
+input, not what an LLM chooses.
+
+**The fixture design is the test.** A sparse input only discriminates if a
+plausible fabrication would be *visible*; otherwise an honest emitter and a
+fabricating one produce identical artifacts, which is standard 8 arriving inside
+a test written to prove honesty under uncertainty. So every column baits a
+specific, nameable guess: `email` (a regex), `status` (an enum), `created_at` (a
+default), `age` (a 0-120 range), `phone` (a format), `country_code` (a length or
+enum). Each is absent from the declared model and asserted absent by name.
+
+The discriminating half declares all six and asserts each reaches its landing
+site — DDL for a default, ODCS `quality` for a pattern or enum,
+`logicalTypeOptions` for a range, `unique` for uniqueness. Without it, every
+absence assertion would pass on an emitter that emits nothing.
+
+### S5-1 — the dbt exporter fabricates `accepted_values`
+
+**A live defect, found by this test.** A column named `status` with **no**
+declared `check_expression` acquires `accepted_values: ACTIVE, INACTIVE,
+PENDING` in the emitted dbt project. Three permitted values it never had,
+shipped as a contract term, tested against the customer's data.
+
+A user whose statuses are `PENDING` and `DONE` gets a red build on their own
+correct data. That is **H11's failure reached from the other direction**: Sprint
+4 fixed the case where the seed generator disagreed with a *declared* CHECK, and
+left the case where nothing is declared at all and the exporter invents one.
+
+### S5-2 — the prompt never mentions the quality-rule fields
+
+The synthesis prompt instructs omit-rather-than-guess for `is_nullable`,
+`is_unique`, `default_value`, `check_expression` and `references`. It says
+nothing about `regex_pattern`, `min_value` or `max_value` — and those are
+precisely the fields that become ODCS `quality` terms. A model inventing a
+0-120 age range is *obeying the prompt*, because the prompt never covered it.
+The gap is between the schema and the instruction, which is where a silent
+decision lives.
+
+### The inventory moved, deliberately — say so loudly
+
+| | Before | After |
+| :-- | :-- | :-- |
+| App suite | 549 passed, 18 xfailed | **561 passed, 22 xfailed** |
+| App-suite **non-preview** xfails | 0 | **4** (S5-1 ×1, S5-2 ×3) |
+| Fidelity non-preview / preview | 0 / 18 | **0 / 18 — unmoved** |
+
+All four are `strict=True` from creation, so a fix turns the run red until the
+marker is removed and the inventory can never overstate remaining work. The
+fidelity harness is untouched: these are app-suite defects, not artifact-parse
+defects, which is itself the point — the fidelity harness hands each artifact to
+its own parser, and a *fabricated but well-formed* `accepted_values` block parses
+perfectly. Same blindness as the Avro nullability defect in Task 4.
+
+Register A6 ("no non-preview xfail at Phase I exit") now has two open items.
+Neither is fixed here, because every defect in this programme becomes a failing
+test before it becomes a fix, and both fixes belong with their emitters and
+their own gates. **Mutant 18:** requiring only one opt-in instead
 of both — killed by `test_the_runner_refuses_without_both_opt_ins`.
 
 **Superseded note — the harness (synthesise the five gold graphs through each
