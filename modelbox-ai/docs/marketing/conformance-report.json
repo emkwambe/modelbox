@@ -1,0 +1,101 @@
+{
+  "threshold_version": "1.0",
+  "run_started_at": "2026-08-13T13:03:26.713903+00:00",
+  "providers": [
+    {
+      "provider": "anthropic_cloud",
+      "egress_class": "cloud",
+      "model_identifier": "claude-sonnet-4-5-20250929",
+      "model_version": "claude-sonnet-4-5-20250929",
+      "entity_f1": 0.2881,
+      "column_f1": 0.0741,
+      "relationship_f1": 0.2,
+      "lint_delta_per_graph": 0.0,
+      "systematic_new_codes": [
+        "MISSING_SLA"
+      ],
+      "passed": false,
+      "failures": [
+        "entity F1 0.288 < 0.8",
+        "column F1 0.074 < 0.7",
+        "relationship F1 0.200 < 0.6",
+        "new lint codes on >= 3 graphs: ['MISSING_SLA']"
+      ],
+      "remedy": "narrow the air-gap claim \u2014 degradation is spread across axes ({'entity': 0.512, 'column': 0.626, 'relationship': 0.4}), so no fix at the synthesis layer is indicated"
+    }
+  ],
+  "materially_worse_than_cloud": [],
+  "per_graph": [
+    {
+      "gold_graph_id": "banking-datavault",
+      "provider": "anthropic_cloud",
+      "entity_f1": 0.3333,
+      "column_f1": 0.1579,
+      "relationship_f1": 0.0,
+      "lint_delta": 5,
+      "new_codes": [
+        "MISSING_SLA",
+        "NAMING_CONVENTION"
+      ],
+      "prompt_sha256": "099584ff1bf1d24f7b3f9032de0bc139c9cf705a0dc2ddd523e37e77fc314ed2",
+      "model_identifier": "claude-sonnet-4-5-20250929",
+      "model_version": "claude-sonnet-4-5-20250929"
+    },
+    {
+      "gold_graph_id": "ecommerce-orders",
+      "provider": "anthropic_cloud",
+      "entity_f1": 0.8571,
+      "column_f1": 0.1471,
+      "relationship_f1": 0.0,
+      "lint_delta": -2,
+      "new_codes": [
+        "MISSING_SLA"
+      ],
+      "prompt_sha256": "24158d3e03dcbbaab7d52db7b67b02488487dc766cab8699266f215253090c4e",
+      "model_identifier": "claude-sonnet-4-5-20250929",
+      "model_version": "claude-sonnet-4-5-20250929"
+    },
+    {
+      "gold_graph_id": "healthcare-ehr",
+      "provider": "anthropic_cloud",
+      "entity_f1": 0.25,
+      "column_f1": 0.0656,
+      "relationship_f1": 0.0,
+      "lint_delta": -2,
+      "new_codes": [
+        "MISSING_SLA"
+      ],
+      "prompt_sha256": "59575bec5b26036f2a400a466d4d1c5de154909bd825b388c46880f91a6d4da2",
+      "model_identifier": "claude-sonnet-4-5-20250929",
+      "model_version": "claude-sonnet-4-5-20250929"
+    },
+    {
+      "gold_graph_id": "marketing-attribution",
+      "provider": "anthropic_cloud",
+      "entity_f1": 0.0,
+      "column_f1": 0.0,
+      "relationship_f1": 1.0,
+      "lint_delta": -1,
+      "new_codes": [
+        "MISSING_SLA"
+      ],
+      "prompt_sha256": "dd63e3346a9d7c38bdc937234686d03a4f0f90feace4f8acddf4b3bc0e3e8908",
+      "model_identifier": "claude-sonnet-4-5-20250929",
+      "model_version": "claude-sonnet-4-5-20250929"
+    },
+    {
+      "gold_graph_id": "saas-subscription",
+      "provider": "anthropic_cloud",
+      "entity_f1": 0.0,
+      "column_f1": 0.0,
+      "relationship_f1": 0.0,
+      "lint_delta": 0,
+      "new_codes": [
+        "MISSING_SLA"
+      ],
+      "prompt_sha256": "6c434b1b5f8081c271aef9b2ef172474b5c5fce0f955cf0a473d246f4b0d5a21",
+      "model_identifier": "claude-sonnet-4-5-20250929",
+      "model_version": "claude-sonnet-4-5-20250929"
+    }
+  ]
+}

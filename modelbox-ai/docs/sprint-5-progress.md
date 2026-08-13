@@ -671,6 +671,81 @@ direction, and invisible to every other gate.
 
 ---
 
+## The first run happened — and it invalidated the metric, not the model
+
+`docs/marketing/conformance-report.json`. One cloud provider
+(`claude-sonnet-4-5-20250929`), five gold graphs, five real provider calls — the
+programme's first since the audit. No local provider: no `ollama-engine` was
+running and nothing answered on `:11434`, so this is the cloud reference half
+only and **D10 does not close.**
+
+### The verdict, and why it must not be reported as one
+
+| Measure | Result | Threshold |
+| :-- | :-- | :-- |
+| Entity F1 | 0.288 | 0.80 |
+| Column F1 | 0.074 | 0.70 |
+| Relationship F1 | 0.200 | 0.60 |
+| New lint code | `MISSING_SLA` on 5/5 | none on ≥3 |
+
+**These numbers measure name agreement, not schema quality.** Per-graph variance
+is what proves it:
+
+| Graph | Entity F1 | Reading |
+| :-- | :-- | :-- |
+| `ecommerce-orders` | **0.857** | conventional `dim_`/`fact_` names the model would pick anyway |
+| `saas-subscription` | **0.000** | also Kimball, near-identical task shape |
+
+A model does not comprehend e-commerce warehousing and then fail *completely* on
+subscription warehousing. Those two numbers are the same model naming things
+differently, scored as if it had produced nothing.
+
+### Three instrument defects, none of them the model
+
+1. **F1 over names is the wrong metric.** A structurally perfect star with
+   `customers` / `orders` instead of `dim_customer` / `fact_order_line` scores
+   zero. Column F1 stays at 0.07–0.16 *even where entity F1 is 0.857*, which is
+   the same defect one level down (`customer_sk` vs `customer_id`).
+2. **Empty-set F1 returns 1.0 and inflates the average.**
+   `marketing-attribution` scored relationship F1 **1.000** with entity F1
+   **0.000** — it is an OBT graph with no relationships, so both sides were
+   empty. Documented as intentional ("nothing required, nothing invented") and
+   wrong to average with real scores: a free 1.0 for measuring nothing.
+3. **`MISSING_SLA` on 5/5 is a prompt gap, not a model failure.** The prompt
+   never asks for freshness, so the linter penalises the model for omitting a
+   field nobody requested. Same shape as S5-2, in the scoring path.
+
+### What the discipline bought
+
+**The threshold-before-output rule worked exactly as designed, and this is the
+case that proves it.** The numbers were fixed in `b6a3e1a`, into a tree that
+could not call a provider. So on seeing 0.288 there is no move available except
+to conclude the instrument is wrong — which is the correct conclusion. Had the
+threshold been set after this result, it would have been set at 0.25 and the
+report would have read PASS.
+
+**Nothing about the thresholds changes.** They were right; the metric feeding
+them is not.
+
+### The ledger's first real rows
+
+Five ATTEMPT and five SUCCESS rows, `anthropic_cloud`, egress class `cloud`,
+with prompt digests and real token counts — 2,963 prompt / 5,706 completion on
+the first. D3 and D4's mechanism verified against live egress rather than a
+double, which is the one claim this run does close.
+
+### Outstanding
+
+* Replace name-equality F1 with a structure-aware comparison — match entities by
+  column overlap and role rather than by name, or score the *shape* of the star.
+  This is a metric redesign and it must be fixed **before** the local run, or
+  the local/cloud comparison inherits the defect.
+* `f1()` must not return 1.0 for two empty sets in an averaged context.
+* Ask for `freshness_sla` in the prompt, or exclude `MISSING_SLA` from scoring.
+* Then the local run, and only then D10.
+
+---
+
 ## Proposed follow-on, for sprint close: the removal sweep
 
 **Proposed, not decided.** Recorded here so it survives the sprint.
