@@ -24,7 +24,6 @@ Requires Docker. Skipped when unavailable, unless MODELBOX_MIGRATION_STRICT=1.
 
 from __future__ import annotations
 
-import socket
 import subprocess
 import time
 import uuid
@@ -32,6 +31,8 @@ import uuid
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
+
+from tests._docker_postgres import assert_reachable_from_host, published_port
 
 # Imported rather than copied. `_upgrade_to` carries the M1 fix — it resolves
 # what `head` actually is and asserts the database reports it — and a second
@@ -72,20 +73,20 @@ def postgres_dsn() -> str:
     """A throwaway Postgres, torn down whatever the outcome."""
     _need_docker()
     name = f"modelbox-egress-{uuid.uuid4().hex[:8]}"
-    # An ephemeral port, not a fixed one: a fixed port silently binds to a
-    # previous run's container, and the test then migrates one database while
-    # asserting against another (Sprint 2 harness bug, register standard 2).
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = str(probe.getsockname()[1])
+    # Docker binds the host port and reports it back — see
+    # `tests/_docker_postgres`. A fixed port bound a previous run's container
+    # (Sprint 2); probing for a free one and closing the socket before Docker
+    # binds left a smaller window with the same shape, and that window is what
+    # this gate tripped over in Sprint 4 and again in Sprint 5.
     subprocess.run(
         [DOCKER, "run", "-d", "--name", name,
          "-e", "POSTGRES_PASSWORD=verify", "-e", "POSTGRES_USER=verify",
-         "-e", "POSTGRES_DB=verify", "-p", f"{port}:5432",
+         "-e", "POSTGRES_DB=verify", "-p", "0:5432",
          "postgres:16-alpine"],
         check=True, capture_output=True, text=True,
     )
     try:
+        port = published_port(name)
         for _ in range(60):
             ready = subprocess.run(
                 [DOCKER, "exec", name, "pg_isready", "-U", "verify", "-d", "verify"],
@@ -96,6 +97,7 @@ def postgres_dsn() -> str:
             time.sleep(1)
         else:
             pytest.fail("postgres container never became ready")
+        assert_reachable_from_host(port)
         yield f"postgresql+asyncpg://verify:verify@localhost:{port}/verify"
     finally:
         subprocess.run([DOCKER, "rm", "-f", name], capture_output=True, check=False)
