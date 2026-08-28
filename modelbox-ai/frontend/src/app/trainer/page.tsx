@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
+import { AUTH_BADGE_RESERVE } from '@/components/auth/AuthBadge';
 import ERDCanvas from '@/components/canvas/ERDCanvas';
 import ColumnSemanticEditor from '@/components/canvas/ColumnSemanticEditor';
 import EntitySettingsEditor from '@/components/canvas/EntitySettingsEditor';
@@ -211,7 +212,8 @@ export default function TrainerPage() {
           alignItems: 'center',
           gap: 12,
           padding: '10px 16px',
-          paddingRight: 320,
+          // The badge declares how much space it needs; do not restate it.
+          paddingRight: AUTH_BADGE_RESERVE,
           borderBottom: '1px solid #e2e8f0',
           background: '#ffffff',
           flexWrap: 'wrap',

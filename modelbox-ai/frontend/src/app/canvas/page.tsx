@@ -8,6 +8,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
+import { AUTH_BADGE_RESERVE } from '@/components/auth/AuthBadge';
 import ERDCanvas from '@/components/canvas/ERDCanvas';
 import ColumnSemanticEditor from '@/components/canvas/ColumnSemanticEditor';
 import EntitySettingsEditor from '@/components/canvas/EntitySettingsEditor';
@@ -21,6 +22,7 @@ export default function CanvasPage() {
   const paradigm = useCanvasStore((s) => s.paradigm);
   const entityCount = useCanvasStore((s) => s.nodes.length);
   const modelId = useCanvasStore((s) => s.modelId);
+  const sourcePrompt = useCanvasStore((s) => s.sourcePrompt);
   const validation = useCanvasStore((s) => s.validation);
   const reset = useCanvasStore((s) => s.reset);
   const setValidation = useCanvasStore((s) => s.setValidation);
@@ -29,6 +31,11 @@ export default function CanvasPage() {
   const [showDiff, setShowDiff] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  // A graph on the canvas with no model behind it: the library's "Load canvas"
+  // path. Every header action is gated on `modelId`, so without saying so the
+  // page reads as five broken buttons.
+  const isReferenceModel = entityCount > 0 && !modelId;
 
   const issueCount = validation?.issues.length ?? 0;
   const validStatus = validation
@@ -99,8 +106,9 @@ export default function CanvasPage() {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '10px 16px',
-          // Reserve space on the right for the fixed AuthBadge overlay.
-          paddingRight: 320,
+          // Reserve space on the right for the fixed AuthBadge overlay. The
+          // badge declares how much it needs; do not restate the number here.
+          paddingRight: AUTH_BADGE_RESERVE,
           borderBottom: '1px solid #e2e8f0',
           background: '#ffffff',
         }}
@@ -204,6 +212,45 @@ export default function CanvasPage() {
           </button>
         </div>
       </header>
+
+      {isReferenceModel && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+            padding: '8px 16px',
+            background: '#fffbeb',
+            borderBottom: '1px solid #fde68a',
+            color: '#92400e',
+            fontSize: 13,
+          }}
+        >
+          <strong style={{ fontWeight: 700 }}>Reference model</strong>
+          <span>
+            Loaded from the library, so it does not exist in your workspace
+            yet. Saving, diffing and exporting act on stored models.
+          </span>
+          {sourcePrompt && (
+            <Link
+              href="/"
+              style={{
+                marginLeft: 'auto',
+                padding: '4px 12px',
+                borderRadius: 6,
+                border: '1px solid #b45309',
+                color: '#92400e',
+                fontWeight: 600,
+                textDecoration: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Synthesize this model →
+            </Link>
+          )}
+        </div>
+      )}
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>

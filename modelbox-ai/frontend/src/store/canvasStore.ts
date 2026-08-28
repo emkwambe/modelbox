@@ -47,6 +47,13 @@ interface CanvasState {
 
   // --- context ---
   modelId: string | null;
+  /**
+   * The prompt a library template was loaded from, when the graph on the
+   * canvas came from one. Non-null exactly when `modelId` is null and the
+   * canvas is holding a reference model — it is what lets the canvas offer a
+   * route to a real, synthesized model instead of five disabled buttons.
+   */
+  sourcePrompt: string | null;
   paradigm: Paradigm | null;
   dialect: string;
   validation: ValidationReport | null;
@@ -89,6 +96,7 @@ interface CanvasState {
     entities: Entity[],
     relationships: Relationship[],
     paradigm?: Paradigm | null,
+    sourcePrompt?: string | null,
   ) => void;
   loadModel: (model: SynthesizeResponse) => void;
   applyLayout: (direction?: LayoutDirection) => void;
@@ -205,6 +213,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     nodes: [],
     edges: [],
     modelId: null,
+    sourcePrompt: null,
     paradigm: null,
     dialect: 'snowflake',
     validation: null,
@@ -404,10 +413,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       return { entities, relationships };
     },
 
-    loadGraph: (entities, relationships, paradigm = null) => {
+    loadGraph: (entities, relationships, paradigm = null, sourcePrompt = null) => {
       commit();
       set({
         modelId: null,
+        sourcePrompt,
         paradigm,
         nodes: entities.map(entityToNode),
         edges: relationships.map(relationshipToEdge),
@@ -421,6 +431,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       commit();
       set({
         modelId: model.model_id,
+        // A real model supersedes whatever template seeded the canvas.
+        sourcePrompt: null,
         paradigm: model.paradigm,
         nodes: model.entities.map(entityToNode),
         edges: model.relationships.map(relationshipToEdge),
@@ -492,6 +504,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         nodes: [],
         edges: [],
         modelId: null,
+        sourcePrompt: null,
         paradigm: null,
         validation: null,
         validating: false,

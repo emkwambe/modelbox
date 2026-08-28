@@ -75,6 +75,8 @@ export default function HomePage() {
   const router = useRouter();
   const loadModel = useCanvasStore((s) => s.loadModel);
   const loadGraph = useCanvasStore((s) => s.loadGraph);
+  const sourcePrompt = useCanvasStore((s) => s.sourcePrompt);
+  const sourceParadigm = useCanvasStore((s) => s.paradigm);
   const token = useAuthStore((s) => s.token);
   const openModal = useAuthStore((s) => s.openModal);
   const activeWorkspaceId = useAuthStore((s) => s.activeWorkspaceId);
@@ -94,7 +96,9 @@ export default function HomePage() {
   }
 
   function handleLoadGraph(t: Template) {
-    loadGraph(t.entities, t.relationships, t.paradigm);
+    // Carry the prompt with the graph: the canvas offers "Synthesize this
+    // model", and that is the prompt it sends the reader back here with.
+    loadGraph(t.entities, t.relationships, t.paradigm, t.rawPrompt);
     setShowLibrary(false);
     router.push('/canvas');
   }
@@ -102,10 +106,20 @@ export default function HomePage() {
   // Auth state is only known client-side (persisted). Gate auth-dependent UI
   // behind mount to avoid an SSR/CSR hydration mismatch.
   useEffect(() => setMounted(true), []);
+
+  // Coming back from the canvas's "Synthesize this model": start from the
+  // template's own prompt. Never overwrite something already typed.
+  useEffect(() => {
+    if (!sourcePrompt) return;
+    setContent((current) => (current.trim() ? current : sourcePrompt));
+    if (sourceParadigm) setParadigm(sourceParadigm);
+  }, [sourcePrompt, sourceParadigm]);
+
   const signedIn = mounted && Boolean(token);
 
   /** Poll a job to completion and return the finished model. */
   async function pollJob(jobId: string): Promise<SynthesizeResponse> {
+    let lastStatus = 'PENDING';
     for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
       const job = await getJob(jobId);
       if (job.status === 'COMPLETED' && job.result_model_id) {
@@ -114,10 +128,23 @@ export default function HomePage() {
       if (job.status === 'FAILED') {
         throw new Error(job.error ?? 'Synthesis failed.');
       }
+      lastStatus = job.status;
       setProgress(job.status === 'PROCESSING' ? 'Synthesizing…' : 'Queued…');
       await sleep(POLL_INTERVAL_MS);
     }
-    throw new Error('Timed out waiting for synthesis.');
+    // A job still QUEUED at the deadline never started, which is a different
+    // fault from one that started and ran long — and the status says which.
+    // Reporting both as a timeout described the client's own budget rather
+    // than what happened to the work, and sent people looking for a slow model
+    // when nothing was consuming the queue at all.
+    const minutes = Math.round((POLL_MAX_ATTEMPTS * POLL_INTERVAL_MS) / 60000);
+    throw new Error(
+      lastStatus === 'PENDING'
+        ? `Synthesis never started — the job was still queued after ${minutes} minutes. ` +
+          'Nothing is consuming the queue: check that the modelbox-worker container is running.'
+        : `Synthesis is still running after ${minutes} minutes. The job has not failed; ` +
+          'it may finish on its own, or the provider may be unresponsive — check the worker logs.',
+    );
   }
 
   async function handleSynthesize() {
