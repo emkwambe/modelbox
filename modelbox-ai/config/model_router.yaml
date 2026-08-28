@@ -44,7 +44,12 @@ providers:
   gemini_cloud:
     type: "gemini"
     api_key_env: "GEMINI_API_KEY"
-    default_model: "gemini-1.5-pro"
+    # `gemini-1.5-pro` returns 404 "no longer available to new users", as do
+    # 2.0-flash and 2.5-*. A retired model identifier fails as NotFoundError,
+    # which reads like a broken key and is not: the credential was fine
+    # throughout. Pinned model names expire; re-check this one when a route
+    # starts 404ing rather than assuming the key.
+    default_model: "gemini-3.6-flash"
     egress: "cloud"
 
   mistral_cloud:
@@ -133,7 +138,13 @@ task_routing:
   # Kimi's long context is a strong fallback for very large documents.
   unstructured_doc_parsing:
     primary: "anthropic_cloud"
-    fallback: ["openai_cloud", "kimi_cloud", "airgapped_vllm"]
+    # `gemini_cloud` leads the fallback because it is the only chain member with
+    # a working credential on this deployment; the previous chain exhausted all
+    # four providers in 23s (anthropic: invalid key, openai: no credits, kimi:
+    # no key configured, airgapped_vllm: not shipped). Synthesis is the only
+    # caller of this route, so an unreachable chain here means no synthesis
+    # at all.
+    fallback: ["gemini_cloud", "openai_cloud", "kimi_cloud", "airgapped_vllm"]
     temperature: 0.1
     max_egress_class: "cloud"
 
