@@ -81,7 +81,7 @@ async def synthesize_model(
     payload.workspace_id = await resolve_user_workspace(
         session, user, payload.workspace_id
     )
-    return await engine.synthesize(payload)
+    return await engine.synthesize(payload, user_id=user.user_id)
 
 
 @router.get(

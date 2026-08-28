@@ -111,8 +111,25 @@ class SynthesisEngine:
         self._gateway = gateway
         self._graph = graph_engine or GraphEngine()
 
-    async def synthesize(self, request: SynthesizeRequest) -> SynthesizeResponse:
-        """Run synthesis end-to-end and persist the result."""
+    async def synthesize(
+        self,
+        request: SynthesizeRequest,
+        *,
+        user_id: uuid.UUID | None = None,
+    ) -> SynthesizeResponse:
+        """Run synthesis end-to-end and persist the result.
+
+        ``user_id`` is threaded to the egress ledger (D4). The ledger has
+        recorded *what* left and *when* since Task 1; without an actor it
+        cannot answer *who*, which is half of the question the criterion asks
+        an operator to answer from the UI.
+
+        No ``model_id`` is passed, and that is not an omission: synthesis is
+        the call that brings the model into existence, so at the moment the
+        request leaves there is nothing to name. Recording the id assigned
+        afterwards would date the row to a model that did not exist when the
+        prompt was sent.
+        """
         prompt = self._build_prompt(request)
         synthesized = await self._gateway.structured_completion(
             task="unstructured_doc_parsing",
@@ -120,6 +137,8 @@ class SynthesisEngine:
             response_model=SynthesizedModel,
             system_prompt=_SYSTEM_PROMPT,
             llm_override=request.llm_override,
+            user_id=user_id,
+            workspace_id=request.workspace_id,
         )
 
         # Deterministically normalize Fact<->Dimension cardinality/direction so

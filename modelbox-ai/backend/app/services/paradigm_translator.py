@@ -59,9 +59,20 @@ class ParadigmTranslator:
         self._synthesis = SynthesisEngine(session, gateway)
 
     async def transform(
-        self, model_id: uuid.UUID, request: TransformParadigmRequest
+        self,
+        model_id: uuid.UUID,
+        request: TransformParadigmRequest,
+        *,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
     ) -> TransformParadigmResponse | None:
-        """Transform ``model_id`` into ``request.target_paradigm``."""
+        """Transform ``model_id`` into ``request.target_paradigm``.
+
+        The actor is threaded to the egress ledger (D4). Unlike synthesis this
+        call has a model to name, and naming it is the difference between an
+        operator seeing that a prompt went to a provider and seeing which of
+        their models it described.
+        """
         started = time.perf_counter()
 
         model = await self._session.get(DataModel, model_id)
@@ -83,6 +94,9 @@ class ParadigmTranslator:
                 "transformation. Preserve all column descriptions and semantic "
                 "tags across the switch."
             ),
+            model_id=model_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
         )
 
         # Replace the model's graph with the transformed one and bump version.

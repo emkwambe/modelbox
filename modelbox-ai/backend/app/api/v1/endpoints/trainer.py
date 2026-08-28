@@ -106,8 +106,12 @@ async def socratic_step(
     user: CurrentUserDep,
     gateway: GatewayDep,
 ) -> SocraticStepResponse:
-    await _load_assignment(session, user, payload.assignment_id)
-    return await TrainerService(session, gateway).socratic_step(payload)
+    assignment = await _load_assignment(session, user, payload.assignment_id)
+    return await TrainerService(session, gateway).socratic_step(
+        payload,
+        user_id=user.user_id,
+        workspace_id=assignment.workspace_id,
+    )
 
 
 @router.post(

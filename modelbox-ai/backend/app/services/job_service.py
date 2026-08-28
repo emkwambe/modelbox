@@ -72,7 +72,11 @@ class JobService:
                 dialect=job.dialect,
                 workspace_id=job.workspace_id,
             )
-            result = await engine.synthesize(request)
+            # The worker runs the same synthesis path off the queue, so it owes
+            # the ledger the same attribution the HTTP route supplies. The job
+            # row carries both, which is why an async synthesis is still
+            # accountable to a person rather than to "the worker".
+            result = await engine.synthesize(request, user_id=job.user_id)
             job.result_model_id = result.model_id
             job.status = "COMPLETED"
         except Exception as exc:  # noqa: BLE001 - record any failure on the job
