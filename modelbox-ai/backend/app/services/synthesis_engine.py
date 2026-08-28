@@ -77,6 +77,18 @@ _SYSTEM_PROMPT = (
     "conventional pattern for a name like 'email' or 'phone'; a wrong pattern "
     "rejects the customer's own valid data.\n"
     "- references: the qualified 'entity.column' that a foreign key points at.\n"
+    # S5-2 again, at entity level, found by the first conformance run. The
+    # gold graphs declare no tier at all, yet MISSING_SLA fired on 5 of 5
+    # candidate graphs — which it can only do when an entity claims a critical
+    # or important tier and gives no SLA. The model was inventing the tier. A
+    # tier is a governance classification that reaches the ODCS contract and
+    # the linter, so it is exactly the kind of term the omission rule exists
+    # for; the instruction simply did not cover it.
+    "- tier, freshness_sla (on the entity): only when the requirements state "
+    "how critical the asset is or how fresh it must be. Do not infer criticality "
+    "from a table's importance to the model — a tier is a governance commitment "
+    "the business makes, not a property you can read off a schema, and claiming "
+    "one obliges an SLA nobody agreed to.\n"
     "- agg_time_column (on the entity, not the column): the name of the date "
     "or time column this entity's measures are aggregated over. It must be one "
     "of that entity's own columns and must be a date or time type. Omit it "

@@ -109,6 +109,32 @@ MIN_RELATIONSHIP_F1: Final[float] = 0.60
 MAX_LINT_DELTA_PER_GRAPH: Final[float] = 2.0
 NEW_CODE_GRAPH_COUNT: Final[int] = 3
 
+# --- entity matching, structural ---------------------------------------------
+# How much of two entities' column vocabulary must coincide before they are
+# treated as the same table under different names. Jaccard over canonicalised
+# column names, so 0.50 means "more shared columns than not".
+#
+# **Provenance, stated plainly because it differs from every other number in
+# this file.** The pass thresholds above were fixed in `b6a3e1a`, into a tree
+# containing no code able to contact a provider, and that ordering is a property
+# of git history. This constant cannot claim that: it was added after the first
+# run, because the first run showed the metric those thresholds were feeding was
+# measuring name agreement rather than schema quality.
+#
+# What it can claim is that it was not tuned to a result. It is set on a stated
+# principle — a table sharing more than half its columns with another is the
+# same table renamed, and one sharing fewer is not — and its behaviour is pinned
+# by known-answer tests over constructed graphs, not by the live report.
+#
+# There is also an accidental guarantee, and it is worth naming because it is
+# stronger than the intention: the first run discarded every candidate graph and
+# kept only scores, so there is no preserved output to tune against. The number
+# could not have been fitted to that run even deliberately. The runner now
+# persists candidates precisely so that a future metric change can be re-applied
+# to the same outputs — which will remove this accidental protection, and makes
+# the stated principle the only thing holding.
+ENTITY_MATCH_FLOOR: Final[float] = 0.50
+
 # --- "materially worse than cloud", relative ---------------------------------
 MAX_F1_DROP_VS_CLOUD: Final[float] = 0.15
 MAX_LINT_DELTA_VS_CLOUD: Final[float] = 2.0

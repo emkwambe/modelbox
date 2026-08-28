@@ -135,6 +135,13 @@ async def main(argv: list[str] | None = None) -> int:
 
     rows = []
     verdicts = []
+    # Every candidate graph, kept verbatim. The first run stored only scores,
+    # so when the metric turned out to be measuring name agreement there was
+    # nothing left to re-score: correcting the instrument meant paying for five
+    # fresh provider calls whose outputs would differ anyway, and the two runs
+    # could never be compared. A conformance number that cannot be recomputed
+    # from preserved inputs is not reproducible, whatever the report says.
+    captured: list[dict[str, object]] = []
     for provider in [p.strip() for p in args.providers.split(",") if p.strip()]:
         egress_class = gateway._egress_class(provider)
         model_identifier = gateway.providers[provider]["default_model"]
@@ -145,6 +152,17 @@ async def main(argv: list[str] | None = None) -> int:
                 prompt=prompt,
                 response_model=SynthesizedModel,
                 llm_override=provider,
+            )
+            captured.append(
+                {
+                    "gold_graph_id": graph_id,
+                    "provider": provider,
+                    "model_identifier": model_identifier,
+                    "prompt_sha256": hashlib.sha256(
+                        prompt.encode("utf-8")
+                    ).hexdigest(),
+                    "candidate": candidate.model_dump(mode="json"),
+                }
             )
             scores.append(
                 score_graph(
@@ -189,6 +207,14 @@ async def main(argv: list[str] | None = None) -> int:
                 }
             )
 
+    def _round(value: float | None, places: int) -> float | None:
+        """`None` means the axis did not apply — it is not a zero.
+
+        Serialised as JSON null rather than a number, so a reader cannot mistake
+        "no applicable graph" for a measured result.
+        """
+        return None if value is None else round(value, places)
+
     report = {
         "threshold_version": THRESHOLD_VERSION,
         "run_started_at": started,
@@ -198,9 +224,9 @@ async def main(argv: list[str] | None = None) -> int:
                 "egress_class": v.egress_class,
                 "model_identifier": v.model_identifier,
                 "model_version": v.model_version,
-                "entity_f1": round(v.entity_f1, 4),
-                "column_f1": round(v.column_f1, 4),
-                "relationship_f1": round(v.relationship_f1, 4),
+                "entity_f1": _round(v.entity_f1, 4),
+                "column_f1": _round(v.column_f1, 4),
+                "relationship_f1": _round(v.relationship_f1, 4),
                 "lint_delta_per_graph": round(v.lint_delta, 3),
                 "systematic_new_codes": v.systematic_new_codes,
                 "passed": v.passed,
@@ -214,9 +240,9 @@ async def main(argv: list[str] | None = None) -> int:
             {
                 "gold_graph_id": s.gold_graph_id,
                 "provider": s.provider,
-                "entity_f1": round(s.entity_f1, 4),
-                "column_f1": round(s.column_f1, 4),
-                "relationship_f1": round(s.relationship_f1, 4),
+                "entity_f1": _round(s.entity_f1, 4),
+                "column_f1": _round(s.column_f1, 4),
+                "relationship_f1": _round(s.relationship_f1, 4),
                 "lint_delta": s.lint_delta,
                 "new_codes": sorted(s.new_codes),
                 "prompt_sha256": s.prompt_sha256,
@@ -226,9 +252,17 @@ async def main(argv: list[str] | None = None) -> int:
             for s in rows
         ],
     }
+    candidates_path = args.out.with_suffix(".candidates.json")
+    report["candidates_file"] = candidates_path.name
+
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    candidates_path.write_text(
+        json.dumps({"run_started_at": started, "graphs": captured}, indent=2),
+        encoding="utf-8",
+    )
     print(f"wrote {args.out}")
+    print(f"wrote {candidates_path} ({len(captured)} candidate graphs)")
     for v in verdicts:
         print(f"  {v.provider}: {'PASS' if v.passed else 'FAIL'} {v.failures or ''}")
     return 0

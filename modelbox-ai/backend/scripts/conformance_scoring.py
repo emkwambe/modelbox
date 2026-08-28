@@ -21,6 +21,7 @@ from app.schemas.data_model import SynthesizedModel
 from app.services.graph_engine import GraphEngine
 from scripts.conformance_threshold import (
     CONCENTRATION_SHARE,
+    ENTITY_MATCH_FLOOR,
     MAX_LINT_DELTA_PER_GRAPH,
     MIN_COLUMN_F1,
     MIN_ENTITY_F1,
@@ -34,22 +35,99 @@ def canon(name: str) -> str:
     return name.replace("_", "").replace(" ", "").lower()
 
 
-def f1(expected: set, actual: set) -> float:
-    """Harmonic mean of precision and recall.
+def f1(expected: set, actual: set) -> float | None:
+    """Harmonic mean of precision and recall, or ``None`` where inapplicable.
 
     F1 rather than recall: recall alone rewards a provider that emits every
     plausible entity and lets precision collapse, and over-generation is the
-    expected failure mode of a model asked for a warehouse schema. Two empty
-    sets score 1.0 — nothing was required and nothing was invented.
+    expected failure mode of a model asked for a warehouse schema.
+
+    **Two empty sets return ``None``, not 1.0.** The old value was defended as
+    "nothing was required and nothing was invented", which is true of a single
+    graph and false of an average. `marketing-attribution` is an OBT model with
+    no relationships, so both sides were empty and it scored relationship F1
+    1.000 — a free top mark for measuring nothing, averaged in beside graphs
+    that were actually judged, on the same run where its entity F1 was 0.000.
+    An axis that does not apply to a graph is excluded from that axis's mean;
+    `_mean` skips `None` and `verdict` refuses an axis with nothing to judge.
     """
     if not expected and not actual:
-        return 1.0
+        return None
     hits = len(expected & actual)
     if not hits:
         return 0.0
     precision = hits / len(actual)
     recall = hits / len(expected)
     return 2 * precision * recall / (precision + recall)
+
+
+def _entity_columns(entity) -> set[str]:
+    return {canon(c.name) for c in entity.columns}
+
+
+def entity_similarity(gold_entity, candidate_entity) -> float:
+    """How much two entities look like the same table, ignoring their names.
+
+    Jaccard over canonicalised column names. Column vocabulary is the stable
+    part of a schema: two modellers asked for the same warehouse will disagree
+    about whether the table is `orders` or `fact_order_line` far more often than
+    they will disagree that it carries an order id, a customer reference, a date
+    and an amount.
+
+    Entity *type* is deliberately not part of the score. FACT/DIMENSION is a
+    label the paradigm assigns, and a provider that builds the right table and
+    labels it wrong should lose points for the label — which it does, through
+    the linter codes — rather than have the table itself go unrecognised.
+    """
+    gold_columns = _entity_columns(gold_entity)
+    candidate_columns = _entity_columns(candidate_entity)
+    if not gold_columns or not candidate_columns:
+        return 0.0
+    intersection = len(gold_columns & candidate_columns)
+    union = len(gold_columns | candidate_columns)
+    return intersection / union
+
+
+def match_entities(gold: SynthesizedModel, candidate: SynthesizedModel) -> dict[str, str]:
+    """Pair gold entities with candidate entities by content, not by name.
+
+    Returns ``{canonical gold name: canonical candidate name}`` for pairs above
+    ``ENTITY_MATCH_FLOOR``. Each entity is used at most once.
+
+    **This is the defect the first run exposed.** Scoring by name equality gave
+    `ecommerce-orders` 0.857 and `saas-subscription` 0.000 for the same model on
+    two near-identical Kimball tasks — the second is not a model that failed to
+    comprehend subscription warehousing, it is the same model choosing different
+    words, scored as though it had produced nothing. Column F1 stayed at
+    0.07-0.16 even where entity F1 was 0.857, which is the same defect one level
+    down: `customer_sk` against `customer_id`.
+
+    Greedy, highest similarity first, ties broken by name. Not optimal
+    assignment: the Hungarian algorithm would need SciPy, which this harness
+    does not depend on, and greedy differs from optimal only when two gold
+    entities compete for one candidate at similar scores — which means the
+    candidate collapsed two tables into one, and that is a real defect the score
+    should reflect rather than an artefact to be optimised away. Deterministic
+    tie-breaking matters more than optimality here: the same two graphs must
+    always produce the same number.
+    """
+    pairs = [
+        (entity_similarity(g, c), canon(g.entity_name), canon(c.entity_name))
+        for g in gold.entities
+        for c in candidate.entities
+    ]
+    pairs.sort(key=lambda p: (-p[0], p[1], p[2]))
+
+    matched: dict[str, str] = {}
+    used_candidates: set[str] = set()
+    for similarity, gold_name, candidate_name in pairs:
+        if similarity < ENTITY_MATCH_FLOOR:
+            break
+        if gold_name in matched or candidate_name in used_candidates:
+            continue
+        matched[gold_name] = candidate_name
+        used_candidates.add(candidate_name)
+    return matched
 
 
 def entity_set(model: SynthesizedModel) -> set[str]:
@@ -64,11 +142,63 @@ def column_set(model: SynthesizedModel) -> set[tuple[str, str]]:
     }
 
 
+def _entity_of(ref: str) -> str:
+    """The entity half of a `entity.column` reference.
+
+    Relationships are compared entity-to-entity rather than column-to-column:
+    the question this harness asks is whether the provider built the same star,
+    and whether it joined on `customer_sk` or `customer_id` is a column-naming
+    difference already counted once on the column axis. Counting it again here
+    would make one disagreement fail two axes.
+    """
+    return canon(ref.split(".", 1)[0])
+
+
 def relationship_set(model: SynthesizedModel) -> set[tuple[str, str, str]]:
     return {
-        (canon(r.from_ref), canon(r.to_ref), str(r.cardinality))
+        (_entity_of(r.from_ref), _entity_of(r.to_ref), str(r.cardinality))
         for r in model.relationships
     }
+
+
+def entity_scores(
+    gold: SynthesizedModel, candidate: SynthesizedModel
+) -> tuple[float | None, float | None, float | None]:
+    """Entity, column and relationship F1 computed through a content matching.
+
+    Every axis is scored in the *gold* namespace: candidate entities are
+    renamed to their matched gold counterparts first, so a structurally correct
+    schema under different names scores as correct. An unmatched candidate
+    entity keeps its own name and therefore counts against precision, which is
+    the right treatment — it is a table the gold model does not have.
+    """
+    matching = match_entities(gold, candidate)
+    rename = {c: g for g, c in matching.items()}
+
+    def as_gold(name: str) -> str:
+        return rename.get(name, name)
+
+    gold_entities = entity_set(gold)
+    candidate_entities = {as_gold(canon(e.entity_name)) for e in candidate.entities}
+
+    gold_columns = column_set(gold)
+    candidate_columns = {
+        (as_gold(canon(e.entity_name)), canon(c.name))
+        for e in candidate.entities
+        for c in e.columns
+    }
+
+    gold_relationships = relationship_set(gold)
+    candidate_relationships = {
+        (as_gold(a), as_gold(b), cardinality)
+        for a, b, cardinality in relationship_set(candidate)
+    }
+
+    return (
+        f1(gold_entities, candidate_entities),
+        f1(gold_columns, candidate_columns),
+        f1(gold_relationships, candidate_relationships),
+    )
 
 
 def lint_codes(model: SynthesizedModel) -> list[str]:
@@ -93,9 +223,9 @@ class GraphScore:
     model_version: str
     prompt_sha256: str
     run_started_at: str
-    entity_f1: float
-    column_f1: float
-    relationship_f1: float
+    entity_f1: float | None
+    column_f1: float | None
+    relationship_f1: float | None
     gold_codes: list[str] = field(default_factory=list)
     candidate_codes: list[str] = field(default_factory=list)
 
@@ -133,6 +263,7 @@ def score_graph(
     prompt_sha256: str,
     run_started_at: str,
 ) -> GraphScore:
+    entity, column, relationship = entity_scores(gold, candidate)
     return GraphScore(
         gold_graph_id=gold_graph_id,
         provider=provider,
@@ -141,9 +272,9 @@ def score_graph(
         model_version=model_version,
         prompt_sha256=prompt_sha256,
         run_started_at=run_started_at,
-        entity_f1=f1(entity_set(gold), entity_set(candidate)),
-        column_f1=f1(column_set(gold), column_set(candidate)),
-        relationship_f1=f1(relationship_set(gold), relationship_set(candidate)),
+        entity_f1=entity,
+        column_f1=column,
+        relationship_f1=relationship,
         gold_codes=lint_codes(gold),
         candidate_codes=lint_codes(candidate),
     )
@@ -155,9 +286,9 @@ class ProviderVerdict:
     egress_class: str
     model_identifier: str
     model_version: str
-    entity_f1: float
-    column_f1: float
-    relationship_f1: float
+    entity_f1: float | None
+    column_f1: float | None
+    relationship_f1: float | None
     lint_delta: float
     systematic_new_codes: list[str]
     failures: list[str]
@@ -168,8 +299,18 @@ class ProviderVerdict:
         return not self.failures
 
 
-def _mean(values: list[float]) -> float:
-    return sum(values) / len(values) if values else 0.0
+def _mean(values: list[float | None]) -> float | None:
+    """Mean of the applicable scores, or ``None`` if none apply.
+
+    Skipping `None` rather than treating it as zero: a graph with no
+    relationships has not scored badly on relationships, it has not been asked
+    about them. Counting that as 0.0 would be the mirror of the 1.0 defect —
+    both invent a judgement where none was made.
+    """
+    applicable = [value for value in values if value is not None]
+    if not applicable:
+        return None
+    return sum(applicable) / len(applicable)
 
 
 def verdict(scores: list[GraphScore]) -> ProviderVerdict:
@@ -193,11 +334,22 @@ def verdict(scores: list[GraphScore]) -> ProviderVerdict:
     systematic = sorted(c for c, n in counts.items() if n >= NEW_CODE_GRAPH_COUNT)
 
     failures: list[str] = []
-    if entity < MIN_ENTITY_F1:
+    # An axis with nothing to judge fails rather than passing quietly. A run
+    # where no graph exercised relationships has not demonstrated that the
+    # provider can build them, and "no evidence" must not read as "met" — the
+    # same standard-12 shape as the empty-set F1 this replaced.
+    for name, value in (
+        ("entity", entity),
+        ("column", column),
+        ("relationship", relationship),
+    ):
+        if value is None:
+            failures.append(f"{name} F1 has no applicable graph in this run")
+    if entity is not None and entity < MIN_ENTITY_F1:
         failures.append(f"entity F1 {entity:.3f} < {MIN_ENTITY_F1}")
-    if column < MIN_COLUMN_F1:
+    if column is not None and column < MIN_COLUMN_F1:
         failures.append(f"column F1 {column:.3f} < {MIN_COLUMN_F1}")
-    if relationship < MIN_RELATIONSHIP_F1:
+    if relationship is not None and relationship < MIN_RELATIONSHIP_F1:
         failures.append(f"relationship F1 {relationship:.3f} < {MIN_RELATIONSHIP_F1}")
     if delta > MAX_LINT_DELTA_PER_GRAPH:
         failures.append(f"lint delta +{delta:.2f} > +{MAX_LINT_DELTA_PER_GRAPH}")
@@ -219,13 +371,24 @@ def verdict(scores: list[GraphScore]) -> ProviderVerdict:
     )
 
 
-def remedy_for(entity: float, column: float, relationship: float) -> str:
+def remedy_for(
+    entity: float | None, column: float | None, relationship: float | None
+) -> str:
     """Which remedy the *shape* of the failure indicates.
 
     Decided before any provider ran, because a remedy chosen after seeing a
     number is chosen to suit it. "Concentrated" is numeric for the same reason:
     otherwise the question is settled by whoever wants which conclusion.
+
+    An axis with no applicable graph indicates no remedy, because it made no
+    measurement. Treating it as a zero shortfall would let an unmeasured axis
+    argue for a fix, and treating it as a full one would let it dominate.
     """
+    if entity is None or column is None or relationship is None:
+        return (
+            "no remedy indicated — at least one axis had no applicable graph, "
+            "so the shape of the failure is not established"
+        )
     shortfalls = {
         "entity": max(0.0, MIN_ENTITY_F1 - entity),
         "column": max(0.0, MIN_COLUMN_F1 - column),

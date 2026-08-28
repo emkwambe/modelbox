@@ -77,6 +77,19 @@ OPTIONAL_CONSTRAINTS = (
     "max_value",
 )
 
+# The same property one level up. `EntitySchema` carries optional fields an
+# emitter can invent too, and until the first conformance run nothing here
+# looked at them: the coverage guard below derived its breadth from
+# `ColumnSchema` alone, so an entity-level field could go unmentioned by the
+# prompt and unnoticed by the gate meant to catch exactly that.
+#
+# It did. The gold graphs declare no tier, yet MISSING_SLA fired on 5 of 5
+# candidate graphs in the first run — a code that can only fire when an entity
+# claims a critical or important tier and supplies no SLA. The model invented
+# the tier, because the instruction never told it not to. Third occurrence of
+# S5-2's shape, found by a lint result rather than by this suite.
+ENTITY_CONSTRAINTS = ("tier", "freshness_sla", "agg_time_column")
+
 # Columns chosen because each invites a specific, nameable guess.
 BAIT = ("email", "status", "created_at", "age", "phone", "country_code")
 
@@ -202,6 +215,37 @@ def test_every_invented_constraint_field_is_covered() -> None:
     assert not uncovered, (
         f"optional IR fields an emitter could invent, neither exercised nor "
         f"excused: {uncovered}"
+    )
+
+
+def test_every_invented_entity_field_is_covered() -> None:
+    """The same breadth, applied to the model this guard used to skip.
+
+    A gate is only as broad as the fixtures it is parameterised over, and this
+    one was parameterised over `ColumnSchema` alone. `tier` and `freshness_sla`
+    are optional `EntitySchema` fields that reach the ODCS contract and the
+    linter, and both went unmentioned by the prompt and unnoticed here until a
+    conformance run showed a model inventing a tier on every graph.
+    """
+    ir_optional = {
+        name
+        for name, f in EntitySchema.model_fields.items()
+        if f.default in (None, False)
+    }
+    excused = {
+        "description",  # free text; absence is visible, not fabricated
+        "grain",  # the prompt asks for it, and MISSING_GRAIN lints its absence
+        # Canvas geometry, not schema. They arrive here only because their
+        # default is 0.0 and `0.0 == False` in Python, so the `f.default in
+        # (None, False)` filter sweeps in any numeric zero — worth knowing
+        # before adding an IR field that defaults to 0.
+        "canvas_position_x",
+        "canvas_position_y",
+    }
+    uncovered = sorted(ir_optional - set(ENTITY_CONSTRAINTS) - excused)
+    assert not uncovered, (
+        f"optional entity fields a model could invent, neither covered by the "
+        f"omission instruction nor excused: {uncovered}"
     )
 
 
@@ -335,7 +379,7 @@ def test_declared_constraints_do_reach_the_contract() -> None:
 # ---------------------------------------------------------------------------
 # The instruction itself
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("field", OPTIONAL_CONSTRAINTS)
+@pytest.mark.parametrize("field", OPTIONAL_CONSTRAINTS + ENTITY_CONSTRAINTS)
 def test_the_system_prompt_names_every_constraint_it_asks_to_be_omitted(
     field: str,
 ) -> None:
@@ -344,10 +388,27 @@ def test_the_system_prompt_names_every_constraint_it_asks_to_be_omitted(
     A constraint the IR accepts but the prompt never mentions is one the model
     decides about silently — which is exactly the guess this property forbids,
     arriving through the gap between the schema and the instruction.
+
+    **The field must be named in an instruction bullet, not merely appear
+    somewhere.** A bare `field in _SYSTEM_PROMPT` passes on any mention,
+    including the prose explaining why the rule exists — demonstrated: deleting
+    the `- tier, freshness_sla …` bullet outright left this green for `tier`,
+    because the sentence justifying the rule still contained the word. A guard
+    satisfied by its own rationale is checking that someone wrote about the
+    field, not that the model was told anything.
+
+    Mutation, 2026-08-28: replacing the bullet's `tier, freshness_sla` with a
+    placeholder fails this for both fields. Under the previous substring form
+    the same mutation failed for `freshness_sla` only, and `tier` stayed green.
     """
-    assert field in _SYSTEM_PROMPT, (
-        f"'{field}' is an optional constraint the IR carries, but the synthesis "
-        f"prompt gives no omit-rather-than-guess instruction for it"
+    bullets = [
+        line for line in _SYSTEM_PROMPT.split("\n") if line.strip().startswith("- ")
+    ]
+    named = [line for line in bullets if field in line.split(":", 1)[0]]
+    assert named, (
+        f"'{field}' is an optional field the IR carries, but no instruction "
+        f"bullet in the synthesis prompt names it before its colon — so the "
+        f"model is given no omit-rather-than-guess rule for it"
     )
 
 
