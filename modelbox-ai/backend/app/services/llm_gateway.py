@@ -335,6 +335,48 @@ class LLMGateway:
         route = self._config.get("task_routing", {}).get(task, {})
         return float(route.get("temperature", 0.0))
 
+    def _call_settings(self) -> dict[str, Any]:
+        """Provider-call settings from the router's ``settings:`` block.
+
+        ``request_timeout_seconds`` and ``num_retries`` have been in
+        ``config/model_router.yaml`` from the start and **nothing read them**:
+        a grep for ``timeout`` over this module returned nothing while the file
+        said 60 seconds, and a failure logged "Max retries exceeded. Total
+        attempts: 1" while the file said 3. Configuration that states a
+        behaviour the code does not implement is the defect class D2 exists to
+        prevent, arriving through the router file instead of the environment.
+
+        The timeout is the one with teeth. Without it there is no per-request
+        deadline anywhere in the call path, so a provider that accepts a
+        connection and then stalls blocks the whole failover chain
+        indefinitely — the chain never advances, the task never fails, and the
+        caller's own budget expires first. That is precisely how a hung call
+        reaches a user as "timed out waiting for synthesis" naming no provider
+        at all.
+
+        ``num_retries`` is LiteLLM's transport-level retry of the *same*
+        provider, which is a different thing from this gateway's failover to
+        the *next* one. It does not touch classification: an auth failure is
+        not retryable and still fails over immediately under D8's rules. The
+        cost of honouring it is latency on a genuinely rate-limited provider,
+        which is now three attempts before the chain moves on — that is what
+        the deployment asked for, and it is a deliberate consequence rather
+        than an oversight.
+
+        A key that is absent is left to the client library's default rather
+        than given an invented one. The purpose here is to honour what the
+        deployment declares, not to declare on its behalf.
+        """
+        block = self._config.get("settings", {}) or {}
+        kwargs: dict[str, Any] = {}
+        timeout = block.get("request_timeout_seconds")
+        if timeout is not None:
+            kwargs["timeout"] = float(timeout)
+        retries = block.get("num_retries")
+        if retries is not None:
+            kwargs["num_retries"] = int(retries)
+        return kwargs
+
     def _litellm_kwargs(self, provider_name: str) -> dict[str, Any]:
         """Translate a router provider into LiteLLM call kwargs."""
         provider = self.providers.get(provider_name)
@@ -354,6 +396,10 @@ class LLMGateway:
         api_key_env = provider.get("api_key_env")
         if api_key_env:
             kwargs["api_key"] = os.environ.get(api_key_env)
+        # Global call settings last: every provider in every chain gets the
+        # deployment's declared timeout and retry budget, because they are
+        # assembled here — the one place call kwargs are built.
+        kwargs.update(self._call_settings())
         return kwargs
 
     # -- the choke point ----------------------------------------------------
