@@ -130,6 +130,79 @@ def test_every_modelbox_env_var_binds_to_a_real_setting(service: str) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Provider credentials actually reach the container (G1)
+# ---------------------------------------------------------------------------
+# The same shape as the egress opt-in above, one layer down: the appliance
+# declared the setting and the deployment did not deliver it. Every provider key
+# was written as `${ANTHROPIC_API_KEY:-}`, and interpolation reads Compose's
+# *project directory* — this file's own folder. The documented quickstart puts
+# `.env` one level up, so a documented install resolved every key to the empty
+# string and failed at the first synthesis with the whole chain exhausted.
+#
+# Two assertions, because there are two ways to lose the keys and the second is
+# the one that would be reintroduced by someone "restoring" the explicit list:
+# `environment:` overrides `env_file:`, so an empty-defaulting entry there
+# silently wins over the file.
+KEY_SERVICES = ("modelbox-backend", "modelbox-worker", "litellm-proxy")
+PROVIDER_KEY_SUFFIX = "_API_KEY"
+
+
+@pytest.mark.parametrize("service", KEY_SERVICES)
+def test_provider_keys_are_delivered_by_file(service: str) -> None:
+    """A key read from the wrong directory is a key the container never gets."""
+    spec = SPEC["services"][service]
+    declared = spec.get("env_file") or []
+    files = [str(entry) for entry in declared]
+    assert any(name.endswith("../.env") for name in files), (
+        f"{service} has no env_file, so provider keys depend on Compose's "
+        f"project directory rather than on this file's location — the "
+        f"documented install delivers none of them"
+    )
+
+
+@pytest.mark.parametrize("service", KEY_SERVICES)
+def test_no_provider_key_is_restated_in_environment(service: str) -> None:
+    """`environment:` wins over `env_file:`, so restating a key clobbers it."""
+    restated = sorted(
+        name for name in _env(service) if name.endswith(PROVIDER_KEY_SUFFIX)
+    )
+    assert not restated, (
+        f"{service} restates {restated} under `environment:`, which overrides "
+        f"`env_file` — an empty default there silently discards the real value"
+    )
+
+
+README = Path(__file__).resolve().parents[2] / "README.md"
+
+
+def test_the_documented_install_passes_the_env_file() -> None:
+    """`env_file:` covers credentials. It does not cover interpolation.
+
+    Every `${VAR}` in the compose file is substituted before any container
+    exists, from Compose's project directory — which is `docker/`, not the
+    directory holding `.env`. So `UI_PORT`, `POSTGRES_PASSWORD`,
+    `ENCRYPTION_KEY` and `AIRGAPPED` all silently take their defaults unless
+    the invocation names the file.
+
+    Silently is the operative word for three of the four: the appliance comes
+    up on the default database password and looks fine. Only `UI_PORT` fails
+    loudly, and only because something else already holds port 3000 — which is
+    how this was found at all.
+    """
+    quickstart = [
+        line
+        for line in README.read_text(encoding="utf-8").splitlines()
+        if "docker compose" in line and "docker-compose.appliance.yml" in line
+    ]
+    assert quickstart, "README no longer documents how to start the appliance"
+    missing = [line.strip() for line in quickstart if "--env-file" not in line]
+    assert not missing, (
+        "the documented install omits --env-file, so compose-level variables "
+        f"fall back to defaults: {missing}"
+    )
+
+
 def test_the_accepted_name_set_is_not_empty() -> None:
     """Fixture sanity: if alias introspection broke, the check above passes vacuously.
 

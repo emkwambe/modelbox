@@ -46,8 +46,27 @@ modelbox-ai/
 
 ```bash
 cp .env.example .env          # then fill in provider API keys
-docker compose -f docker/docker-compose.appliance.yml up --build
+docker compose --env-file .env -f docker/docker-compose.appliance.yml up --build
 ```
+
+`.env` belongs here, beside this README, and **`--env-file .env` is not
+optional.** Two different mechanisms read that file and only one of them finds
+it on its own:
+
+- **Provider credentials** reach the containers through `env_file:` entries in
+  the compose file, whose paths resolve relative to the compose file itself. These
+  work from any directory, with or without the flag.
+- **Everything written as `${VAR}` in the compose file** — `UI_PORT`,
+  `POSTGRES_PASSWORD`, `ENCRYPTION_KEY`, `AIRGAPPED` — is substituted by Compose
+  *before* any service is created, and that substitution reads Compose's project
+  directory, which is `docker/`. Without the flag those silently fall back to
+  their defaults: the UI binds port 3000 rather than your `UI_PORT`, and the
+  database comes up with the default password.
+
+If synthesis fails with *"All providers exhausted"*, check that the file exists
+and that the keys in it are current — a retired model identifier surfaces as a
+404 and reads like a bad credential. If the UI fails to start with *"ports are
+not available"*, the `--env-file` flag is missing and `UI_PORT` never applied.
 
 - Web UI → http://localhost:3000
 - API docs → http://localhost:8000/docs
@@ -56,7 +75,7 @@ docker compose -f docker/docker-compose.appliance.yml up --build
 Enable the optional local inference engine (offline / air-gapped):
 
 ```bash
-docker compose -f docker/docker-compose.appliance.yml --profile airgap up --build
+docker compose --env-file .env -f docker/docker-compose.appliance.yml --profile airgap up --build
 ```
 
 ## Local development

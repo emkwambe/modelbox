@@ -59,13 +59,32 @@ services:
       # disable outbound calls regardless of keys or routing.
       - MODELBOX_ALLOW_PROVIDER_CALLS=${MODELBOX_ALLOW_PROVIDER_CALLS:-1}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-dev-encryption-key-change-me}
-      # Provider keys for the backend's direct LiteLLM calls (from .env).
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
+    # Provider keys come from the file, not from `${VAR:-}` interpolation.
+    #
+    # Interpolation reads Compose's *project directory*, which is this file's
+    # own folder — so `docker compose -f docker/docker-compose.appliance.yml up`
+    # run from `modelbox-ai/` looked for `docker/.env`, found nothing, and
+    # resolved every key to the empty string. The documented quickstart puts
+    # `.env` one level up, so the documented install shipped an appliance with
+    # no credentials and failed at the first synthesis with every provider in
+    # the chain exhausted.
+    #
+    # `env_file` resolves relative to this file regardless of the working
+    # directory, which is what makes it location-independent where
+    # interpolation is not. The keys must NOT also appear under `environment:`:
+    # that block wins over `env_file`, so an empty-defaulting entry there would
+    # silently clobber the value this line supplies — the original defect,
+    # reintroduced one layer down.
+    #
+    # This fixes credentials and nothing else. Every `${VAR}` elsewhere in this
+    # file — UI_PORT, POSTGRES_PASSWORD, ENCRYPTION_KEY, AIRGAPPED — is still
+    # substituted by Compose before any container exists, still from the project
+    # directory, and still falls back to its default without `--env-file .env`.
+    # That is why the README documents the flag rather than treating it as
+    # optional: the failure is silent for the database password and merely loud
+    # for the port.
+    env_file:
+      - ../.env
     volumes:
       # Give the backend read access to the same router config as the gateway.
       - ../config/model_router.yaml:/app/config/model_router.yaml:ro
@@ -103,12 +122,19 @@ services:
       # refuses would be worse than both failing.
       - MODELBOX_ALLOW_PROVIDER_CALLS=${MODELBOX_ALLOW_PROVIDER_CALLS:-1}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-dev-encryption-key-change-me}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
+    # See the backend service: keys arrive by file, and must not be restated
+    # under `environment:` or that block overrides them with empty strings.
+    # The worker matters most here — it is the service that actually runs
+    # synthesis off the queue, so a worker without credentials is a queue that
+    # drains into "all providers exhausted".
+    #
+    # Mutation, 2026-08-28: replacing this block with
+    # `- ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}` — the pre-fix form — fails
+    # both `test_provider_keys_are_delivered_by_file[modelbox-worker]` and
+    # `test_no_provider_key_is_restated_in_environment[modelbox-worker]`, and
+    # nothing else.
+    env_file:
+      - ../.env
     volumes:
       - ../config/model_router.yaml:/app/config/model_router.yaml:ro
     # The worker runs Celery, not the HTTP server, so the backend image's
@@ -129,12 +155,11 @@ services:
     volumes:
       # LiteLLM proxy reads its own model_list config (not model_router.yaml).
       - ../config/litellm_config.yaml:/app/config.yaml:ro
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - INTERNAL_VLLM_KEY=${INTERNAL_VLLM_KEY:-}
+    # Same reason as the backend and worker: interpolation resolved these to
+    # empty strings under the documented install, so the proxy's model_list
+    # authenticated with nothing.
+    env_file:
+      - ../.env
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     restart: unless-stopped
 
