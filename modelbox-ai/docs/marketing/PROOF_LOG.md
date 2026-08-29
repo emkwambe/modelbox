@@ -293,12 +293,17 @@ relied on. See `docs/sprint-5-progress.md`.
 
 **Honest limits**, each of which would otherwise be read into the claim:
 
-* **There is no operator-facing view yet.** The ledger is queryable SQL. "An
+* ~~**There is no operator-facing view yet.** The ledger is queryable SQL. "An
   operator can answer *what left our network* without engineering help" is D4
-  and is not built, so this claim must not be stated as a UI capability.
-* **Attribution is not yet populated.** `model_id`, `user_id` and
+  and is not built, so this claim must not be stated as a UI capability.~~
+  **Lifted 2026-08-29 — see PL-009.** Struck rather than deleted: the limit was
+  true when written and the dates are what make the claim auditable.
+* ~~**Attribution is not yet populated.** `model_id`, `user_id` and
   `workspace_id` exist and are nullable, and the three call sites do not yet
-  pass them. Today the ledger answers *what, when, where to* — not *who*.
+  pass them. Today the ledger answers *what, when, where to* — not *who*.~~
+  **Lifted 2026-08-29 — see PL-009.** Rows written before that date carry no
+  actor and never will; the view reports them as unattributable rather than
+  omitting them.
 * **Token counts are best-effort.** Read off the provider response when it is
   shaped as expected, recorded as null when it is not. Recording "unknown"
   honestly beats inventing a number, but they are not a billing record.
@@ -316,6 +321,68 @@ review. **Not** usable as a claim about a ledger UI.
 
 ---
 
+## PL-009 — An operator can see what left the network, and what we cannot account for
+
+**Claim:** "Open the egress ledger and see every request this appliance made to
+a model provider: when it went, which provider and residency class, whether it
+succeeded, how many tokens it cost, and which of your people caused it. Where we
+cannot attribute a request, the page says so and counts it rather than leaving
+it out."
+
+**Evidence:** `test_egress_ledger_view.py`, six passing tests over the
+operator-facing endpoint, and `test_egress_attribution.py`, four over the
+attribution that fills it. The pair matters: the second says every call site
+records an actor, the first says an operator can read it.
+
+The load-bearing ones are `test_rows_scoping_cannot_show_are_counted_not_dropped`
+and `test_a_user_with_no_workspaces_still_learns_of_unattributed_egress`, and
+`test_every_call_site_attributes_its_request`.
+
+**Why it is stronger than it looks — the view is required to admit its own
+blind spot.** The ledger is workspace data, so the page is scoped by
+membership, and rows written before an actor was known belong to no workspace:
+scoping returns them to nobody. A view that simply omitted them would let an
+operator read "one request left the network" from a ledger holding five, and the
+omission is invisible exactly where a governance answer must be complete. The
+count is asserted, and hard-coding it to zero — the natural way to write the
+endpoint if the gap is not front of mind — fails those two tests and nothing
+else.
+
+The attribution guard is structural rather than behavioural, for the reason D3
+was re-specified in this sprint: a test exercising three call sites says nothing
+about a fourth. It walks the AST of every `structured_completion` call in `app/`
+and names the file and line of any that omits an actor.
+
+**Verified against the running appliance, not only in tests.** A live synthesis
+on 2026-08-29 produced four attributed rows showing failover from
+`anthropic_cloud` (invalid key) to `gemini_cloud`, with 2,311 prompt / 8,292
+completion tokens recorded on the success — and the page reported four earlier
+rows, written before the attribution wiring existed, as unattributable. The
+honest case arrived on its own rather than being staged.
+
+**Honest limits:**
+
+* **Rows written before 2026-08-29 carry no actor**, permanently. They are
+  counted, not shown, and no backfill can invent who caused them.
+* **Scoping is by workspace membership, not by an operator role.** Someone who
+  belongs to no workspace sees no rows — only the unattributable count. There is
+  no appliance-wide "see everything" view, so a single operator cannot read the
+  whole ledger from the UI unless they are a member of every workspace.
+* **Metadata only.** The ledger stores a prompt's SHA-256 and length, never its
+  text, and this view does not widen that. It answers *that* something was sent
+  and *what it cost*, never *what was said*.
+* **Token counts remain best-effort**, inherited from PL-008.
+
+**Verified:** 2026-08-29 · **Sprint:** 5 · **Version:** unreleased
+**Expires:** if the endpoint stops reporting `unattributed`, if a call site
+reaches the gateway without an actor (asserted structurally, so loudly), or if
+any prompt content reaches the response.
+**Usable in:** security FAQ, regulated-buyer review, landing page egress
+section. **Not** usable as a claim that one person can see every workspace's
+egress.
+
+---
+
 ## Claims explicitly NOT yet provable
 
 Recorded so nobody reaches for them early. Each becomes an entry when its test
@@ -327,5 +394,5 @@ passes.
 | "Data contracts are wire-stable" | H6 — Protobuf tags shift when a column is inserted | 3 |
 | "Our contracts are valid ODCS" | H2 — stamped v0.9.3, missing required v3.1.0 fields | 3 |
 | "Generated test data satisfies the generated contract" | H1 — seed ignores declared lengths and quality rules | 4 |
-| "We can *show you* everything that left your network" | D4 — the ledger exists and is recorded (PL-008), but there is no operator-facing view; it is queryable SQL only | 5 |
+| ~~"We can *show you* everything that left your network"~~ **now PL-009** (2026-08-29), with one wording caveat: the view is workspace-scoped, so "everything" is everything *in the workspaces you belong to*, plus a count of what cannot be attributed | — | 5 |
 | "Governed contracts and semantic layers, not just schemas" | B1 + H2 together | 3 |

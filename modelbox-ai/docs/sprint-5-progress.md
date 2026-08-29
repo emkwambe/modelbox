@@ -18,15 +18,23 @@ every commit boundary, not at sprint end.
 
 ---
 
-## Current state — last verified 2026-08-12, at `Task 5 harness`
+## Current state — last verified 2026-08-29, after the ledger view
 
 A recorded baseline, so a restart can tell whether a number *moved* rather than
 only what it is. A count that differs from this table is a finding, and the
 commit that moved it is where to look.
 
+**The app-suite count moved deliberately: 572 → 613.** The +41 are new tests,
+not new behaviour discovered by old ones — `test_router_call_settings` (5),
+`test_conformance_metric` (15), `test_egress_attribution` (4),
+`test_egress_ledger_view` (6), and additions to
+`test_appliance_configuration` and `test_omission_is_not_fabrication`. Every
+other row is unchanged, which is the point of recording them: the xfail
+inventory and the Ruff count did not move while forty-one tests were added.
+
 | Measure | Value | How |
 | :-- | :-- | :-- |
-| App suite | **572 passed, 36 skipped, 18 xfailed** | `cd backend && .venv/Scripts/python -m pytest -q` |
+| App suite | **613 passed, 36 skipped, 18 xfailed** (was 572 on 2026-08-12) | `cd backend && .venv/Scripts/python -m pytest -q` |
 | App-suite non-preview xfails | **0** — S5-1 and S5-2 fixed | markers removed; the tests now assert the fixed behaviour |
 | Fidelity, non-preview xfails | **0** | `MODELBOX_FIDELITY_STRICT=1 .venv-tools/Scripts/python -m pytest tests/test_artifact_fidelity.py -m "not preview" -q` |
 | Fidelity, preview xfails | **18** | same, with `-m "preview"` |
@@ -1216,15 +1224,150 @@ timed rather than refuted.
 
 ## Remaining
 
+*Updated 2026-08-29. The nine commits of 28–29 August are recorded below under
+"The session of 28–29 August"; this table is their summary.*
+
 | Task | State |
 | :-- | :-- |
 | 2 — Per-task residency (D5, D8) | **done** |
 | 3 — Air-gapped mode that proves itself (D6, D7, Q1) | **done** |
 | 4 — Cross-artifact consistency gate (standard 10) | **done** — found and fixed an Avro/DDL/ODCS disagreement |
-| 5 — Provider conformance harness (D10) | **next** — own session; threshold in writing before the first call |
+| 5 — Provider conformance harness (D10) | **harness done, metric rewritten, runs outstanding** — the instrument the first run invalidated is fixed; D10 needs the cloud half re-run under it plus a local half |
 | 6 — Security FAQ (G2) | not started |
-| 7 — Unassisted install (G1) | pending an evaluator; Eddy arranges |
+| 7 — Unassisted install (G1) | pending an evaluator; **its blocker is fixed** — the documented install delivered no API keys |
 | 8 — One Trainer lab (H4) | not started |
+| — D4 (carried forward) | **DONE, criterion MET** — attribution wired and an operator-facing ledger view; PL-009 |
 
-Carried forward for D4: wiring `model_id` / `user_id` / `workspace_id` from the
-three call sites, without which the ledger cannot answer "who".
+~~Carried forward for D4: wiring `model_id` / `user_id` / `workspace_id` from the
+three call sites, without which the ledger cannot answer "who".~~ **Done
+2026-08-29.**
+
+---
+
+## The session of 28–29 August
+
+**Written after the fact, which is the first thing to record.** This file opens
+with the rule that it is written at every commit boundary, and the reason: two
+of Task 1's three mutants were lost to a restart because they existed only in
+chat. Nine commits were made across these two days and this file was updated
+after the last of them, not during. The reasoning survived because it went into
+the commit messages instead — which is luck in the shape of a habit, not the
+discipline the rule asks for.
+
+### The metric was wrong in the way the first run said it was
+
+`8c54a71`. Entities are now matched by column-vocabulary overlap and candidates
+renamed into the gold namespace before any axis is scored; relationships compare
+entity-to-entity, so one naming disagreement costs one axis rather than two.
+`f1()` returns `None` where an axis does not apply, `_mean` skips it, and an
+axis with *no* applicable graph now fails rather than passing quietly.
+
+**The pass thresholds were not touched** — 0.80 / 0.70 / 0.60 stand as committed
+in `b6a3e1a`. One new number, `ENTITY_MATCH_FLOOR`, cannot claim the
+threshold-before-output property and the threshold module says so in full rather
+than implying otherwise.
+
+Both directions are mutation-proven, because a loosened metric needs its
+failures pinned harder than its successes:
+
+* `match_entities` returning `{}` — the old name-equality metric exactly — fails
+  the rename-invariance test at 0.0, reproducing the reported defect.
+* Dropping the match floor to 0.0 fails "a different schema scores low": a SaaS
+  warehouse scores 0.857 against a healthcare EHR.
+
+The runner now persists candidate graphs. The first run kept only scores, so
+when the metric proved wrong there was nothing to re-score.
+
+### MISSING_SLA was not a scoring artefact — S5-2, third occurrence
+
+The gold graphs declare no tier, and the code can only fire when an entity
+claims a critical or important tier with no SLA. **The model was inventing the
+tier.** The omit-rather-than-guess instruction covered six column constraints
+and never mentioned `tier` or `freshness_sla`, so a model supplying one was
+obeying the prompt.
+
+The guard that should have caught it derived its breadth from `ColumnSchema`
+alone — standard 11 applied to one model and not the other. It now covers
+`EntitySchema` and immediately caught two more fields.
+
+Tightening it exposed a weakness in the guard itself: `field in _SYSTEM_PROMPT`
+is satisfied by any mention, **including the prose explaining the rule**.
+Deleting the instruction bullet left it green for `tier`, because the sentence
+justifying the rule still contained the word. It now requires an instruction
+bullet.
+
+### D4, both halves
+
+`73f7211` and `10a2855`. The identity columns had existed since migration 0015
+with every call site leaving them null. The guard is structural for the reason
+D3 was re-specified this sprint — an AST scan over every `structured_completion`
+call, naming file and line.
+
+The view is workspace-scoped, and **reports what scoping cannot show**. Rows
+written before the wiring belong to no workspace, so scoping returns them to
+nobody; a view that omitted them would let an operator read "one request left"
+from a ledger holding five. Hard-coding that count to zero fails exactly the two
+tests that assert on what the page cannot show.
+
+Verified on the running appliance: a live synthesis produced four attributed
+rows showing failover from `anthropic_cloud` to `gemini_cloud` with real token
+counts, and the banner reported four earlier rows as unattributable — the honest
+case arriving on its own rather than being staged.
+
+### Three defects found by driving the product, not the tests
+
+`76d9754`. The canvas header reserved a hard-coded 320px for a content-sized
+fixed badge measuring 456px, so **"Export artifacts" was unclickable by a human**
+at every viewport. Both the reservation and the badge anchor right, so the
+overshoot was identical at 1440 and 1920. One declared constant now, imported
+rather than restated — the trainer page carried the same literal and would have
+acquired the same collision.
+
+A library template loaded onto the canvas left `modelId: null` by design, so
+every header action was disabled with nothing explaining why. And a job that
+never started was reported as "Timed out waiting for synthesis" while
+`job.status` sat in scope saying otherwise.
+
+### G1's blocker: the documented install delivered no API keys
+
+`f3bc9b1`. Every provider key was written as `${VAR:-}`, and Compose resolves
+interpolation from its *project directory* — the folder holding the compose
+file, not the folder holding `.env`. The documented quickstart therefore
+produced an appliance with every key empty, failing at the first synthesis with
+the whole chain exhausted in 23 seconds.
+
+`env_file:` fixes credentials because its paths resolve relative to the compose
+file. **It fixes nothing else**: every `${VAR}` elsewhere — `UI_PORT`,
+`POSTGRES_PASSWORD`, `ENCRYPTION_KEY`, `AIRGAPPED` — still needs
+`--env-file .env`, and three of those four fail silently. Only `UI_PORT` fails
+loudly, which is how this half was found: the UI failed to bind during a rebuild
+run without the flag.
+
+### The Sprint 4 watch item recurred, so it is no longer a watch item
+
+`340927e`. The migration gate failed once in a full run and passed 4/4 isolated.
+The qualifier: that run was concurrent with container rebuilds from this same
+session, so it is a recurrence under self-inflicted contention.
+
+The defect is visible without any run. The fixture probed for a free port,
+**closed the socket**, then asked Docker to bind it. Sprint 2 replaced a fixed
+port with that probe; what it left is the same race one order smaller. Publishing
+`0:5432` and reading the mapping back removes the interval rather than shortening
+it. And readiness was `docker exec pg_isready`, which asks the server *inside*
+the container — true whether or not the published mapping works, which is why a
+lost port surfaced later as a migration error rather than a harness one.
+
+### Also found, not yet fixed
+
+* **`request_timeout_seconds` and `num_retries` were read by nothing** — fixed
+  in `d835c5b`, and worth recording as a *category*: configuration that states a
+  behaviour the code does not implement, arriving through the router file rather
+  than the environment. D2 covers the environment form.
+* **`NEXT_PUBLIC_API_URL` in the compose file is inert.** Next.js inlines
+  `NEXT_PUBLIC_*` at build time; `Dockerfile.frontend` takes no build arg, so the
+  value is baked from an unset variable and the bundle falls back to the code
+  default. It works only because that default matches. Third instance of the
+  same category. **Open.**
+* **Four Proof Log claims remain blocked on findings closed in Sprints 3–4** —
+  earned in passing tests, unusable by rule E2 because no `PL-` entry names
+  them. **Open**, and the same shape as the D4 row this session closed.
