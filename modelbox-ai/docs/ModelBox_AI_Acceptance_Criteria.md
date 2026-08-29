@@ -146,7 +146,7 @@ fails on the pair that matters.
 | ID | Criterion | Evidence | Sprint |
 |---|---|---|---|
 | G1 ◆ | An evaluator can install the appliance and export a working artifact without assistance | Unassisted install transcript from someone who has never seen it | 5 |
-| G2 ◆ | A security reviewer's standard questions — what leaves, where it goes, how to stop it — are answerable from documentation alone | Security FAQ doc | 5 |
+| G2 ◆ **MET** | A security reviewer's standard questions — what leaves, where it goes, how to stop it — are answerable from documentation alone | `docs/SECURITY_FAQ.md`, one section per question, every capability statement carrying a `PL-` id (PL-008 what leaves, PL-010 how to stop it, PL-009 what is recorded). `test_security_faq_cites_real_proof.py` fails if the FAQ cites an entry that does not exist, if an answer section states capabilities citing nothing, or if the "what we do not claim" section loses its disclosures — so E2 is enforced on this surface rather than promised. **Limit:** no external reviewer has read it yet; that would be stronger evidence than the document's own structure | 5 |
 | G3 ◆ | Every landing page claim traces to a Proof Log ID | Claim-to-test map | 7 |
 | G4 | Brownfield path works: point at a warehouse, get a governance audit and remediation backlog | Introspection walkthrough | 5 |
 | G5 | The differentiator line — governed contracts and semantic layers, not just schemas — is true and stated | Product surface | 3 (true), 7 (stated) |

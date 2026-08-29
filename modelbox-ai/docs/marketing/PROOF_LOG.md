@@ -383,6 +383,71 @@ egress.
 
 ---
 
+## PL-010 — There are two independent ways to stop egress, and both are tested
+
+**Claim:** "You can stop this appliance talking to any external model provider in
+two ways that do not depend on each other. Set `AIRGAPPED=true` and every task
+resolves to a local runtime, with cloud providers stripped at route resolution
+rather than declined later. Or set `MODELBOX_ALLOW_PROVIDER_CALLS=0` and the
+gateway refuses before it constructs a client at all. Neither requires deleting
+your API keys, and the air-gapped path is tested with every key present."
+
+**Evidence:** `test_airgap_routing.py`, nine passing tests, and
+`test_egress_choke_point.py` for the fail-closed gate —
+`test_provider_call_without_the_opt_in_is_refused` and
+`test_the_refusal_precedes_any_network_attempt`.
+
+**Why it is stronger than it looks — the air-gap suite runs with the keys
+loaded.** The obvious way to test air-gapped mode is to unset the credentials,
+which proves nothing: a run with no keys cannot reach a provider whatever the
+routing does. `test_the_sentinels_are_actually_present` asserts every provider
+key is populated with a recognisable sentinel *first*, and
+`test_an_airgapped_run_sends_no_cloud_key` then asserts none of them is sent. The
+discriminating case is
+`test_stripping_is_what_makes_a_fall_through_task_local`: it distinguishes a task
+that is local because the routing stripped its cloud options from one that merely
+happens to fall through to a local provider, which is the difference between a
+control and a coincidence.
+
+`test_a_route_that_would_use_a_cloud_key_is_refused_at_resolution` pins *when*
+the refusal happens. Refusing at resolution rather than at the call means the
+request is never assembled; the second gate is placed ahead of client
+construction for the same reason, since a refusal issued after the SDK has opened
+a connection is not a refusal.
+
+**Why the two are independent, and why that matters to a reviewer.**
+`AIRGAPPED` is the residency control: it changes which providers a task may
+resolve to. The opt-in is a fail-closed library switch: it stops the gateway
+regardless of routing or keys. A reviewer can therefore verify one without
+trusting the other, and neither is the same mechanism wearing a different name —
+`test_airgapped_remains_the_residency_control` asserts the deployment keeps them
+distinct.
+
+**Honest limits:**
+
+* **Air-gapped mode needs a local runtime to be useful.** With `AIRGAPPED=true`
+  and no local engine running, tasks resolve local-only and then fail. That is
+  the correct behaviour and it is not a silent fallback to cloud, but it means
+  the mode is a deployment choice, not a switch to flip casually.
+* **D7 is about shipping what the defaults name.** Every air-gapped provider
+  resolves to a compose service or is declared bring-your-own, and no air-gapped
+  primary is BYO — asserted, after a sprint in which the default pointed at a
+  container the appliance does not ship.
+* **This says nothing about a compromised host.** These are controls over what
+  the application does, not a sandbox. An operator with shell on the box can
+  make network calls the appliance did not.
+* **Neither control encrypts anything.** They govern whether a request is made,
+  not what a network observer sees.
+
+**Verified:** 2026-08-29 · **Sprint:** 5 · **Version:** unreleased
+**Expires:** if `AIRGAPPED` stops stripping cloud providers at resolution, if the
+opt-in stops preceding client construction, or if the two flags collapse into
+one. All three are asserted.
+**Usable in:** security FAQ, regulated-buyer review, air-gap positioning.
+**Not** usable as a claim about host hardening or transport security.
+
+---
+
 ## Claims explicitly NOT yet provable
 
 Recorded so nobody reaches for them early. Each becomes an entry when its test

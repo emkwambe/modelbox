@@ -1233,7 +1233,7 @@ timed rather than refuted.
 | 3 — Air-gapped mode that proves itself (D6, D7, Q1) | **done** |
 | 4 — Cross-artifact consistency gate (standard 10) | **done** — found and fixed an Avro/DDL/ODCS disagreement |
 | 5 — Provider conformance harness (D10) | **harness done, metric rewritten, runs outstanding** — the instrument the first run invalidated is fixed; D10 needs the cloud half re-run under it plus a local half |
-| 6 — Security FAQ (G2) | not started |
+| 6 — Security FAQ (G2) | **done, criterion MET** — `docs/SECURITY_FAQ.md`, with PL-010 written for the two egress controls and a gate that fails if the FAQ outruns the Proof Log |
 | 7 — Unassisted install (G1) | pending an evaluator; **its blocker is fixed** — the documented install delivered no API keys |
 | 8 — One Trainer lab (H4) | not started |
 | — D4 (carried forward) | **DONE, criterion MET** — attribution wired and an operator-facing ledger view; PL-009 |
