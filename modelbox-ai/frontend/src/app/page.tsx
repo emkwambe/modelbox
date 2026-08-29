@@ -202,6 +202,11 @@ export default function HomePage() {
           <Link href="/settings/api-keys" style={navLink}>
             API keys
           </Link>
+          {/* D4 asks that an operator answer "what left our network" without
+              engineering help. A page nobody can navigate to is help. */}
+          <Link href="/settings/egress" style={navLink}>
+            Egress
+          </Link>
           <Link href="/docs" style={navLink}>
             Docs
           </Link>

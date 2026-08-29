@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     auth,
     connectors,
+    egress,
     jobs,
     models,
     trainer,
@@ -26,5 +27,6 @@ api_router.include_router(transform.router)
 api_router.include_router(workspaces.router)
 api_router.include_router(trainer.router)
 api_router.include_router(connectors.router)
+api_router.include_router(egress.router)
 
 __all__ = ["api_router"]

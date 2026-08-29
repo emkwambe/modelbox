@@ -164,6 +164,50 @@ class ModelInfo(BaseModel):
     version_number: int
 
 
+class EgressEventOut(BaseModel):
+    """One row of the egress ledger, as an operator reads it (D4).
+
+    The prompt itself is deliberately absent. The ledger stores a SHA-256 and a
+    character count, never the text, so this view can be opened by anyone who
+    can see the workspace without re-exposing the content that left. The digest
+    still answers "was this the same prompt" across the rows of a failover
+    chain, which is the question an operator actually asks.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    egress_id: uuid.UUID
+    attempt_id: uuid.UUID
+    event: str
+    task: str
+    provider: str
+    egress_class: str
+    prompt_sha256: str
+    prompt_chars: int
+    model_id: uuid.UUID | None = None
+    user_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    error: str | None = None
+    occurred_at: datetime.datetime
+
+
+class EgressLedgerPage(BaseModel):
+    """A page of ledger rows, plus what the page could not show.
+
+    ``unattributed`` is the count of rows carrying no workspace, which
+    workspace scoping cannot return to anybody. Reporting it is the difference
+    between "nothing else left the network" and "nothing else that we can
+    attribute left the network" — and a governance view that quietly rounds the
+    second into the first is worse than no view, because it is believed.
+    """
+
+    events: list[EgressEventOut] = Field(default_factory=list)
+    total: int
+    unattributed: int
+
+
 class WorkspaceInfo(BaseModel):
     """A workspace the caller belongs to, with their role."""
 

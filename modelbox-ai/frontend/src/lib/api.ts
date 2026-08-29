@@ -25,6 +25,7 @@ import type {
   DictionaryFormat,
   DiffRequest,
   DiffResponse,
+  EgressLedgerPage,
   Entity,
   ExportFormat,
   ExportResponse,
@@ -163,6 +164,17 @@ export async function gradeSubmission(payload: {
 // --- Workspaces & model management (RBAC) ---
 export async function listWorkspaces(): Promise<WorkspaceInfo[]> {
   const { data } = await apiClient.get<WorkspaceInfo[]>('/workspaces');
+  return data;
+}
+
+export async function listEgressEvents(params?: {
+  provider?: string;
+  event?: string;
+  limit?: number;
+}): Promise<EgressLedgerPage> {
+  const { data } = await apiClient.get<EgressLedgerPage>('/egress/events', {
+    params: { limit: 200, ...params },
+  });
   return data;
 }
 

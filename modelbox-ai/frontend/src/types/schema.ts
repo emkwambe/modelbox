@@ -187,6 +187,32 @@ export interface WorkspaceInfo {
   role: string;
 }
 
+/** One row of the egress ledger (D4). Metadata only — never the prompt text. */
+export interface EgressEvent {
+  egress_id: string;
+  attempt_id: string;
+  event: string;
+  task: string;
+  provider: string;
+  egress_class: string;
+  prompt_sha256: string;
+  prompt_chars: number;
+  model_id: string | null;
+  user_id: string | null;
+  workspace_id: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  error: string | null;
+  occurred_at: string;
+}
+
+export interface EgressLedgerPage {
+  events: EgressEvent[];
+  total: number;
+  /** Rows carrying no workspace, which scoping can return to nobody. */
+  unattributed: number;
+}
+
 export interface ApiKeyInfo {
   api_key_id: string;
   workspace_id: string;
