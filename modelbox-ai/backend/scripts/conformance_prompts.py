@@ -47,6 +47,7 @@ paradigm**, plausibly arrive at the gold entity set?
 | `healthcare-ehr` | 3NF | Yes — four operational concepts, stated as normalised with no central fact |
 | `banking-datavault` | DATA_VAULT | Yes, **once the paradigm is given.** Two business concepts, an association between them, and separately-historised descriptive attributes maps onto hub/link/satellite by Data Vault convention |
 | `marketing-attribution` | OBT | Yes, **once the paradigm is given.** A single wide interaction row is the OBT answer; without the paradigm the default answer is a star, which is why this was unanswerable before |
+| `aml-financial-crime` | KIMBALL | Yes, **with a stated caveat.** It is much the largest graph, and the alert / investigation / outcome chain can reasonably be modelled with fewer entities than the gold set uses — a model that merges them is making a defensible modelling choice, not a mistake. Under name-equality scoring that would have read as near-total failure; under the structure-aware metric a merged entity matches on column overlap and scores as partial, which is the honest reading. Recorded here because it is the one graph where a *correct* answer can legitimately differ in entity count |
 
 **No graph is excluded.** The two previously judged not well-posed —
 `banking-datavault` and `marketing-attribution` — become answerable once the
@@ -69,6 +70,29 @@ PROMPT_TEMPLATE: Final[str] = (
 )
 
 DESCRIPTIONS: Final[dict[str, str]] = {
+    "aml-financial-crime": (
+        "A retail bank monitoring customer activity for signs of money "
+        "laundering. Analytics cover what moved, who moved it, which monitoring "
+        "conditions were met, and how the resulting work was resolved. The bank "
+        "tracks the people and organisations it holds relationships with, "
+        "including those who ultimately own or control them; the due-diligence "
+        "record held for each one, covering how their identity was verified and "
+        "how risky they are judged to be; the accounts they hold; the external "
+        "parties they send money to and receive it from, who are usually not "
+        "themselves customers; and the devices activity is initiated from, since "
+        "the same device appearing for several unrelated customers is itself a "
+        "signal. It also tracks the monitoring conditions it runs, each of which "
+        "has a threshold it was tuned to and a period during which that version "
+        "was in force, because a review months later must establish what the "
+        "condition said at the moment it was met rather than what it says now; "
+        "each occasion a condition was met; the unit of analyst work these "
+        "occasions are grouped into for review; the work carried out on it; and "
+        "how that work concluded. A calendar is shared across the measurable "
+        "events. The grain of the central fact is one movement of money on one "
+        "account with one external party — a leg rather than a whole transfer, "
+        "since a transfer between two customers of the same bank is one movement "
+        "of money seen twice."
+    ),
     "ecommerce-orders": (
         "An online retailer selling physical goods, which needs analytics over "
         "what was sold, to whom, and at what value. The business tracks the "

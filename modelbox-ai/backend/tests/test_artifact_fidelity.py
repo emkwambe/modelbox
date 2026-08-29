@@ -583,11 +583,38 @@ def test_gold_mirror_matches_templates_ts(tmp_path: Path) -> None:
 
 
 def test_templates_ts_is_the_only_gold_source() -> None:
-    """Guard the mirror's provenance: five graphs, extracted, none hand-added."""
+    """Guard the mirror's provenance: extracted from the library, none hand-added.
+
+    The claim is that every gold graph came from `templates.ts` and nothing was
+    written into the mirror by hand. That is a statement about *provenance*, and
+    it is checked by comparing the two sets — a graph in the mirror with no
+    template behind it fails here whatever the totals are.
+
+    It previously also asserted `len(GOLD_IDS) == 5`, which was a restatement of
+    how many templates happened to exist rather than a property of anything.
+    Adding a sixth reference model to the library failed this test while every
+    emitter passed against it, which is the wrong way round: the count was the
+    only thing that objected, and it objected to the library growing. Read the
+    expected set off `templates.ts` instead, so the guard tracks the source it
+    exists to protect.
+    """
     assert _TEMPLATES_TS.is_file()
     index = json.loads((_GOLD_DIR / "index.json").read_text(encoding="utf-8"))
     assert set(index) == set(GOLD_IDS)
-    assert len(GOLD_IDS) == 5, "the Requirements Library is five gold graphs"
+
+    declared = set(
+        re.findall(
+            r"^\s*id: '([a-z0-9-]+)',",
+            _TEMPLATES_TS.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+    )
+    assert declared, "fixture sanity: no template ids parsed out of templates.ts"
+    assert set(GOLD_IDS) == declared, (
+        f"the gold mirror and the Requirements Library disagree: "
+        f"mirror-only={sorted(set(GOLD_IDS) - declared)}, "
+        f"library-only={sorted(declared - set(GOLD_IDS))}"
+    )
 
 
 _EXPORT_PANEL = (
@@ -1293,7 +1320,16 @@ def test_cube_boolean_dimensions_are_boolean(gid: str, tmp_path: Path) -> None:
 @pytest.mark.parametrize("gid", gold_params({
     gid: "M3: LookML excludes the primary key from measures but not foreign "
          "keys, so SUM() over an FK is emitted. Preview — not scheduled."
-    for gid in ("saas-subscription", "ecommerce-orders", "healthcare-ehr")
+    # Every graph whose foreign keys are numeric. `banking-datavault` uses
+    # CHAR hash keys and `marketing-attribution` is a single-table OBT, so
+    # neither exhibits it. `aml-financial-crime` is a Kimball star with
+    # INTEGER surrogate keys and exhibits it exactly as the other stars do.
+    for gid in (
+        "saas-subscription",
+        "ecommerce-orders",
+        "healthcare-ehr",
+        "aml-financial-crime",
+    )
 }))
 def test_lookml_no_measure_over_foreign_key(gid: str) -> None:
     fks = _fk_columns(GOLD[gid].model)

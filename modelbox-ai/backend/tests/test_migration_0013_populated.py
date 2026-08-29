@@ -42,6 +42,22 @@ BACKEND = Path(__file__).resolve().parents[1]
 REPO = BACKEND.parents[1]
 GOLD_DIR = BACKEND / "tests" / "fixtures" / "gold"
 
+
+def _gold_graph_count() -> int:
+    """How many gold graphs the mirror holds, counted rather than restated.
+
+    This was a literal `5`, and adding a sixth reference model to the
+    Requirements Library failed three migration tests while the migration
+    itself was fine — the assertion was measuring the size of the library, not
+    a property of the migration. The same literal appeared in the fidelity
+    harness's provenance guard and in the register's "all 12 linter codes" row,
+    which is three instances of one habit: writing down how many there are
+    today instead of asserting what must be true.
+    """
+    return len(
+        [p for p in GOLD_DIR.glob("*.json") if p.name != "index.json"]
+    )
+
 PRE_MIGRATION_REVISION = "0012_add_column_quality_rules"
 BASELINE_TAG = "v1.6.0"
 _STRICT = os.environ.get("MODELBOX_MIGRATION_STRICT") == "1"
@@ -220,7 +236,9 @@ def test_migration_0013_preserves_the_persisted_model(
     # 1. Previous schema, seeded and projected by the code that shipped it.
     _upgrade_to(baseline_worktree, postgres_dsn, PRE_MIGRATION_REVISION)
     before = _run_helper(baseline_worktree, postgres_dsn, "seed-and-export")
-    assert len(before["models"]) == 5, "expected all five gold graphs seeded"
+    assert len(before["models"]) == _gold_graph_count(), (
+        f"expected every gold graph seeded, got {sorted(before['models'])}"
+    )
     before_projection = _run_helper(
         baseline_worktree, postgres_dsn, "project-model"
     )["models"]
@@ -316,7 +334,7 @@ def test_downgrade_restores_the_previous_schema(
 
     # The old code must still be able to read the downgraded database.
     after_downgrade = _run_helper(baseline_worktree, postgres_dsn, "export-only")
-    assert len(after_downgrade["models"]) == 5
+    assert len(after_downgrade["models"]) == _gold_graph_count()
 
     result = _alembic(BACKEND, postgres_dsn, "upgrade", "head")
     assert result.returncode == 0, result.stderr[-3000:]
