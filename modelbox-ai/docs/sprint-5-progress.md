@@ -1235,7 +1235,7 @@ timed rather than refuted.
 | 5 — Provider conformance harness (D10) | **harness done, metric rewritten, runs outstanding** — the instrument the first run invalidated is fixed; D10 needs the cloud half re-run under it plus a local half |
 | 6 — Security FAQ (G2) | **done, criterion MET** — `docs/SECURITY_FAQ.md`, with PL-010 written for the two egress controls and a gate that fails if the FAQ outruns the Proof Log |
 | 7 — Unassisted install (G1) | pending an evaluator; **its blocker is fixed** — the documented install delivered no API keys |
-| 8 — One Trainer lab (H4) | not started |
+| 8 — One Trainer lab (H4) | **done, H4 and H2 both MET** — `m4_lab2_integration_review`, anchored on the defect that produced `PATTERN_EXCEEDS_LENGTH`, and it closed the last four untaught linter codes |
 | — D4 (carried forward) | **DONE, criterion MET** — attribution wired and an operator-facing ledger view; PL-009 |
 
 ~~Carried forward for D4: wiring `model_id` / `user_id` / `workspace_id` from the

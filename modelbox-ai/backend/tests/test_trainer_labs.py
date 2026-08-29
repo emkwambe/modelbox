@@ -7,6 +7,7 @@ produces on its flawed graph — so labs never drift from the appliance.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,52 @@ def _load(lab: dict) -> tuple[list[EntitySchema], list[RelationshipSchema]]:
         RelationshipSchema.model_validate(r) for r in lab["graph"]["relationships"]
     ]
     return entities, relationships
+
+
+def _linter_codes() -> set[str]:
+    """Every code the linter can emit, read off its source.
+
+    Derived rather than listed, so a new rule added to `GraphEngine` fails the
+    coverage test below until a lab teaches it. A hand-written list would go on
+    passing while the curriculum silently fell behind the appliance — the same
+    breadth failure as a gate parameterised over fixtures that do not exercise
+    the feature (standard 11).
+    """
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "services"
+        / "graph_engine.py"
+    ).read_text(encoding="utf-8")
+    return set(re.findall(r'code="([A-Z_]+)"', source))
+
+
+def test_every_linter_code_is_taught_by_some_lab() -> None:
+    """H2 — all linter codes are taught and gradeable.
+
+    A code no lab exercises is a fault the appliance reports and the curriculum
+    never prepares anyone to read. Four were in that position until the
+    integration-review lab: CYCLIC_FK, DANGLING_REF, ORPHAN_ENTITY and
+    PATTERN_EXCEEDS_LENGTH — the structural ones that only appear when separate
+    pieces of work are put together, which is precisely when a learner meets
+    them in practice.
+
+    Mutation, 2026-08-29: removing `m4_lab2_integration_review.json` fails this
+    with those four named, and nothing else in the suite notices — which is the
+    gap it was written to close.
+    """
+    taught: set[str] = set()
+    for path in _LABS:
+        lab = json.loads(path.read_text(encoding="utf-8"))
+        taught.update(flaw["code"] for flaw in lab["expected_flaws"])
+
+    codes = _linter_codes()
+    assert codes, "fixture sanity: no linter codes were found in graph_engine.py"
+    untaught = sorted(codes - taught)
+    assert not untaught, (
+        f"these linter codes are reported by the appliance but taught by no "
+        f"lab: {untaught}"
+    )
 
 
 @pytest.mark.skipif(not _LABS, reason="no Trainer labs present")

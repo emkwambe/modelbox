@@ -158,9 +158,9 @@ fails on the pair that matters.
 | ID | Criterion | Evidence | Sprint |
 |---|---|---|---|
 | H1 | One grading path; the 3-invariant rubric is retired | `trainer_service` review | 8 |
-| H2 | All 12 linter codes are taught and gradeable | Curriculum coverage test | 8 |
+| H2 **MET** | All linter codes are taught and gradeable | `test_every_linter_code_is_taught_by_some_lab` — the code set is read off `graph_engine.py` rather than listed, so a new rule fails the test until a lab teaches it. **The count in this row was wrong: there are 13 codes, not 12** — the quality rules added in Sprint U3 were never counted here, which is why the criterion is now worded to the linter rather than to a number. Four were taught by no lab until `m4_lab2` (CYCLIC_FK, DANGLING_REF, ORPHAN_ENTITY, PATTERN_EXCEEDS_LENGTH) | 8, met early in 5 |
 | H3 | Lab set-equality against linter output is preserved | `test_trainer_labs.py` still passes | 8 |
-| H4 | At least one lab derives from a real defect this programme fixed | Lab content | 8 |
+| H4 **MET** | At least one lab derives from a real defect this programme fixed | `m4_lab2_integration_review` — its headline flaw is the `VARCHAR(6)` column carrying an eight-character pattern, the contradiction that produced the `PATTERN_EXCEEDS_LENGTH` check after the seed generator was asked to satisfy both and could only choose which to break. The lab's solution notes carry that history, so the learner meets the reasoning and not just the rule | 8, met early in 5 |
 
 ---
 
