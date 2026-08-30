@@ -177,6 +177,17 @@ jobs:
           cd modelbox-ai/frontend
           npx next lint --max-warnings 0
 
+      # Added to this job rather than as a seventh job, deliberately. "Frontend
+      # Lint" is already in branch protection's required set, so the frontend
+      # tests gate merges from the moment they land. A new job would need the
+      # protection rule updated separately, and until that happened the suite
+      # would run without blocking anything — a gate that cannot fail a merge is
+      # the "skipped gate must be loud" problem wearing a green tick.
+      - name: Run Frontend Tests
+        run: |
+          cd modelbox-ai/frontend
+          npm test
+
   migrations:
     name: Alembic Single Head
     runs-on: ubuntu-latest

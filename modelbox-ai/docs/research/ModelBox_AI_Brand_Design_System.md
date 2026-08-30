@@ -10,6 +10,24 @@
 > research documents sitting alongside the PRD is how the claim drift catalogued
 > in `../PROJECT_STATE_REPORT.md` §2 arose. `README.md`, `PRD_TRD_v2.md` and the
 > release notes are reserved for promises the code keeps.
+>
+> **Superseded as the colour and type authority on 2026-08-29 by
+> `../ModelBox_AI_Design_Tokens.md`** (Sprint 6, F1/F6). Criteria F1 and F6 had
+> cited *this* file as the standard, which the register's own criterion E5
+> forbids — E5 quarantines research as "cannot be read as specification". The
+> quarantine stands; a specification was extracted from this document instead of
+> the quarantine being bent.
+>
+> **Three of the contrast ratios in §9 below are wrong, and one is wrong in the
+> unsafe direction.** Rose `#F43F5E` on white is published here as 5.3:1 "AA"
+> and measures **3.67:1** — below this document's own 4.5:1 body floor. Emerald
+> on Neutral-900 (6.4:1 → 7.04:1) and Cyan on Navy (7.8:1 → 7.47:1) are also
+> misstated. More consequentially, the table never tabulated the semantic
+> colours against a *light* ground, and every application surface except the
+> canvas is light: Emerald measures 2.54:1 on white and Amber 2.15:1, so both
+> are unusable as text there. The specification adds on-light variants this
+> document does not contain, and its published ratios are recomputed by
+> `frontend/src/styles/tokens.test.ts` so they cannot rot the same way.
 
 ## Visual Identity, Color, Typography, and Application Guidelines
 
