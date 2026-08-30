@@ -10,10 +10,14 @@
 import { Panel, useReactFlow } from '@xyflow/react';
 
 import { useCanvasStore } from '@/store/canvasStore';
+import { semantic } from '@/styles/tokens';
 
+// The panel sits on a white card, so both take the on-light variants. The
+// brand's Amber measures 2.15:1 on white — as a warning colour it would be
+// decoration rather than a signal.
 const SEVERITY_COLOR: Record<string, string> = {
-  error: '#dc2626',
-  warning: '#f59e0b',
+  error: semantic.breaking.onLight,
+  warning: semantic.preview.onLight,
 };
 
 export default function ValidationPanel() {

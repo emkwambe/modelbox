@@ -15,6 +15,10 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   plugins: [react(), tsconfigPaths()],
+  // Next's tsconfig sets `jsx: preserve` because Next does the transform. The
+  // test runner has to do it instead, and without this JSX compiles to
+  // `React.createElement` against a `React` that was never imported.
+  esbuild: { jsx: 'automatic' },
   test: {
     environment: 'jsdom',
     globals: true,

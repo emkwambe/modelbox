@@ -10,23 +10,28 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 import { useCanvasStore } from '@/store/canvasStore';
+import { color, entityAccent, semantic } from '@/styles/tokens';
 import type { EntityNode as EntityNodeType, EntityType } from '@/types/schema';
 
-/** Accent colour per entity type for quick visual scanning. */
-export const ENTITY_ACCENT: Record<EntityType, string> = {
-  TABLE: '#64748b',
-  FACT: '#2563eb',
-  DIMENSION: '#16a34a',
-  HUB: '#9333ea',
-  LINK: '#ea580c',
-  SATELLITE: '#0891b2',
-};
+/**
+ * Accent colour per entity type, re-exported from the token module.
+ *
+ * These six values used to be declared here *and* in `tailwind.config.ts`,
+ * independently. Two hand-maintained copies of the same palette is the
+ * arrangement that guarantees one of them is eventually wrong, and nothing
+ * would have reported it — the canvas would simply have drawn a colour the
+ * theme did not know about.
+ */
+export const ENTITY_ACCENT: Record<EntityType, string> = entityAccent;
 
-const ERROR_COLOR = '#dc2626';
-const WARNING_COLOR = '#f59e0b';
+// The node body is white, so status markers take the on-light variants. The
+// brand's own Emerald and Amber measure 2.54:1 and 2.15:1 here and would be
+// decorative rather than legible.
+const ERROR_COLOR = semantic.breaking.onLight;
+const WARNING_COLOR = semantic.preview.onLight;
 
 export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
-  const accent = ENTITY_ACCENT[data.entity_type] ?? '#64748b';
+  const accent = ENTITY_ACCENT[data.entity_type] ?? entityAccent.TABLE;
   const selectColumn = useCanvasStore((s) => s.selectColumn);
   const selectedColumn = useCanvasStore((s) => s.selectedColumn);
 
@@ -135,8 +140,8 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
           style={{
             padding: '2px 10px',
             fontStyle: 'italic',
-            color: '#64748b',
-            borderBottom: '1px solid #f1f5f9',
+            color: color.neutral[500],
+            borderBottom: `1px solid ${color.neutral[100]}`,
           }}
         >
           grain: {data.grain}
@@ -209,7 +214,7 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
                 {col.is_pii && (
                   <span
                     title={col.pii_type ?? 'PII'}
-                    style={{ color: '#dc2626' }}
+                    style={{ color: ERROR_COLOR }}
                   >
                     {' '}
                     ⚠

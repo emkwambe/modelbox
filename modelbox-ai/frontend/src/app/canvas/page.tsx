@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import { AUTH_BADGE_RESERVE } from '@/components/auth/AuthBadge';
+import { color, semantic } from '@/styles/tokens';
 import ERDCanvas from '@/components/canvas/ERDCanvas';
 import ColumnSemanticEditor from '@/components/canvas/ColumnSemanticEditor';
 import EntitySettingsEditor from '@/components/canvas/EntitySettingsEditor';
@@ -38,12 +39,15 @@ export default function CanvasPage() {
   const isReferenceModel = entityCount > 0 && !modelId;
 
   const issueCount = validation?.issues.length ?? 0;
+  // The header is a white bar, so the on-light variants apply. `#16a34a` — the
+  // value this used before — measures 3.30:1 on white and failed the contrast
+  // floor while looking, to a sighted reviewer on a good monitor, entirely fine.
   const validStatus = validation
     ? validation.is_valid
-      ? { label: '✓ Valid', color: '#16a34a' }
+      ? { label: '✓ Valid', color: semantic.validated.onLight }
       : {
           label: `⚠ ${issueCount} issue${issueCount === 1 ? '' : 's'}`,
-          color: '#dc2626',
+          color: semantic.breaking.onLight,
         }
     : null;
 
@@ -140,7 +144,13 @@ export default function CanvasPage() {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {saved && (
-            <span style={{ color: '#16a34a', fontSize: 12, fontWeight: 600 }}>
+            <span
+              style={{
+                color: semantic.validated.onLight,
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
               ✓ Saved
             </span>
           )}
@@ -148,7 +158,7 @@ export default function CanvasPage() {
             type="button"
             onClick={handleSave}
             disabled={!modelId || busy}
-            style={actionBtn('#16a34a')}
+            style={actionBtn(semantic.validated.onLight)}
           >
             {busy ? 'Saving…' : 'Save'}
           </button>
@@ -156,7 +166,7 @@ export default function CanvasPage() {
             type="button"
             onClick={handleRename}
             disabled={!modelId || busy}
-            style={actionBtn('#334155')}
+            style={actionBtn(color.neutral[700])}
           >
             Rename
           </button>
@@ -164,7 +174,7 @@ export default function CanvasPage() {
             type="button"
             onClick={handleDelete}
             disabled={!modelId || busy}
-            style={actionBtn('#dc2626')}
+            style={actionBtn(semantic.breaking.onLight)}
           >
             Delete
           </button>
