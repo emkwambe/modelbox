@@ -6,10 +6,17 @@
  * Browse curated starter scenarios and either populate the prompt bar
  * ("Use prompt", Mode A) or hydrate the gold-standard graph onto the canvas
  * ("Load canvas", Mode B).
+ *
+ * The dialog shell is `ui/Modal`. The search and facet row goes in its
+ * `toolbar` slot rather than in the body, which is what keeps it fixed while
+ * the results scroll — folding it into the children would have looked correct
+ * and scrolled the filters away, so `Modal.test.tsx` asserts the two are
+ * siblings rather than nested.
  */
 
 import { useMemo, useState } from 'react';
 
+import { Modal } from '@/components/ui';
 import {
   TEMPLATES,
   TEMPLATE_DOMAINS,
@@ -49,30 +56,26 @@ export default function TemplateLibraryModal({
   }, [query, domain, paradigm]);
 
   return (
-    <div style={overlay} onClick={onClose} role="presentation">
-      <div style={modal} onClick={(e) => e.stopPropagation()}>
-        <div style={header}>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>
-              📚 Business Requirements Library
-            </div>
-            <div style={{ fontSize: 12, color: '#64748b' }}>
-              Start from a gold-standard reference architecture.
-            </div>
-          </div>
-          <button type="button" onClick={onClose} style={closeBtn} aria-label="Close">
-            ✕
-          </button>
-        </div>
-
-        <div style={filters}>
+    <Modal
+      title="📚 Business Requirements Library"
+      description="Start from a gold-standard reference architecture."
+      onClose={onClose}
+      width="min(920px, 100%)"
+      toolbar={
+        <>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search templates…"
+            aria-label="Search templates"
             style={{ ...select, flex: 1, minWidth: 160 }}
           />
-          <select value={domain} onChange={(e) => setDomain(e.target.value)} style={select}>
+          <select
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            aria-label="Filter by domain"
+            style={select}
+          >
             <option value="">All domains</option>
             {TEMPLATE_DOMAINS.map((d) => (
               <option key={d} value={d}>
@@ -83,6 +86,7 @@ export default function TemplateLibraryModal({
           <select
             value={paradigm}
             onChange={(e) => setParadigm(e.target.value)}
+            aria-label="Filter by paradigm"
             style={select}
           >
             <option value="">All paradigms</option>
@@ -92,110 +96,76 @@ export default function TemplateLibraryModal({
               </option>
             ))}
           </select>
-        </div>
-
-        <div style={grid}>
-          {filtered.length === 0 && (
-            <p style={{ color: '#94a3b8', gridColumn: '1 / -1' }}>
-              No templates match your filters.
-            </p>
-          )}
-          {filtered.map((t) => (
-            <div key={t.id} style={card}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                <span style={{ fontSize: 20 }}>{t.emoji}</span>
-                <strong style={{ fontSize: 14 }}>{t.title}</strong>
-              </div>
-              <span style={paradigmBadge}>{t.paradigm}</span>
-              <p style={{ fontSize: 13, color: '#475569', margin: '4px 0' }}>
-                {t.description}
-              </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {t.highlights.map((h) => (
-                  <span key={h} style={chip}>
-                    {h}
-                  </span>
-                ))}
-              </div>
-
-              {expanded === t.id && (
-                <div style={detail}>
-                  <div style={detailLabel}>Prompt</div>
-                  <p style={detailText}>{t.rawPrompt}</p>
-                  <div style={detailLabel}>Why it&apos;s modeled this way</div>
-                  <p style={detailText}>{t.rationale}</p>
-                </div>
-              )}
-
-              <div style={{ display: 'flex', gap: 6, marginTop: 'auto', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => setExpanded(expanded === t.id ? null : t.id)}
-                  style={ghostBtn}
-                >
-                  {expanded === t.id ? 'Hide' : 'Preview'}
-                </button>
-                {onUsePrompt && (
-                  <button type="button" onClick={() => onUsePrompt(t)} style={ghostBtn}>
-                    Use prompt →
-                  </button>
-                )}
-                <button type="button" onClick={() => onLoadGraph(t)} style={primaryBtn}>
-                  Load canvas →
-                </button>
-              </div>
+        </>
+      }
+    >
+      <div style={grid}>
+        {filtered.length === 0 && (
+          <p style={{ color: '#94a3b8', gridColumn: '1 / -1' }}>
+            No templates match your filters.
+          </p>
+        )}
+        {filtered.map((t) => (
+          <div key={t.id} style={card}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 20 }}>{t.emoji}</span>
+              <strong style={{ fontSize: 14 }}>{t.title}</strong>
             </div>
-          ))}
-        </div>
+            <span style={paradigmBadge}>{t.paradigm}</span>
+            <p style={{ fontSize: 13, color: '#475569', margin: '4px 0' }}>
+              {t.description}
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {t.highlights.map((h) => (
+                <span key={h} style={chip}>
+                  {h}
+                </span>
+              ))}
+            </div>
+
+            {expanded === t.id && (
+              <div style={detail}>
+                <div style={detailLabel}>Prompt</div>
+                <p style={detailText}>{t.rawPrompt}</p>
+                <div style={detailLabel}>Why it&apos;s modeled this way</div>
+                <p style={detailText}>{t.rationale}</p>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 6, marginTop: 'auto', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setExpanded(expanded === t.id ? null : t.id)}
+                style={ghostBtn}
+              >
+                {expanded === t.id ? 'Hide' : 'Preview'}
+              </button>
+              {onUsePrompt && (
+                <button type="button" onClick={() => onUsePrompt(t)} style={ghostBtn}>
+                  Use prompt →
+                </button>
+              )}
+              <button type="button" onClick={() => onLoadGraph(t)} style={primaryBtn}>
+                Load canvas →
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
-    </div>
+    </Modal>
   );
 }
 
-const overlay: React.CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  background: 'rgba(15, 23, 42, 0.55)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  zIndex: 1000,
-  padding: 24,
-};
-
-const modal: React.CSSProperties = {
-  background: '#ffffff',
-  borderRadius: 12,
-  width: 'min(920px, 100%)',
-  maxHeight: '86vh',
-  display: 'flex',
-  flexDirection: 'column',
-  overflow: 'hidden',
-  boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-};
-
-const header: React.CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'flex-start',
-  padding: '16px 20px',
-  borderBottom: '1px solid #e2e8f0',
-};
-
-const filters: React.CSSProperties = {
-  display: 'flex',
-  gap: 8,
-  padding: '12px 20px',
-  borderBottom: '1px solid #e2e8f0',
-  flexWrap: 'wrap',
-};
-
+/*
+ * The overlay, the dialog box, the header and the filter strip used to be four
+ * more constants here. They are `.mb-modal*` now, so the scrim, the elevation
+ * and the two 1px rules are stated once for all three dialogs rather than
+ * three times with three sets of near-miss values.
+ */
 const grid: React.CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
   gap: 12,
-  padding: 20,
-  overflowY: 'auto',
 };
 
 const card: React.CSSProperties = {
@@ -276,13 +246,4 @@ const ghostBtn: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
-};
-
-const closeBtn: React.CSSProperties = {
-  border: 'none',
-  background: 'transparent',
-  fontSize: 18,
-  color: '#64748b',
-  cursor: 'pointer',
-  lineHeight: 1,
 };
