@@ -51,22 +51,29 @@
   font-size: var(--mb-type-caption-size);
 }
 
+/*
+ * `--mb-btn-tone` is the accent override, set inline by the `tone` prop. It
+ * generalises `actionBtn(color)` on the canvas page — already the best-factored
+ * button in the codebase — and the hand-rolled purple, blue and green twins on
+ * the home and trainer pages. Falling back through `var(…, default)` means a
+ * button that passes no tone is byte-identical to one that never had the prop.
+ */
 .mb-btn--primary {
-  background: var(--mb-color-blue);
-  border-color: var(--mb-color-blue);
+  background: var(--mb-btn-tone, var(--mb-color-blue));
+  border-color: var(--mb-btn-tone, var(--mb-color-blue));
   color: var(--mb-color-white);
 }
 
 .mb-btn--secondary {
   background: var(--mb-color-white);
   border-color: var(--mb-color-neutral-300);
-  color: var(--mb-color-neutral-700);
+  color: var(--mb-btn-tone, var(--mb-color-neutral-700));
 }
 
 .mb-btn--ghost {
   background: transparent;
   border-color: transparent;
-  color: var(--mb-color-neutral-600);
+  color: var(--mb-btn-tone, var(--mb-color-neutral-600));
 }
 
 .mb-btn--danger {
@@ -77,9 +84,10 @@
 
 /* Hover is scoped away from the disabled state: a disabled control that still
  * lights up on hover reads as interactive when it is not. */
+/* Darkened rather than swapped for a named colour, so the hover state follows
+ * whatever tone the button was given instead of only working for the default. */
 .mb-btn--primary:hover:not(:disabled) {
-  background: var(--mb-color-navy);
-  border-color: var(--mb-color-navy);
+  filter: brightness(0.92);
 }
 
 .mb-btn--secondary:hover:not(:disabled),
@@ -178,6 +186,10 @@
   font-size: var(--mb-type-ui-small-size);
   font-weight: 600;
   color: var(--mb-color-neutral-700);
+}
+
+.mb-field__required {
+  color: var(--mb-breaking-on-light);
 }
 
 .mb-field__description {
