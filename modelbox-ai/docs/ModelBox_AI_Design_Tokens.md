@@ -126,6 +126,46 @@ must not fail.
 | `bodySmall` | 0.875rem | 400 | 1.5 | 0.005em |
 | `caption` | 0.75rem | 500 | 1.4 | 0.02em |
 | `code` | 0.8125rem | 400 | 1.6 | 0 |
+| `uiSmall` | 0.8125rem | 400 | 1.45 | 0 |
+| `uiXSmall` | 0.6875rem | 600 | 1.3 | 0.02em |
+
+**Two scales, not one.** `display` through `code` is the *content* ramp.
+`uiSmall` and `uiXSmall` are the *UI-density* pair: dense controls, field
+labels and badges. They exist because the content ramp bottoms out at 0.75rem
+while 78% of the frontend's 158 font sizes are 13, 12 and 11px — those elements
+are not small prose, and mapping them onto the content ramp would change type on
+more than a hundred of them. `uiSmall` shares a size with `code` and not its
+role; `code` is the monospace face.
+
+---
+
+## Spacing and radius
+
+| Step | `space` | | Step | `radius` |
+| :-- | :-- | :-- | :-- | :-- |
+| `xs` | 4px | | `sm` | 4px |
+| `sm` | 8px | | `md` | 6px |
+| `md` | 12px | | `lg` | 8px |
+| `lg` | 16px | | `xl` | 12px |
+| `xl` | 24px | | `pill` | 999px |
+| `xxl` | 32px | | | |
+
+**Component padding is not a spacing token.** It is compound (`6px 12px`), it
+belongs to a component and a size rather than to a call site, and the frontend
+currently spells it 48 distinct ways across 141 uses. It is declared once per
+component and size as a CSS variable (`--mb-btn-pad-sm`, `--mb-btn-pad-md`,
+`--mb-field-pad`, `--mb-panel-pad`) and is not reachable as a token on its own.
+
+Those values are **not** rounded onto the `space` ramp. The shapes in use are
+`6px 12px`, `8px 14px` and `8px 10px`, and 6, 14 and 10 are not steps here;
+snapping them would grow every button by 4px, which is the kind of silent
+visual change the component layer exists to avoid. Three declarations replacing
+19 call-site spellings is the objective — not arithmetic purity.
+
+`radius.xl` is the modal corner. Of the four unaccounted radii in use today —
+3, 10, 12, 14 — only 12 recurs as a deliberate shape; the others are near-misses
+of steps already named here and are remapped, with any delta a reviewer judges
+perceptible recorded as a named exception rather than applied silently.
 
 ## Focus
 

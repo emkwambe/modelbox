@@ -80,6 +80,14 @@ export const type = {
   bodySmall: { size: '0.875rem', weight: 400, lineHeight: 1.5, tracking: '0.005em' },
   caption: { size: '0.75rem', weight: 500, lineHeight: 1.4, tracking: '0.02em' },
   code: { size: '0.8125rem', weight: 400, lineHeight: 1.6, tracking: '0' },
+  // The UI-density pair. The content ramp above bottoms out at 0.75rem, but
+  // 78% of the frontend's 158 font sizes are 13/12/11px — dense controls,
+  // labels and badges, which are a different scale from prose rather than
+  // small prose. Mapping them onto the content ramp would move type on more
+  // than a hundred elements; naming them moves nothing. `uiSmall` shares a
+  // size with `code` and not its role: `code` is the monospace face.
+  uiSmall: { size: '0.8125rem', weight: 400, lineHeight: 1.45, tracking: '0' },
+  uiXSmall: { size: '0.6875rem', weight: 600, lineHeight: 1.3, tracking: '0.02em' },
 } as const;
 
 export const fontFamily = {
@@ -88,7 +96,13 @@ export const fontFamily = {
 } as const;
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
-export const radius = { sm: 4, md: 6, lg: 8, pill: 999 } as const;
+
+/**
+ * `xl` is the modal corner. It is not a rounding of an existing step — the
+ * frontend uses 3, 10, 12 and 14 today, and of those only 12 recurs as a
+ * deliberate shape rather than as a near-miss of one already named here.
+ */
+export const radius = { sm: 4, md: 6, lg: 8, xl: 12, pill: 999 } as const;
 
 /**
  * The focus ring. There are zero focus declarations in the frontend today, so

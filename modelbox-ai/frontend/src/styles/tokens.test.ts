@@ -25,9 +25,12 @@ import {
   color,
   contrastRatio,
   entityAccent,
+  radius,
   relativeLuminance,
   semantic,
+  space,
   surface,
+  type,
 } from './tokens';
 
 const SPEC = join(__dirname, '..', '..', '..', 'docs', 'ModelBox_AI_Design_Tokens.md');
@@ -102,6 +105,54 @@ describe('the specification and the token module agree', () => {
     for (const value of Object.values(color.neutral)) {
       expect(spec).toContain(value.toUpperCase());
     }
+  });
+
+  it('publishes the type ramp the code exports, exactly', () => {
+    // The colour assertions above check only that a hex appears *somewhere* in
+    // the document. The type scale is a table with four values per row, so it
+    // can be checked properly: every row is parsed and compared field by field,
+    // and the row count must equal the number of exported tokens — so a token
+    // added to the code without the document fails, and so does one left in the
+    // document after the code drops it.
+    const spec = readSpec();
+    const rows = [
+      ...spec.matchAll(
+        /^\|\s*`(\w+)`\s*\|\s*([\d.]+rem)\s*\|\s*(\d+)\s*\|\s*([\d.]+)\s*\|\s*(\S+)\s*\|/gm,
+      ),
+    ];
+    expect(rows.length, 'no type rows found to check').toBe(
+      Object.keys(type).length,
+    );
+
+    const published = Object.fromEntries(
+      rows.map((r) => [
+        r[1],
+        { size: r[2], weight: Number(r[3]), lineHeight: Number(r[4]), tracking: r[5] },
+      ]),
+    );
+    expect(published).toEqual(type);
+  });
+
+  it('publishes the spacing and radius steps the code exports', () => {
+    // One table, two ramps: `space` on the left, `radius` on the right, with
+    // the right cell empty where the ramps differ in length.
+    const spec = readSpec();
+    const rows = [
+      ...spec.matchAll(
+        /^\|\s*`(\w+)`\s*\|\s*(\d+)px\s*\|\s*\|\s*(?:`(\w+)`\s*\|\s*(\d+)px\s*)?\|/gm,
+      ),
+    ];
+    expect(rows.length, 'no spacing rows found to check').toBeGreaterThan(0);
+
+    const publishedSpace: Record<string, number> = {};
+    const publishedRadius: Record<string, number> = {};
+    for (const row of rows) {
+      if (row[1] && row[2]) publishedSpace[row[1]] = Number(row[2]);
+      if (row[3] && row[4]) publishedRadius[row[3]] = Number(row[4]);
+    }
+
+    expect(publishedSpace).toEqual(space);
+    expect(publishedRadius).toEqual(radius);
   });
 
   it('states ratios that recompute to what it claims', () => {
