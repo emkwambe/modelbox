@@ -17,7 +17,9 @@ import {
   introspectConnection,
   listConnections,
 } from '@/lib/api';
-import { errMessage } from '@/lib/errors';
+import { ErrorState, LoadingState, StatusText } from '@/components/ui';
+import { errMessage, errorKind } from '@/lib/errors';
+import type { ErrorKind } from '@/lib/errors';
 import { useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { ConnectionEngine, ConnectionInfo } from '@/types/schema';
@@ -29,6 +31,18 @@ const ENGINES: { value: ConnectionEngine; label: string; enabled: boolean }[] = 
   { value: 'MYSQL', label: 'MySQL', enabled: true },
 ];
 
+/**
+ * A list load has three outcomes, and "empty" is not one of the first two.
+ *
+ * Inferring "still loading" from `items.length === 0` conflates an unfinished
+ * request with a genuinely empty account, which is how this page came to tell
+ * users with keys that they had none.
+ */
+type ListState =
+  | { status: 'loading' }
+  | { status: 'ready' }
+  | { status: 'failed'; kind: ErrorKind; message: string };
+
 export default function ConnectorsPage() {
   const router = useRouter();
   const token = useAuthStore((s) => s.token);
@@ -38,6 +52,7 @@ export default function ConnectorsPage() {
 
   const [mounted, setMounted] = useState(false);
   const [connections, setConnections] = useState<ConnectionInfo[]>([]);
+  const [listState, setListState] = useState<ListState>({ status: 'loading' });
   const [name, setName] = useState('');
   const [engine, setEngine] = useState<ConnectionEngine>('POSTGRESQL');
   const [uri, setUri] = useState('');
@@ -49,10 +64,17 @@ export default function ConnectorsPage() {
   const signedIn = mounted && Boolean(token);
 
   const refresh = useCallback(async () => {
+    setListState({ status: 'loading' });
     try {
       setConnections(await listConnections());
+      setListState({ status: 'ready' });
     } catch (e) {
-      setError(errMessage(e));
+      // Separate from `error`, which belongs to create, delete and introspect.
+      setListState({
+        status: 'failed',
+        kind: errorKind(e),
+        message: errMessage(e, 'The connections could not be loaded.'),
+      });
     }
   }, []);
 
@@ -193,7 +215,19 @@ export default function ConnectorsPage() {
           <h2 style={{ fontSize: 16, fontWeight: 700, marginTop: 28 }}>
             Connections
           </h2>
-          {connections.length === 0 ? (
+          {listState.status === 'loading' ? (
+            <LoadingState label="Loading connections…" />
+          ) : listState.status === 'failed' ? (
+            <ErrorState
+              kind={listState.kind}
+              title="Your connections could not be loaded"
+              onRetry={() => void refresh()}
+            >
+              {listState.message}
+            </ErrorState>
+          ) : connections.length === 0 ? (
+            // Only reachable once the request has finished; before this the
+            // empty state was shown while the first fetch was still open.
             <p style={{ color: '#94a3b8' }}>No connections yet.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -234,7 +268,11 @@ export default function ConnectorsPage() {
       )}
 
       {error && (
-        <p style={{ color: '#dc2626', marginTop: 16, fontSize: 13 }}>{error}</p>
+        <div style={{ marginTop: 16 }}>
+          {/* Announced as well as shown, and in the brand's error colour rather
+              than Tailwind's `#dc2626`. */}
+          <StatusText tone="breaking">{error}</StatusText>
+        </div>
       )}
     </main>
   );

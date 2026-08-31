@@ -11,9 +11,23 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 
 import { createApiKey, listApiKeys, revokeApiKey } from '@/lib/api';
-import { errMessage } from '@/lib/errors';
+import { ErrorState, LoadingState, StatusText } from '@/components/ui';
+import { errMessage, errorKind } from '@/lib/errors';
+import type { ErrorKind } from '@/lib/errors';
 import { useAuthStore } from '@/store/authStore';
 import type { ApiKeyInfo } from '@/types/schema';
+
+/**
+ * A list load has three outcomes, and "empty" is not one of the first two.
+ *
+ * Inferring "still loading" from `items.length === 0` conflates an unfinished
+ * request with a genuinely empty account, which is how this page came to tell
+ * users with keys that they had none.
+ */
+type ListState =
+  | { status: 'loading' }
+  | { status: 'ready' }
+  | { status: 'failed'; kind: ErrorKind; message: string };
 
 export default function ApiKeysPage() {
   const token = useAuthStore((s) => s.token);
@@ -21,6 +35,7 @@ export default function ApiKeysPage() {
 
   const [mounted, setMounted] = useState(false);
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
+  const [listState, setListState] = useState<ListState>({ status: 'loading' });
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,10 +47,20 @@ export default function ApiKeysPage() {
   const signedIn = mounted && Boolean(token);
 
   const refresh = useCallback(async () => {
+    setListState({ status: 'loading' });
     try {
       setKeys(await listApiKeys());
+      setListState({ status: 'ready' });
     } catch (e) {
-      setError(errMessage(e));
+      // Kept apart from `error`, which is for the create and revoke actions. A
+      // list that failed to load and a revoke that failed are different
+      // failures in different places, and merging them put a message about one
+      // at the bottom of a page still showing the other's stale content.
+      setListState({
+        status: 'failed',
+        kind: errorKind(e),
+        message: errMessage(e, 'The API keys could not be loaded.'),
+      });
     }
   }, []);
 
@@ -151,7 +176,21 @@ export default function ApiKeysPage() {
           <h2 style={{ fontSize: 16, fontWeight: 700, marginTop: 28 }}>
             Active keys
           </h2>
-          {keys.length === 0 ? (
+          {listState.status === 'loading' ? (
+            <LoadingState label="Loading API keys…" />
+          ) : listState.status === 'failed' ? (
+            <ErrorState
+              kind={listState.kind}
+              title="Your API keys could not be loaded"
+              onRetry={() => void refresh()}
+            >
+              {listState.message}
+            </ErrorState>
+          ) : keys.length === 0 ? (
+            // Only reachable once the request has finished. Before this the
+            // page said "No API keys yet" while the first fetch was still open,
+            // so a user with keys was told they had none and then watched it
+            // change.
             <p style={{ color: '#94a3b8' }}>No API keys yet.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -183,7 +222,12 @@ export default function ApiKeysPage() {
       )}
 
       {error && (
-        <p style={{ color: '#dc2626', marginTop: 16, fontSize: 13 }}>{error}</p>
+        <div style={{ marginTop: 16 }}>
+          {/* `#dc2626` — Tailwind's red, not the brand's — and no `role`, so
+              this was one of the three error sites in eight that displayed a
+              failure and announced it to nobody. */}
+          <StatusText tone="breaking">{error}</StatusText>
+        </div>
       )}
     </main>
   );
