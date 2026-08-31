@@ -1,0 +1,232 @@
+/*
+ * The component layer's stylesheet.
+ *
+ * This is the only file in the frontend where `:hover`, `:focus-visible` and
+ * `:disabled` exist. That is the whole reason it exists: the app is styled with
+ * inline `style` objects, and an inline style cannot express a pseudo-class.
+ * The workaround a codebase drifts into — `onMouseEnter` plus `useState` —
+ * cannot express `:focus-visible` at all, so it either draws a focus ring on
+ * every mouse click or draws none for keyboard users. The second is what
+ * shipped: there are zero focus declarations anywhere else in this frontend.
+ *
+ * Every colour, type size, radius and spacing step below is `var(--mb-…)`,
+ * emitted from `tokens.ts` by `cssVars.ts`. None of those may appear here as a
+ * literal — `ui.css.test.ts` fails on a variable that is not derived, and the
+ * point of the indirection is that this file cannot become a second source of
+ * truth. (Hairline borders, transition timings and a 2px optical inset are
+ * literals and are not design tokens.)
+ *
+ * State is a pseudo-class or a data attribute, never a modifier class. A
+ * JS-toggled `.mb-btn--hover` would put state back in JavaScript and undo the
+ * reason for the file.
+ *
+ * Note on precedence during adoption: an inline `style` attribute beats every
+ * rule here. A call site still passing its own padding keeps that padding while
+ * these hover/focus/disabled rules still apply — which is how adoption
+ * preserves the existing look one file at a time, and also why the look can be
+ * uneven mid-migration until the overrides are removed.
+ */
+
+/* --- Button ------------------------------------------------------------- */
+
+.mb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--mb-space-sm);
+  padding: var(--mb-btn-pad-md);
+  border-radius: var(--mb-radius-md);
+  border: 1px solid transparent;
+  font-family: var(--mb-font-sans);
+  font-size: var(--mb-type-body-small-size);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease,
+    color 120ms ease;
+}
+
+.mb-btn--sm {
+  padding: var(--mb-btn-pad-sm);
+  font-size: var(--mb-type-caption-size);
+}
+
+.mb-btn--primary {
+  background: var(--mb-color-blue);
+  border-color: var(--mb-color-blue);
+  color: var(--mb-color-white);
+}
+
+.mb-btn--secondary {
+  background: var(--mb-color-white);
+  border-color: var(--mb-color-neutral-300);
+  color: var(--mb-color-neutral-700);
+}
+
+.mb-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--mb-color-neutral-600);
+}
+
+.mb-btn--danger {
+  background: var(--mb-color-white);
+  border-color: var(--mb-breaking-on-light);
+  color: var(--mb-breaking-on-light);
+}
+
+/* Hover is scoped away from the disabled state: a disabled control that still
+ * lights up on hover reads as interactive when it is not. */
+.mb-btn--primary:hover:not(:disabled) {
+  background: var(--mb-color-navy);
+  border-color: var(--mb-color-navy);
+}
+
+.mb-btn--secondary:hover:not(:disabled),
+.mb-btn--ghost:hover:not(:disabled) {
+  background: var(--mb-color-neutral-100);
+  border-color: var(--mb-color-neutral-300);
+}
+
+.mb-btn--danger:hover:not(:disabled) {
+  background: var(--mb-breaking-on-light);
+  color: var(--mb-color-white);
+}
+
+/* A pressed toggle. Four spellings of "this control is active" existed across
+ * the call sites; this is the one. */
+.mb-btn[data-pressed='true'] {
+  background: var(--mb-color-neutral-200);
+  border-color: var(--mb-color-neutral-400);
+  color: var(--mb-color-neutral-900);
+}
+
+.mb-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mb-btn[aria-busy='true'] {
+  cursor: progress;
+}
+
+.mb-btn:focus-visible {
+  outline: var(--mb-focus-outline);
+  outline-offset: var(--mb-focus-offset);
+}
+
+
+.mb-btn--icon {
+  padding: var(--mb-space-xs);
+  border-color: transparent;
+  background: transparent;
+  color: var(--mb-color-neutral-500);
+  line-height: 1;
+}
+
+.mb-btn--icon:hover:not(:disabled) {
+  background: var(--mb-color-neutral-100);
+  color: var(--mb-color-neutral-900);
+}
+
+/* --- Form controls ------------------------------------------------------ */
+
+/*
+ * One control class for input, select and textarea. The four style constants
+ * these replace were already shared between `input` and `select` elements, so
+ * the split by element name was fiction; the shape is the same.
+ */
+.mb-control {
+  width: 100%;
+  padding: var(--mb-field-pad);
+  border-radius: var(--mb-radius-md);
+  border: 1px solid var(--mb-color-neutral-300);
+  background: var(--mb-color-white);
+  color: var(--mb-color-neutral-900);
+  font-family: var(--mb-font-sans);
+  font-size: var(--mb-type-body-small-size);
+  line-height: var(--mb-type-body-small-line-height);
+}
+
+.mb-control:hover:not(:disabled) {
+  border-color: var(--mb-color-neutral-400);
+}
+
+.mb-control:focus-visible {
+  outline: var(--mb-focus-outline);
+  outline-offset: var(--mb-focus-offset);
+  border-color: var(--mb-color-blue);
+}
+
+.mb-control:disabled {
+  background: var(--mb-color-neutral-100);
+  color: var(--mb-color-neutral-500);
+  cursor: default;
+}
+
+.mb-control[aria-invalid='true'] {
+  border-color: var(--mb-breaking-on-light);
+}
+
+.mb-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mb-space-xs);
+}
+
+.mb-field__label {
+  font-size: var(--mb-type-ui-small-size);
+  font-weight: 600;
+  color: var(--mb-color-neutral-700);
+}
+
+.mb-field__description {
+  font-size: var(--mb-type-ui-x-small-size);
+  color: var(--mb-color-neutral-500);
+}
+
+.mb-field__error {
+  font-size: var(--mb-type-ui-x-small-size);
+  color: var(--mb-breaking-on-light);
+}
+
+/* --- Badge -------------------------------------------------------------- */
+
+.mb-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mb-space-xs);
+  padding: 2px var(--mb-space-sm);
+  border-radius: var(--mb-radius-pill);
+  border: 1px solid transparent;
+  font-family: var(--mb-font-sans);
+  font-size: var(--mb-type-ui-x-small-size);
+  font-weight: var(--mb-type-ui-x-small-weight);
+  letter-spacing: var(--mb-type-ui-x-small-tracking);
+  line-height: var(--mb-type-ui-x-small-line-height);
+  white-space: nowrap;
+}
+
+/* --- Banner ------------------------------------------------------------- */
+
+.mb-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mb-space-sm);
+  padding: var(--mb-space-md);
+  border-radius: var(--mb-radius-lg);
+  border: 1px solid transparent;
+  font-family: var(--mb-font-sans);
+  font-size: var(--mb-type-ui-small-size);
+  line-height: var(--mb-type-ui-small-line-height);
+}
+
+/* --- Status text -------------------------------------------------------- */
+
+.mb-status {
+  margin: 0;
+  font-family: var(--mb-font-sans);
+  font-size: var(--mb-type-ui-small-size);
+  line-height: var(--mb-type-ui-small-line-height);
+  color: var(--mb-color-neutral-600);
+}
