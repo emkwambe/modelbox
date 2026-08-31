@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { diffModels, listModels } from '@/lib/api';
+import { errMessage } from '@/lib/errors';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { DiffResponse, ModelInfo } from '@/types/schema';
 
@@ -188,20 +189,6 @@ export default function DiffPanel({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
-}
-
-function errMessage(e: unknown): string {
-  if (
-    typeof e === 'object' &&
-    e !== null &&
-    'response' in e &&
-    typeof (e as { response?: unknown }).response === 'object'
-  ) {
-    const detail = (e as { response?: { data?: { detail?: unknown } } }).response
-      ?.data?.detail;
-    if (typeof detail === 'string') return detail;
-  }
-  return e instanceof Error ? e.message : 'Request failed.';
 }
 
 const containerStyle: React.CSSProperties = {

@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 
 import { createApiKey, listApiKeys, revokeApiKey } from '@/lib/api';
+import { errMessage } from '@/lib/errors';
 import { useAuthStore } from '@/store/authStore';
 import type { ApiKeyInfo } from '@/types/schema';
 
@@ -191,20 +192,6 @@ export default function ApiKeysPage() {
 function fmtDate(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
-}
-
-function errMessage(e: unknown): string {
-  if (
-    typeof e === 'object' &&
-    e !== null &&
-    'response' in e &&
-    typeof (e as { response?: unknown }).response === 'object'
-  ) {
-    const detail = (e as { response?: { data?: { detail?: unknown } } }).response
-      ?.data?.detail;
-    if (typeof detail === 'string') return detail;
-  }
-  return e instanceof Error ? e.message : 'Request failed.';
 }
 
 const panelStyle: React.CSSProperties = {

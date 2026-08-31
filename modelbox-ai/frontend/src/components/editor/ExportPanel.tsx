@@ -19,6 +19,7 @@ import {
   exportSyntheticData,
   listArtifactStatus,
 } from '@/lib/api';
+import { errMessage } from '@/lib/errors';
 import { useCanvasStore } from '@/store/canvasStore';
 import { color, semantic } from '@/styles/tokens';
 import type {
@@ -178,7 +179,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
       setFiles(result.files);
       setActiveFile(Object.keys(result.files)[0] ?? null);
     } catch (err) {
-      setError(errMessage(err));
+      setError(errMessage(err, 'Export failed.'));
       setFiles({});
       setActiveFile(null);
     } finally {
@@ -193,7 +194,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
     try {
       await downloadExportZip(modelId, format, dialect);
     } catch (err) {
-      setError(errMessage(err));
+      setError(errMessage(err, 'Export failed.'));
     } finally {
       setDownloading(false);
     }
@@ -452,20 +453,6 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
-}
-
-function errMessage(e: unknown): string {
-  if (
-    typeof e === 'object' &&
-    e !== null &&
-    'response' in e &&
-    typeof (e as { response?: unknown }).response === 'object'
-  ) {
-    const detail = (e as { response?: { data?: { detail?: unknown } } }).response
-      ?.data?.detail;
-    if (typeof detail === 'string') return detail;
-  }
-  return e instanceof Error ? e.message : 'Export failed.';
 }
 
 const containerStyle: React.CSSProperties = {

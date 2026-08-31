@@ -19,9 +19,15 @@
 
 import type { ReactNode } from 'react';
 
+import type { ErrorKind } from '@/lib/errors';
+
 import Button from './Button';
 
-export type ErrorKind = 'error' | 'denied' | 'missing';
+// Re-exported so a call site importing the barrel gets the component and its
+// vocabulary together. The type itself is owned by `lib/errors.ts`, because the
+// thing that decides which kind a failure is, is the status code — not a
+// component.
+export type { ErrorKind };
 
 interface ErrorStateProps {
   kind?: ErrorKind;
