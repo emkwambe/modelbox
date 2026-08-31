@@ -120,6 +120,25 @@ export function tokensToCssVariables(): Record<string, string> {
   vars['--mb-btn-pad-md'] = '8px 14px';
   vars['--mb-field-pad'] = '8px 10px';
   vars['--mb-panel-pad'] = `${space.lg}px`;
+  vars['--mb-modal-head-pad'] = '16px 20px';
+  vars['--mb-modal-pad'] = '20px';
+
+  /*
+   * The dialog scrim. The three modals spelled it two ways — `rgba(15, 23,
+   * 42, 0.55)` and `#0f172a99` (0.6) — both Tailwind's slate-900 rather than
+   * the brand navy, and at two different alphas nobody chose. Derived here so
+   * the scrim is one colour and it is the brand's.
+   *
+   * `8C` is 0.55 in eighths of a byte; the stronger of the two alphas is the
+   * one dropped, because the scrim sits under content that must stay legible.
+   */
+  vars['--mb-scrim'] = `${color.navy}8C`;
+
+  // Not a design token and not pretending to be one: the elevation shadow is a
+  // single shape used by a single component. It lives here rather than in
+  // `ui.css` only so the stylesheet keeps its rule that every value it states
+  // is a variable — one place to look, whether or not the value is a token.
+  vars['--mb-shadow-modal'] = '0 20px 60px rgba(0, 0, 0, 0.3)';
 
   return vars;
 }

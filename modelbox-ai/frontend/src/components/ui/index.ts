@@ -21,4 +21,6 @@ export { default as CloseButton } from './CloseButton';
 
 export { default as Field, Input, Select, Textarea } from './Field';
 
+export { default as Modal } from './Modal';
+
 export { default as StatusText } from './StatusText';

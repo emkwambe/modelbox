@@ -32,10 +32,39 @@ const FIXTURES: Record<string, ReactElement> = {
     </UI.Field>
   ),
   Input: <UI.Input aria-label="input" />,
+  Modal: (
+    <UI.Modal title="Labs" onClose={() => {}}>
+      body
+    </UI.Modal>
+  ),
   Select: <UI.Select aria-label="select" />,
   StatusText: <UI.StatusText>Saved.</UI.StatusText>,
   Textarea: <UI.Textarea aria-label="textarea" />,
 };
+
+/**
+ * The primitive's outermost rendered element.
+ *
+ * Not simply `container.firstElementChild`: `Modal` renders through a React
+ * portal, so its DOM is a sibling of the render container rather than inside
+ * it, and reading only the container would find nothing. Falling back to the
+ * portal keeps the assertions below applying to the same thing — the element
+ * the primitive actually puts on the page — instead of quietly skipping the one
+ * component whose root is elsewhere.
+ */
+function rootOf(container: HTMLElement, baseElement: HTMLElement): HTMLElement | null {
+  const inContainer = container.firstElementChild as HTMLElement | null;
+  if (inContainer) return inContainer;
+
+  // Empty siblings are skipped: a portalled dialog also puts `react-focus-guards`
+  // sentinel spans directly on `<body>`, and taking the first sibling blindly
+  // would find one of those, read no child from it, and report the component as
+  // having rendered nothing.
+  const portal = [...baseElement.children].find(
+    (el) => el !== container && el.firstElementChild !== null,
+  );
+  return (portal?.firstElementChild as HTMLElement | null) ?? null;
+}
 
 /** Exported components, by the convention that a component is capitalised. */
 function exportedComponents(): string[] {
@@ -61,8 +90,8 @@ describe('the ui barrel', () => {
     const fixture = FIXTURES[name];
     expect(fixture).toBeDefined();
 
-    const { container } = render(fixture as ReactElement);
-    const root = container.firstElementChild;
+    const { container, baseElement } = render(fixture as ReactElement);
+    const root = rootOf(container, baseElement as HTMLElement);
 
     expect(root, `${name} rendered nothing`).not.toBeNull();
     // Every primitive takes its shape from `ui.css`. A root with no `mb-` class
@@ -81,11 +110,12 @@ describe('the ui barrel', () => {
     // means the primitives themselves must stay silent, or the class could
     // never win. Colour is exempt: `Badge`, `Banner` and `StatusText` compute a
     // tone against a ground, which is their whole purpose.
-    const { container } = render(FIXTURES[name] as ReactElement);
-    const root = container.firstElementChild as HTMLElement;
+    const { container, baseElement } = render(FIXTURES[name] as ReactElement);
+    const root = rootOf(container, baseElement as HTMLElement);
+    expect(root, `${name} rendered nothing`).not.toBeNull();
 
-    expect(root.style.padding, `${name} padding`).toBe('');
-    expect(root.style.borderRadius, `${name} borderRadius`).toBe('');
-    expect(root.style.fontSize, `${name} fontSize`).toBe('');
+    expect(root?.style.padding, `${name} padding`).toBe('');
+    expect(root?.style.borderRadius, `${name} borderRadius`).toBe('');
+    expect(root?.style.fontSize, `${name} fontSize`).toBe('');
   });
 });

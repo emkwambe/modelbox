@@ -242,3 +242,88 @@
   line-height: var(--mb-type-ui-small-line-height);
   color: var(--mb-color-neutral-600);
 }
+
+/* --- Modal -------------------------------------------------------------- */
+
+/*
+ * The overlay and the dialog are siblings in the Radix portal, not parent and
+ * child, so the dialog cannot be centred by flex on the scrim the way the
+ * hand-rolled modals did it. It centres itself. The 48px inset reproduces the
+ * `padding: 24` those overlays carried, which is what kept a tall dialog off
+ * the viewport edges.
+ */
+.mb-modal__scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--mb-scrim);
+  z-index: 1000;
+}
+
+.mb-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-width: calc(100vw - 48px);
+  max-height: 86vh;
+  background: var(--mb-color-white);
+  border-radius: var(--mb-radius-xl);
+  box-shadow: var(--mb-shadow-modal);
+  font-family: var(--mb-font-sans);
+}
+
+.mb-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--mb-space-md);
+  padding: var(--mb-modal-head-pad);
+  border-bottom: 1px solid var(--mb-color-neutral-200);
+}
+
+/*
+ * 16px at weight 700 — what all three modal headings ship at today, composed
+ * from `body` and a weight rather than taken from the display ramp, because
+ * the nearest ramp step (`h3`, 1.125rem) would grow every modal title by 2px.
+ * The type ramp is for prose; a dialog title is UI chrome. Same reason
+ * `type.uiSmall` and `type.uiXSmall` exist at all.
+ */
+.mb-modal__title {
+  margin: 0;
+  font-size: var(--mb-type-body-size);
+  font-weight: 700;
+  line-height: var(--mb-type-h3-line-height);
+  color: var(--mb-color-neutral-900);
+}
+
+.mb-modal__description {
+  margin: 0;
+  font-size: var(--mb-type-caption-size);
+  font-weight: 400;
+  line-height: var(--mb-type-ui-small-line-height);
+  color: var(--mb-color-neutral-500);
+}
+
+.mb-modal__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mb-space-sm);
+  padding: 12px var(--mb-modal-pad);
+  border-bottom: 1px solid var(--mb-color-neutral-200);
+}
+
+.mb-modal__body {
+  padding: var(--mb-modal-pad);
+  overflow-y: auto;
+}
+
+/* Radix moves focus to the dialog itself on open. That focus is programmatic
+ * rather than an intent to interact, so it gets no ring — the ring belongs on
+ * whatever the user tabs to next. */
+.mb-modal:focus {
+  outline: none;
+}
