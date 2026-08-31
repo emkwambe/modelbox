@@ -61,6 +61,14 @@ from app.schemas.data_model import (
     RelationshipSchema,
     SynthesizedModel,
 )
+from app.services.artifact_status import (
+    ARTIFACT_STATUS,
+    ArtifactStatus,
+    all_dialects,
+    certified_dialects,
+    certified_families,
+    preview_dialects,
+)
 from app.services.exporter_service import ExporterService
 from app.services.seed_generator import SyntheticSeedGenerator
 
@@ -111,13 +119,20 @@ SYNTHETIC: dict[str, Fixture] = {
 
 GOLD_IDS = sorted(GOLD)
 
-# Dialect certification — Enhancement Blueprint §3, Q4. `postgres`, `snowflake`,
-# `redshift` and `duckdb` are deployment-verified; the other three are Preview
-# and are NOT scheduled for repair, so their failures are marked `preview` and
-# excluded from the Sprint 3 burn-down.
-CERTIFIED_DIALECTS = ("postgres", "snowflake", "redshift", "duckdb")
-PREVIEW_DIALECTS = ("bigquery", "databricks", "clickhouse")
-ALL_DIALECTS = CERTIFIED_DIALECTS + PREVIEW_DIALECTS
+# Dialect certification — Enhancement Blueprint §3, Q4. Preview dialects
+# transpile but are not deployment-verified, so their failures are marked
+# `preview` and excluded from the burn-down.
+#
+# **Derived, not declared.** These were literals here, and `ExportPanel.tsx`
+# held its own copies, and a test scraped the TSX to check the two agreed — so
+# the harness verified the UI's text while nothing verified that a thing called
+# certified had been tested at all. The manifest in `app.services.artifact_status`
+# is now the single source, and reading it here is what makes the label
+# load-bearing: moving a variant to CERTIFIED there removes its `preview`
+# exclusion here, and its failures enter the burn-down.
+CERTIFIED_DIALECTS = certified_dialects()
+PREVIEW_DIALECTS = preview_dialects()
+ALL_DIALECTS = all_dialects()
 
 
 # ---------------------------------------------------------------------------
@@ -623,42 +638,115 @@ _EXPORT_PANEL = (
 )
 
 
-def test_export_ui_offers_exactly_the_dialects_the_backend_supports() -> None:
-    """The UI's dialect list must match the backend's, certification included.
+def test_the_export_ui_hardcodes_no_dialect_list() -> None:
+    """The UI must not carry its own copy of what is certified (F5).
 
-    Finding M12. The export panel offered five dialects while the backend
-    accepted seven: `redshift` was **certified and unreachable**, and
-    `clickhouse` was **preview and offered without qualification**. The whole
-    fidelity programme was therefore verifying a surface users could not fully
-    reach, while users could reach a surface it had not verified.
+    This replaces `test_export_ui_offers_exactly_the_dialects_the_backend_supports`,
+    which read this same file as *text* and asserted its two literal arrays
+    matched the harness's. That test closed a real seam — finding M12, where the
+    panel offered five dialects while the backend accepted seven — but it closed
+    it in the wrong direction: the harness verified the UI's source code, and
+    the UI's copy stayed authoritative for what a user was told.
 
-    That is a gap between the harness and the product rather than a bug in
-    either, which is exactly why neither caught it — the audit checked what the
-    emitters produce, never what the UI lets you ask for. This test closes the
-    seam so an eighth dialect cannot drift in on one side only.
+    The manifest is now the single source and the UI fetches it, so the correct
+    assertion is the negative one: no dialect list is written here at all.
     """
     source = _EXPORT_PANEL.read_text(encoding="utf-8")
 
-    def declared(name: str) -> list[str]:
-        match = re.search(rf"const {name} = \[(.*?)\];", source, re.S)
-        assert match, f"{name} not found in ExportPanel.tsx"
-        return re.findall(r"'([^']+)'", match.group(1))
+    for name in ("CERTIFIED_DIALECTS", "PREVIEW_DIALECTS", "DIALECTS"):
+        assert f"const {name}" not in source, (
+            f"ExportPanel.tsx declares {name}; certification is served by "
+            f"/export/status and must not be restated in the UI"
+        )
 
-    assert declared("CERTIFIED_DIALECTS") == list(CERTIFIED_DIALECTS), (
-        "the UI's certified dialects differ from the ones this harness verifies"
-    )
-    assert declared("PREVIEW_DIALECTS") == list(PREVIEW_DIALECTS), (
-        "the UI's preview dialects differ from the ones this harness labels"
-    )
+    # Belt and braces: no bare array of dialect names, whatever it is called.
+    for dialect in all_dialects():
+        assert f"'{dialect}'" not in source, (
+            f"ExportPanel.tsx contains the literal '{dialect}'; dialects come "
+            f"from the API"
+        )
 
-    # And both must agree with what the exporter will actually accept.
+
+def test_the_manifest_covers_exactly_what_the_exporter_accepts() -> None:
+    """The other half of M12, kept: neither side may grow a dialect alone.
+
+    The seam that finding named is still real — it is only the *source* of truth
+    that moved. A dialect the exporter accepts but the manifest never mentions
+    is offered to users with no status at all; one the manifest claims but the
+    exporter rejects is a promise that errors on use.
+    """
     from app.services.exporter_service import _SQLGLOT_DIALECTS
 
     backend = set(_SQLGLOT_DIALECTS) - {"postgresql"}  # an alias, not a dialect
-    assert set(ALL_DIALECTS) == backend, (
-        f"harness covers {sorted(ALL_DIALECTS)} but the exporter accepts "
+    assert set(all_dialects()) == backend, (
+        f"manifest covers {sorted(all_dialects())} but the exporter accepts "
         f"{sorted(backend)}"
     )
+
+
+def test_every_certified_artifact_family_has_collected_tests() -> None:
+    """Nothing may be called certified without tests behind it.
+
+    The manifest is a claim, and a claim with no gate is the shape this whole
+    programme exists to prevent. `family` is the prefix of the tests that verify
+    a variant, so collecting this module and matching prefixes turns
+    "CERTIFIED" into a statement that can be checked rather than typed.
+
+    Collection is run in a subprocess rather than introspected, because the
+    question is what pytest *collects* — a test skipped at import, or lost to a
+    renamed marker, is not a gate however present its source looks.
+    """
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-m", "pytest", str(Path(__file__)), "--collect-only", "-q"],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        check=False,
+    )
+    collected = {
+        line.split("::", 1)[1].split("[", 1)[0]
+        for line in result.stdout.splitlines()
+        if "::" in line
+    }
+    # Standard 12: an empty collection would satisfy every membership test below
+    # by making the loop body unreachable.
+    assert len(collected) > 20, (
+        f"collection returned {len(collected)} tests; the guard below would "
+        f"pass vacuously. stderr: {result.stderr[-800:]}"
+    )
+
+    missing = [
+        family
+        for family in certified_families()
+        if not any(name.startswith(f"test_{family}_") for name in collected)
+    ]
+    assert not missing, (
+        f"these families are marked CERTIFIED in the manifest but no "
+        f"test_<family>_* is collected for them: {missing}"
+    )
+
+
+def test_unverified_variants_claim_no_verification() -> None:
+    """UNVERIFIED must mean what it says, and be reachable.
+
+    The data dictionary is offered by the export panel in three formats and has
+    no fidelity gate of any kind. Recording that honestly is the point of the
+    third status; this asserts the manifest keeps saying so until a gate exists,
+    at which point the entry moves to CERTIFIED and this test names the change.
+    """
+    unverified = {
+        e.variant for e in ARTIFACT_STATUS if e.status is ArtifactStatus.UNVERIFIED
+    }
+    assert unverified == {"markdown", "html", "json"}, (
+        f"the set of unverified variants changed to {sorted(unverified)}; if a "
+        f"gate was added, move the entry to CERTIFIED and update this test"
+    )
+    for family in {
+        e.family for e in ARTIFACT_STATUS if e.status is ArtifactStatus.UNVERIFIED
+    }:
+        assert family not in certified_families(), (
+            f"family '{family}' is both certified and unverified"
+        )
 
 
 # ===========================================================================

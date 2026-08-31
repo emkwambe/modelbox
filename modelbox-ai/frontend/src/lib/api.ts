@@ -17,6 +17,7 @@ import type {
 import type {
   ApiKeyCreatedResponse,
   ApiKeyInfo,
+  ArtifactStatusInfo,
   ConnectionCreateRequest,
   ConnectionInfo,
   ContractExportResponse,
@@ -164,6 +165,11 @@ export async function gradeSubmission(payload: {
 // --- Workspaces & model management (RBAC) ---
 export async function listWorkspaces(): Promise<WorkspaceInfo[]> {
   const { data } = await apiClient.get<WorkspaceInfo[]>('/workspaces');
+  return data;
+}
+
+export async function listArtifactStatus(): Promise<ArtifactStatusInfo[]> {
+  const { data } = await apiClient.get<ArtifactStatusInfo[]>('/export/status');
   return data;
 }
 

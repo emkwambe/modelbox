@@ -187,6 +187,20 @@ export interface WorkspaceInfo {
   role: string;
 }
 
+/**
+ * What the appliance has verified about one exportable artifact (F5).
+ *
+ * Served by `GET /export/status`. The UI must not carry its own copy — that is
+ * how the certified-dialect list came to be maintained in two places, kept in
+ * step by a test that read this codebase as text.
+ */
+export interface ArtifactStatusInfo {
+  variant: string;
+  family: string;
+  status: 'CERTIFIED' | 'PREVIEW' | 'UNVERIFIED';
+  reason: string;
+}
+
 /** One row of the egress ledger (D4). Metadata only — never the prompt text. */
 export interface EgressEvent {
   egress_id: string;

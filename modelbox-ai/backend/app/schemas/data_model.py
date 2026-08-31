@@ -164,6 +164,21 @@ class ModelInfo(BaseModel):
     version_number: int
 
 
+class ArtifactStatusOut(BaseModel):
+    """What the appliance has verified about one exportable artifact (F5).
+
+    Served so the export surface can show a status it did not invent. The UI
+    previously carried its own copy of which dialects were certified, and a test
+    scraped the TSX to check the copy still matched — the label reached the user
+    by being retyped.
+    """
+
+    variant: str
+    family: str
+    status: str
+    reason: str
+
+
 class EgressEventOut(BaseModel):
     """One row of the egress ledger, as an operator reads it (D4).
 

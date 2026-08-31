@@ -7,7 +7,7 @@
  * semantic layers (FR-2.3).
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import CodeEditor from '@/components/editor/CodeEditor';
 import {
@@ -17,9 +17,12 @@ import {
   exportDictionary,
   exportSemantic,
   exportSyntheticData,
+  listArtifactStatus,
 } from '@/lib/api';
 import { useCanvasStore } from '@/store/canvasStore';
+import { color, semantic } from '@/styles/tokens';
 import type {
+  ArtifactStatusInfo,
   ContractFormat,
   DictionaryFormat,
   ExportFormat,
@@ -44,19 +47,21 @@ const FORMATS: { value: ExportFormat; label: string }[] = [
 ];
 
 /**
- * Certified dialects are verified on every push by two independent grammars,
- * and DuckDB additionally by executing the emitted DDL against the engine.
- * Preview dialects transpile but are not deployment-verified: BigQuery needs
- * NOT ENFORCED on key constraints, Databricks needs NOT NULL on primary keys,
- * ClickHouse needs an ENGINE clause and forbids Nullable in a key.
+ * Verification status comes from `GET /export/status`, never from this file.
  *
- * The distinction is shown in the picker, before the user commits to an
- * export — a warning discovered afterwards is not a warning.
+ * These lists used to be written here as literals, and a test in the fidelity
+ * harness read this source as *text* to check they still matched what the
+ * harness verified. The label therefore reached the user by being retyped, and
+ * the check ran backwards: the harness verified the UI's source code.
+ *
+ * The status is shown before the user commits to an export — a warning
+ * discovered afterwards is not a warning.
  */
-const CERTIFIED_DIALECTS = ['postgres', 'snowflake', 'redshift', 'duckdb'];
-const PREVIEW_DIALECTS = ['bigquery', 'databricks', 'clickhouse'];
-const DIALECTS = [...CERTIFIED_DIALECTS, ...PREVIEW_DIALECTS];
-const isPreviewDialect = (d: string) => PREVIEW_DIALECTS.includes(d);
+const STATUS_LABEL: Record<string, string> = {
+  CERTIFIED: 'Certified',
+  PREVIEW: 'Preview',
+  UNVERIFIED: 'Unverified',
+};
 
 const SEED_FORMATS: { value: SeedFormat; label: string }[] = [
   { value: 'sql_insert', label: 'SQL INSERT' },
@@ -98,7 +103,10 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
 
   const [kind, setKind] = useState<Kind>('artifact');
   const [format, setFormat] = useState<ExportFormat>('ddl');
-  const [dialect, setDialect] = useState('snowflake');
+  // Empty until the manifest arrives, then the first certified dialect. Naming
+  // one here would be the same defect in miniature: a dialect the UI asserts
+  // exists, unchecked against the appliance that has to emit it.
+  const [dialect, setDialect] = useState('');
   const [seedFormat, setSeedFormat] = useState<SeedFormat>('sql_insert');
   const [rowCount, setRowCount] = useState(50);
   const [contractFormat, setContractFormat] =
@@ -112,6 +120,39 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statuses, setStatuses] = useState<ArtifactStatusInfo[] | null>(null);
+
+  // Fetched once. A failure leaves `statuses` null and every badge simply
+  // absent — the panel keeps working, and it says nothing it cannot support
+  // rather than defaulting a variant to "certified" because the fetch failed.
+  useEffect(() => {
+    let cancelled = false;
+    listArtifactStatus()
+      .then((rows) => {
+        if (cancelled) return;
+        setStatuses(rows);
+        const firstCertified = rows.find(
+          (r) => r.family === 'ddl' && r.status === 'CERTIFIED',
+        );
+        if (firstCertified) setDialect((d) => d || firstCertified.variant);
+      })
+      .catch(() => {
+        if (!cancelled) setStatuses([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const statusFor = (variant: string): ArtifactStatusInfo | undefined =>
+    statuses?.find((s) => s.variant === variant);
+
+  const certifiedDialects = (statuses ?? []).filter(
+    (s) => s.family === 'ddl' && s.status === 'CERTIFIED',
+  );
+  const previewDialects = (statuses ?? []).filter(
+    (s) => s.family === 'ddl' && s.status !== 'CERTIFIED',
+  );
 
   async function handleGenerate() {
     if (!modelId) return;
@@ -176,6 +217,23 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
   const zipEligible = kind === 'artifact' && (format === 'dbt' || format === 'cube');
   const dialectRelevant =
     (kind === 'artifact' && format === 'ddl') || kind === 'seed';
+
+  // What the user has actually selected, whatever kind they are on. The status
+  // badge previously reached only DDL and seed, because it was gated on
+  // `dialectRelevant` — the one control that happens to be a dialect picker.
+  const selectedVariant =
+    kind === 'artifact'
+      ? format === 'ddl'
+        ? dialect
+        : format
+      : kind === 'seed'
+        ? seedFormat
+        : kind === 'contract'
+          ? contractFormat
+          : kind === 'semantic'
+            ? semanticEngine
+            : dictionaryFormat;
+  const selectedStatus = statusFor(selectedVariant);
 
   return (
     <div style={containerStyle}>
@@ -292,16 +350,16 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
             style={selectStyle}
           >
             <optgroup label="Certified — deployment-verified">
-              {CERTIFIED_DIALECTS.map((d) => (
-                <option key={d} value={d}>
-                  {d}
+              {certifiedDialects.map((d) => (
+                <option key={d.variant} value={d.variant}>
+                  {d.variant}
                 </option>
               ))}
             </optgroup>
             <optgroup label="Preview — not deployment-verified">
-              {PREVIEW_DIALECTS.map((d) => (
-                <option key={d} value={d}>
-                  {d} (preview)
+              {previewDialects.map((d) => (
+                <option key={d.variant} value={d.variant}>
+                  {d.variant} (preview)
                 </option>
               ))}
             </optgroup>
@@ -343,13 +401,16 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
         )}
       </div>
 
-      {dialectRelevant && isPreviewDialect(dialect) && (
-        <div style={previewBanner} role="status">
-          <strong>{dialect}</strong> is <strong>Preview — not
-          deployment-verified.</strong> The DDL transpiles and re-parses, but we
-          do not verify that this engine accepts it, and it currently does not
-          without hand-editing. Certified dialects are{' '}
-          {CERTIFIED_DIALECTS.join(', ')}.
+      {/* Every artifact carries its status, not only the SQL dialects. Seven
+          families — dbt, Cube, LookML, MetricFlow, ODCS, Avro, Protobuf — plus
+          the three dictionary formats previously showed nothing at all, so a
+          user could not tell a contract verified by protoc from a dictionary
+          nothing has ever checked. */}
+      {selectedStatus && selectedStatus.status !== 'CERTIFIED' && (
+        <div style={statusBanner(selectedStatus.status)} role="status">
+          <strong>{selectedVariant}</strong> is{' '}
+          <strong>{STATUS_LABEL[selectedStatus.status]}</strong>.{' '}
+          {selectedStatus.reason}
         </div>
       )}
 
@@ -445,17 +506,28 @@ const controlRow: React.CSSProperties = {
   borderTop: '1px solid #0f172a',
 };
 
-const previewBanner: React.CSSProperties = {
-  margin: '0 8px 8px',
-  padding: '8px 10px',
-  borderRadius: 6,
-  // Amber: the brand system's warning colour. Not an error — the export works,
-  // it is the deployability that is unverified.
-  background: '#78350f',
-  border: '1px solid #b45309',
-  color: '#fef3c7',
-  fontSize: 12,
-  lineHeight: 1.45,
+/**
+ * The panel sits on a dark ground, so these take the `onDark` variants.
+ *
+ * Preview and Unverified are deliberately different colours. "We checked and it
+ * is not deployment-verified" and "nothing has ever checked this" are different
+ * statements, and giving them one badge would let the second hide inside the
+ * first — which is exactly how three dictionary formats came to sit beside
+ * protoc-verified contracts looking equally reviewed.
+ */
+const statusBanner = (status: string): React.CSSProperties => {
+  const accent =
+    status === 'UNVERIFIED' ? semantic.breaking.onDark : semantic.preview.onDark;
+  return {
+    margin: '0 8px 8px',
+    padding: '8px 10px',
+    borderRadius: 6,
+    background: color.neutral[900],
+    border: `1px solid ${accent}`,
+    color: accent,
+    fontSize: 12,
+    lineHeight: 1.45,
+  };
 };
 
 const selectStyle: React.CSSProperties = {
