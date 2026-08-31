@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
+import { AUTH_BADGE_RESERVE } from '@/components/auth/AuthBadge';
 import TemplateLibraryModal from '@/components/TemplateLibraryModal';
 import { enqueueSynthesis, getJob, getModel } from '@/lib/api';
 import type { Template } from '@/lib/templates';
@@ -183,7 +184,9 @@ export default function HomePage() {
           justifyContent: 'space-between',
           gap: 16,
           flexWrap: 'wrap',
-          paddingRight: 220, // clear the fixed AuthBadge overlay
+          // Reserve space on the right for the fixed AuthBadge overlay. The
+          // badge declares how much it needs; do not restate the number here.
+          paddingRight: AUTH_BADGE_RESERVE,
         }}
       >
         <span style={{ fontWeight: 800, fontSize: 18, letterSpacing: -0.3 }}>

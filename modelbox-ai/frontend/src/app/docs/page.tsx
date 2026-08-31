@@ -14,6 +14,8 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+import { AUTH_BADGE_RESERVE } from '@/components/auth/AuthBadge';
+
 type Tab = 'guide' | 'api';
 
 const DOCS: Record<Tab, { label: string; src: string }> = {
@@ -128,7 +130,9 @@ export default function DocsPage() {
           justifyContent: 'space-between',
           gap: 16,
           flexWrap: 'wrap',
-          paddingRight: 220,
+          // Reserve space on the right for the fixed AuthBadge overlay. The
+          // badge declares how much it needs; do not restate the number here.
+          paddingRight: AUTH_BADGE_RESERVE,
         }}
       >
         <Link
