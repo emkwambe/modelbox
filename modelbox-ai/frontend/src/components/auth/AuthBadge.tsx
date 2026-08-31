@@ -8,7 +8,9 @@
 import { useEffect, useState } from 'react';
 
 import AuthModal from '@/components/auth/AuthModal';
+import { Badge } from '@/components/ui';
 import { listWorkspaces } from '@/lib/api';
+import { errMessage } from '@/lib/errors';
 import { useAuthStore } from '@/store/authStore';
 
 /**
@@ -53,6 +55,7 @@ export default function AuthBadge() {
   const setWorkspaces = useAuthStore((s) => s.setWorkspaces);
   const setActiveWorkspace = useAuthStore((s) => s.setActiveWorkspace);
   const [mounted, setMounted] = useState(false);
+  const [workspacesError, setWorkspacesError] = useState<string | null>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -60,6 +63,7 @@ export default function AuthBadge() {
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
+    setWorkspacesError(null);
     listWorkspaces()
       .then((list) => {
         if (cancelled) return;
@@ -70,7 +74,17 @@ export default function AuthBadge() {
           setActiveWorkspace(list[0]!.workspace_id);
         }
       })
-      .catch(() => undefined);
+      /*
+       * This was `.catch(() => undefined)`. The switcher is gated on
+       * `workspaces.length > 0`, so a failed list did not fail — it rendered
+       * *nothing*, and a user who could not switch workspace had no way to
+       * tell whether they had one workspace or whether the request had died.
+       * A discarded error that changes what is on screen is the worst kind.
+       */
+      .catch((e) => {
+        if (cancelled) return;
+        setWorkspacesError(errMessage(e, 'Workspaces could not be loaded.'));
+      });
     return () => {
       cancelled = true;
     };
@@ -112,10 +126,18 @@ export default function AuthBadge() {
       <div style={pill}>
         {token ? (
           <>
+            {workspacesError && (
+              // Compact on purpose: the badge is width-bounded and the detail
+              // belongs in the tooltip, but the *fact* has to be on screen.
+              <Badge tone="breaking" title={workspacesError}>
+                Workspaces unavailable
+              </Badge>
+            )}
             {workspaces.length > 0 && (
               <select
                 value={activeWorkspaceId ?? ''}
                 onChange={(e) => setActiveWorkspace(e.target.value)}
+                aria-label="Active workspace"
                 title={activeRole ? `Role: ${activeRole}` : undefined}
                 style={{
                   ...btn,
