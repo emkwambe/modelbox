@@ -243,6 +243,48 @@
   color: var(--mb-color-neutral-600);
 }
 
+/* --- Empty, loading and error states ------------------------------------ */
+
+/*
+ * One shape for "this surface is not showing content". It centres and takes the
+ * space the content would have taken, which is the whole point: a spinner in
+ * the corner of an empty pane reads as a page that has finished and has nothing
+ * on it.
+ */
+.mb-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--mb-space-md);
+  padding: var(--mb-space-xxl) var(--mb-panel-pad);
+  min-height: 160px;
+  text-align: center;
+  font-family: var(--mb-font-sans);
+}
+
+.mb-state__message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mb-space-xs);
+  max-width: 46ch;
+}
+
+.mb-state__title {
+  margin: 0;
+  font-size: var(--mb-type-body-size);
+  font-weight: 600;
+  line-height: var(--mb-type-h3-line-height);
+  color: var(--mb-color-neutral-900);
+}
+
+.mb-state__detail {
+  margin: 0;
+  font-size: var(--mb-type-ui-small-size);
+  line-height: var(--mb-type-ui-small-line-height);
+  color: var(--mb-color-neutral-600);
+}
+
 /* --- Modal -------------------------------------------------------------- */
 
 /*

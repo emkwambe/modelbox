@@ -19,7 +19,12 @@ export type { ButtonSize, ButtonVariant } from './Button';
 
 export { default as CloseButton } from './CloseButton';
 
+export { default as ErrorState } from './ErrorState';
+export type { ErrorKind } from './ErrorState';
+
 export { default as Field, Input, Select, Textarea } from './Field';
+
+export { default as LoadingState } from './LoadingState';
 
 export { default as Modal } from './Modal';
 

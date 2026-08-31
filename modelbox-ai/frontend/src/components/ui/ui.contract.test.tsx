@@ -26,6 +26,8 @@ const FIXTURES: Record<string, ReactElement> = {
   Banner: <UI.Banner tone="preview">Preview dialect.</UI.Banner>,
   Button: <UI.Button>Save</UI.Button>,
   CloseButton: <UI.CloseButton />,
+  ErrorState: <UI.ErrorState>The backend is unreachable.</UI.ErrorState>,
+  LoadingState: <UI.LoadingState />,
   Field: (
     <UI.Field label="Workspace">
       <UI.Input />
