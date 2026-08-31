@@ -2,11 +2,18 @@
 
 /**
  * AuthModal — local sign-in / create-account form + one-click Dev Quick Login.
+ *
+ * The dialog shell is `ui/Modal` and the three inputs are `ui/Field`. This was
+ * the worst of the three modals to meet with a keyboard: it had **no close
+ * button at all**, so a user who opened it and did not want to sign in had no
+ * way out — no Escape, no ✕, and Tab walked out of the form into the page
+ * behind the overlay rather than back to the top of it.
  */
 
 import { useState } from 'react';
 import { AxiosError } from 'axios';
 
+import { Field, Input, Modal, StatusText } from '@/components/ui';
 import { login, register } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 
@@ -58,14 +65,6 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: 10,
-    marginTop: 6,
-    borderRadius: 6,
-    border: '1px solid #cbd5e1',
-    fontSize: 14,
-  };
   const tab = (active: boolean): React.CSSProperties => ({
     flex: 1,
     padding: '8px 0',
@@ -82,147 +81,127 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
   const canSubmit = Boolean(email && password) && !loading;
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: '#0f172a99',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 2000,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: 380,
-          background: '#ffffff',
-          borderRadius: 12,
-          padding: 24,
-          boxShadow: '0 10px 40px #0000004d',
-        }}
-      >
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>ModelBox AI</h2>
-
-        <div style={{ display: 'flex', marginTop: 16, borderBottom: '1px solid #e2e8f0' }}>
-          <button
-            type="button"
-            style={tab(!isRegister)}
-            onClick={() => {
-              setMode('signin');
-              setError(null);
-            }}
-          >
-            Sign in
-          </button>
-          <button
-            type="button"
-            style={tab(isRegister)}
-            onClick={() => {
-              setMode('register');
-              setError(null);
-            }}
-          >
-            Create account
-          </button>
-        </div>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (isRegister) void createAccount();
-            else void signIn(email, password);
+    <Modal title="ModelBox AI" onClose={onClose} width="380px">
+      <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0' }}>
+        <button
+          type="button"
+          style={tab(!isRegister)}
+          aria-pressed={!isRegister}
+          onClick={() => {
+            setMode('signin');
+            setError(null);
           }}
         >
-          {isRegister && (
-            <label style={{ display: 'block', marginTop: 16, fontSize: 13 }}>
-              Full name (optional)
-              <input
-                type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Ada Lovelace"
-                style={inputStyle}
-                autoComplete="name"
-              />
-            </label>
-          )}
-          <label style={{ display: 'block', marginTop: 16, fontSize: 13 }}>
-            Email
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@company.com"
-              style={inputStyle}
-              autoComplete="username"
-            />
-          </label>
-          <label style={{ display: 'block', marginTop: 12, fontSize: 13 }}>
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={inputStyle}
-              autoComplete={isRegister ? 'new-password' : 'current-password'}
-            />
-          </label>
-
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            style={{
-              width: '100%',
-              marginTop: 18,
-              padding: 10,
-              borderRadius: 8,
-              border: 'none',
-              background: !canSubmit ? '#94a3b8' : '#2563eb',
-              color: '#fff',
-              fontWeight: 600,
-              cursor: !canSubmit ? 'default' : 'pointer',
-            }}
-          >
-            {loading
-              ? isRegister
-                ? 'Creating account…'
-                : 'Signing in…'
-              : isRegister
-                ? 'Create account'
-                : 'Sign in'}
-          </button>
-        </form>
-
-        {!isRegister && (
-          <button
-            type="button"
-            onClick={() => void signIn(DEV_EMAIL, DEV_PASSWORD)}
-            disabled={loading}
-            style={{
-              width: '100%',
-              marginTop: 10,
-              padding: 10,
-              borderRadius: 8,
-              border: '1px dashed #94a3b8',
-              background: '#f8fafc',
-              color: '#334155',
-              fontWeight: 600,
-              cursor: loading ? 'default' : 'pointer',
-            }}
-          >
-            ⚡ Dev Quick Login
-          </button>
-        )}
-
-        {error && (
-          <p style={{ color: '#dc2626', marginTop: 12, fontSize: 13 }} role="alert">
-            {error}
-          </p>
-        )}
+          Sign in
+        </button>
+        <button
+          type="button"
+          style={tab(isRegister)}
+          aria-pressed={isRegister}
+          onClick={() => {
+            setMode('register');
+            setError(null);
+          }}
+        >
+          Create account
+        </button>
       </div>
-    </div>
+
+      <form
+        style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (isRegister) void createAccount();
+          else void signIn(email, password);
+        }}
+      >
+        {isRegister && (
+          <Field label="Full name (optional)">
+            <Input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Ada Lovelace"
+              autoComplete="name"
+            />
+          </Field>
+        )}
+        <Field label="Email">
+          <Input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@company.com"
+            autoComplete="username"
+          />
+        </Field>
+        <Field label="Password">
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete={isRegister ? 'new-password' : 'current-password'}
+          />
+        </Field>
+
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          style={{
+            width: '100%',
+            marginTop: 6,
+            padding: 10,
+            borderRadius: 8,
+            border: 'none',
+            background: !canSubmit ? '#94a3b8' : '#2563eb',
+            color: '#fff',
+            fontWeight: 600,
+            cursor: !canSubmit ? 'default' : 'pointer',
+          }}
+        >
+          {loading
+            ? isRegister
+              ? 'Creating account…'
+              : 'Signing in…'
+            : isRegister
+              ? 'Create account'
+              : 'Sign in'}
+        </button>
+      </form>
+
+      {!isRegister && (
+        <button
+          type="button"
+          onClick={() => void signIn(DEV_EMAIL, DEV_PASSWORD)}
+          disabled={loading}
+          style={{
+            width: '100%',
+            marginTop: 10,
+            padding: 10,
+            borderRadius: 8,
+            border: '1px dashed #94a3b8',
+            background: '#f8fafc',
+            color: '#334155',
+            fontWeight: 600,
+            cursor: loading ? 'default' : 'pointer',
+          }}
+        >
+          ⚡ Dev Quick Login
+        </button>
+      )}
+
+      {error && (
+        <div style={{ marginTop: 12 }}>
+          {/*
+           * `StatusText` derives `role="alert"` and `aria-live="assertive"`
+           * from the tone, and takes its colour from `semantic.breaking` for a
+           * light ground rather than the `#dc2626` that was written here — one
+           * of the 22 sites where the app used Tailwind's red instead of the
+           * brand's.
+           */}
+          <StatusText tone="breaking">{error}</StatusText>
+        </div>
+      )}
+    </Modal>
   );
 }
