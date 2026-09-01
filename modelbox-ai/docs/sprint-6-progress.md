@@ -428,6 +428,31 @@ inventing numbers in the other one.
 
 Frontend 32 files / **349 tests**. `tsc` clean, lint clean.
 
+### 2026-09-01 — Task 3, third screen
+
+`app/settings/api-keys/page.tsx`, 25 → 0. Burn-down **276 → 251**. Three screens
+now converted; 81 of the original 358 literals are gone.
+
+**A real contrast defect, not a branding one.** The empty state — *"No API keys
+yet."* — was `#94a3b8`, which is `neutral-400` exactly, and `neutral-400`
+measures **2.56:1** on white. That is user-facing prose at roughly half the body
+floor, and it is the same defect `EntityNode`'s data-type label had. Moved to
+`neutral-500` (4.76:1), not to the token it matched, for the reason recorded
+there: a contrast failure behind a token name is worse than one in a literal,
+because it looks decided.
+
+Worth noting what found it. The burn-down does not measure contrast — it counts
+literals. This surfaced because converting a literal forces someone to name the
+token, and naming the token is where "2.56:1" becomes visible. That is an
+argument for the burn-down that is not about tidiness.
+
+The amber secret panel now derives its ground and border from
+`toneColor`/`toneTint` at the `preview` role, the same helpers `Banner` uses, so
+the pair cannot drift. The delete button's `#dc2626` border and text became
+`breaking.onLight` — 4.83:1 → 6.29:1 on white.
+
+Frontend 32 files / **348 tests**. `tsc` clean, lint clean.
+
 ---
 
 ## Carried, and why each is still open

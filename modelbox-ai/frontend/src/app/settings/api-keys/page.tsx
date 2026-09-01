@@ -11,7 +11,8 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 
 import { createApiKey, listApiKeys, revokeApiKey } from '@/lib/api';
-import { ErrorState, LoadingState, StatusText } from '@/components/ui';
+import { ErrorState, LoadingState, StatusText, toneColor, toneTint } from '@/components/ui';
+import { color, fontFamily, semantic, surface } from '@/styles/tokens';
 import { errMessage, errorKind } from '@/lib/errors';
 import type { ErrorKind } from '@/lib/errors';
 import { useAuthStore } from '@/store/authStore';
@@ -111,19 +112,19 @@ export default function ApiKeysPage() {
     <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px' }}>
       <Link
         href="/"
-        style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}
+        style={{ color: color.blue, fontWeight: 600, textDecoration: 'none' }}
       >
         ← ModelBox AI
       </Link>
       <h1 style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>API Keys</h1>
-      <p style={{ color: '#475569', marginTop: 4 }}>
+      <p style={{ color: color.neutral[600], marginTop: 4 }}>
         Programmatic access for CI/CD pipelines and agents. Send the key as an{' '}
         <code>X-API-Key</code> header. The secret is shown once — store it safely.
       </p>
 
       {!signedIn && (
         <div style={panelStyle}>
-          <p style={{ margin: 0, color: '#475569' }}>Sign in to manage API keys.</p>
+          <p style={{ margin: 0, color: color.neutral[600] }}>Sign in to manage API keys.</p>
           <button type="button" onClick={openModal} style={primaryBtn}>
             Sign in
           </button>
@@ -134,10 +135,10 @@ export default function ApiKeysPage() {
         <>
           {newSecret && (
             <div style={secretPanel}>
-              <div style={{ fontWeight: 700, color: '#0f172a' }}>
+              <div style={{ fontWeight: 700, color: color.neutral[900] }}>
                 Your new API key — copy it now
               </div>
-              <div style={{ fontSize: 12, color: '#64748b' }}>
+              <div style={{ fontSize: 12, color: color.neutral[500] }}>
                 You won&apos;t be able to see this secret again.
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -191,14 +192,14 @@ export default function ApiKeysPage() {
             // page said "No API keys yet" while the first fetch was still open,
             // so a user with keys was told they had none and then watched it
             // change.
-            <p style={{ color: '#94a3b8' }}>No API keys yet.</p>
+            <p style={{ color: color.neutral[500] }}>No API keys yet.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {keys.map((key) => (
                 <div key={key.api_key_id} style={rowStyle}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{key.name}</div>
-                    <div style={{ fontSize: 12, color: '#64748b' }}>
+                    <div style={{ fontSize: 12, color: color.neutral[500] }}>
                       <code>{key.key_prefix}…</code> · created{' '}
                       {fmtDate(key.created_at)}
                       {key.last_used_at
@@ -244,9 +245,9 @@ const panelStyle: React.CSSProperties = {
   gap: 12,
   marginTop: 20,
   padding: 16,
-  border: '1px solid #e2e8f0',
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 8,
-  background: '#f8fafc',
+  background: surface.page,
 };
 
 const secretPanel: React.CSSProperties = {
@@ -254,9 +255,9 @@ const secretPanel: React.CSSProperties = {
   flexDirection: 'column',
   marginTop: 20,
   padding: 16,
-  border: '1px solid #fde68a',
+  border: `1px solid ${toneColor('preview', 'light')}`,
   borderRadius: 8,
-  background: '#fffbeb',
+  background: toneTint('preview', 'light'),
 };
 
 const secretCode: React.CSSProperties = {
@@ -266,9 +267,9 @@ const secretCode: React.CSSProperties = {
   whiteSpace: 'nowrap',
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid #e2e8f0',
-  background: '#ffffff',
-  fontFamily: 'monospace',
+  border: `1px solid ${color.neutral[200]}`,
+  background: color.white,
+  fontFamily: fontFamily.mono,
   fontSize: 13,
 };
 
@@ -278,24 +279,24 @@ const rowStyle: React.CSSProperties = {
   justifyContent: 'space-between',
   gap: 12,
   padding: '12px 14px',
-  border: '1px solid #e2e8f0',
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 8,
-  background: '#ffffff',
+  background: color.white,
 };
 
 const inputStyle: React.CSSProperties = {
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  border: `1px solid ${color.neutral[300]}`,
   fontSize: 14,
 };
 
 const primaryBtn: React.CSSProperties = {
   padding: '8px 14px',
   borderRadius: 6,
-  border: '1px solid #2563eb',
-  background: '#2563eb',
-  color: '#ffffff',
+  border: `1px solid ${color.blue}`,
+  background: color.blue,
+  color: color.white,
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
@@ -304,9 +305,9 @@ const primaryBtn: React.CSSProperties = {
 const ghostBtn: React.CSSProperties = {
   padding: '6px 12px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
-  background: '#ffffff',
-  color: '#334155',
+  border: `1px solid ${color.neutral[300]}`,
+  background: color.white,
+  color: color.neutral[700],
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
@@ -315,9 +316,9 @@ const ghostBtn: React.CSSProperties = {
 const dangerBtn: React.CSSProperties = {
   padding: '8px 12px',
   borderRadius: 6,
-  border: '1px solid #dc2626',
-  background: '#ffffff',
-  color: '#dc2626',
+  border: `1px solid ${semantic.breaking.onLight}`,
+  background: color.white,
+  color: semantic.breaking.onLight,
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
