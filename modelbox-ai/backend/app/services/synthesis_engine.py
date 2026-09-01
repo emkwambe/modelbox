@@ -34,6 +34,7 @@ from app.schemas.data_model import (
     SynthesizedModel,
     SynthesizeRequest,
     SynthesizeResponse,
+    ValidationIssue,
     ValidationReport,
 )
 from app.services.graph_engine import GraphEngine
@@ -100,6 +101,74 @@ _SYSTEM_PROMPT = (
 )
 
 
+_REPAIRABLE_CODES: frozenset[str] = frozenset(
+    {
+        "CYCLIC_FK",
+        "DANGLING_REF",
+        "MISSING_PK",
+        "INVALID_RANGE",
+        "INVALID_REGEX",
+        "PATTERN_EXCEEDS_LENGTH",
+    }
+)
+"""The lint codes a model is asked to fix, and nothing else.
+
+**Not "errors only", though that was the intention.** The obvious rule — feed
+back `severity == "error"` — does not survive contact with the linter: exactly
+two of the thirteen codes are errors, `CYCLIC_FK` and `DANGLING_REF`. Missing
+primary keys and the whole invented-constraint family are *warnings*, so
+severity would have excluded the most mechanically fixable defects there are
+while including nothing else.
+
+So the partition is drawn where it actually lies: **a code is repairable when a
+correct answer is objectively checkable from the graph alone.** A cycle either
+exists or does not. A reference either resolves or does not. A regex either fits
+inside the column's length or does not.
+
+Everything excluded is excluded because it invites invention rather than
+correction:
+
+- `MISSING_SLA` and `NAMING_CONVENTION` are the S5-2 defect's own venue. The
+  first fires when an entity claims a tier and gives no SLA, so "fix it" reads
+  as "supply an SLA" — a governance term the requirements never stated, going
+  into a data contract as fact. That is the exact failure the system prompt
+  above was rewritten to suppress; re-introducing it through a repair loop would
+  be the same bug arriving by the back door.
+- `MISSING_DESCRIPTION`, `MISSING_GRAIN` and `FAN_OUT_RISK` ask for prose or a
+  modelling judgement, neither of which the graph can check afterwards.
+- `PII_EXPOSURE` is arguably objective and is deliberately still out: asking a
+  model to classify what is personal data is a governance decision a user should
+  make, and a silently auto-classified column is worse than a flagged one.
+- `ORPHAN_ENTITY` is frequently correct — a legitimately standalone table.
+
+The three constraint codes are here for a reason worth stating: an invented
+`0-120` age range or a wrong email pattern is repaired by *removing* it. Those
+are the one family where the fix direction is subtraction, which is the safest
+thing a repair pass can be asked to do.
+"""
+
+_REPAIR_PROMPT = (
+    "You produced a data model that violates rules the target warehouse will "
+    "enforce. Return the SAME model with ONLY those violations fixed.\n"
+    "\n"
+    "Rules for the repair:\n"
+    "- Do not rename entities or columns that are not named below.\n"
+    "- Do not add entities, columns, constraints or descriptions that the "
+    "listed violations do not require. In particular, do not supply a tier, an "
+    "SLA, a description, or a grain — their absence is not what you are fixing.\n"
+    "- INVALID_RANGE, INVALID_REGEX and PATTERN_EXCEEDS_LENGTH are fixed by "
+    "*removing* the offending constraint unless the requirements state a "
+    "correct one. A constraint you cannot justify from the requirements is "
+    "worse than no constraint: it is exported into a data contract as fact.\n"
+    "- MISSING_PK is fixed by marking an existing identifying column as the "
+    "primary key where one exists, and by adding a surrogate key only where "
+    "none does.\n"
+    "- DANGLING_REF is fixed either by pointing the reference at the entity "
+    "that was meant, or by removing the foreign key if no such entity belongs "
+    "in the model.\n"
+)
+
+
 class SynthesisEngine:
     """Synthesizes and persists data models from unstructured input."""
 
@@ -149,11 +218,24 @@ class SynthesisEngine:
             synthesized.entities, synthesized.relationships
         )
 
-        # Validate the graph; log issues but do not hard-fail synthesis so the
+        # Validate the graph; issues do not hard-fail synthesis, because the
         # user can fix them interactively on the canvas (FR-2.3).
         report = self._graph.validate(
             synthesized.entities, synthesized.relationships
         )
+
+        # One repair round, if the linter found something objectively wrong.
+        #
+        # The report used to be computed, counted into a log line, and dropped.
+        # It reached the canvas for a human to fix by hand and never reached the
+        # model that produced it — which is the whole of this pass: the linter
+        # is *external* deterministic feedback, and that is the only kind of
+        # feedback self-correction is documented to benefit from. A model asked
+        # to critique itself gets worse.
+        synthesized, report = await self._repair_once(
+            synthesized, report, request, user_id=user_id
+        )
+
         if not report.is_valid:
             logger.warning(
                 "Synthesized model has %d validation error(s).",
@@ -272,6 +354,90 @@ class SynthesisEngine:
         return response.validation
 
     # -- internals ----------------------------------------------------------
+    @staticmethod
+    def _repairable(report: ValidationReport) -> list[ValidationIssue]:
+        return [i for i in report.issues if i.code in _REPAIRABLE_CODES]
+
+    async def _repair_once(
+        self,
+        synthesized: SynthesizedModel,
+        report: ValidationReport,
+        request: SynthesizeRequest,
+        *,
+        user_id: uuid.UUID | None,
+    ) -> tuple[SynthesizedModel, ValidationReport]:
+        """One repair attempt, kept only if it strictly improves the graph.
+
+        **The gate is the point, not the prompt.** A repair pass with no
+        acceptance test is a second chance to make the model worse, and there is
+        no reason to assume a provider's second answer beats its first — the
+        published result for *un*gated self-correction is that quality falls.
+        So the repaired graph replaces the original only when it carries
+        strictly fewer repairable issues, and the original is returned
+        unchanged in every other case, including an exception.
+
+        **One round, not a loop.** A loop needs a termination argument this has
+        no evidence for, and each turn is a real provider call recorded in the
+        egress ledger. Twice the egress for an unbounded gain is not a trade a
+        governance product should make silently.
+        """
+        before = self._repairable(report)
+        if not before:
+            return synthesized, report
+
+        listing = "\n".join(
+            f"- [{i.code}] {i.message}"
+            + (f" (entity: {i.entity_name})" if i.entity_name else "")
+            + (f" (column: {i.column_name})" if i.column_name else "")
+            for i in before
+        )
+        prompt = (
+            f"{self._build_prompt(request)}\n\n"
+            f"The model you produced:\n{synthesized.model_dump_json()}\n\n"
+            f"Violations to fix:\n{listing}"
+        )
+
+        try:
+            repaired = await self._gateway.structured_completion(
+                task="unstructured_doc_parsing",
+                prompt=prompt,
+                response_model=SynthesizedModel,
+                system_prompt=_REPAIR_PROMPT,
+                llm_override=request.llm_override,
+                user_id=user_id,
+                workspace_id=request.workspace_id,
+            )
+        except Exception:
+            # A failed repair is not a failed synthesis. The user still gets the
+            # model they asked for, with the issues shown on the canvas exactly
+            # as before this pass existed.
+            logger.warning("Repair pass failed; keeping the original model.", exc_info=True)
+            return synthesized, report
+
+        repaired.relationships = self._normalize_relationships(
+            repaired.entities, repaired.relationships
+        )
+        repaired_report = self._graph.validate(
+            repaired.entities, repaired.relationships
+        )
+        after = self._repairable(repaired_report)
+
+        if len(after) >= len(before):
+            logger.info(
+                "Repair pass did not improve the graph (%d -> %d repairable "
+                "issues); keeping the original.",
+                len(before),
+                len(after),
+            )
+            return synthesized, report
+
+        logger.info(
+            "Repair pass fixed %d of %d repairable issues.",
+            len(before) - len(after),
+            len(before),
+        )
+        return repaired, repaired_report
+
     @staticmethod
     def _build_prompt(request: SynthesizeRequest) -> str:
         return (

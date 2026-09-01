@@ -1,0 +1,347 @@
+"""The linter's findings reach the model that produced them (Task 7).
+
+`GraphEngine.validate` has always run on the synthesised graph. Its report went
+to the canvas for a human to fix by hand and, in the engine, into
+``logger.warning`` as a *count* — the issues themselves were discarded. So the
+product owned a deterministic thirteen-rule checker and never told the model
+what it found.
+
+That is the one shape of self-correction with evidence behind it. A model asked
+to critique its own output gets worse; a model handed an **external**
+deterministic verdict does not. The linter is external in exactly that sense.
+
+**These tests are about the gate, not the prompt.** A repair pass with no
+acceptance test is a second chance to make the model worse, and there is no
+reason to assume a provider's second answer beats its first. Every test below
+either proves the gate accepts a real improvement or proves it refuses
+everything else — including a "repair" that trades a cycle for two new defects.
+
+**No test here contacts a provider.** The stub gateway returns a scripted second
+answer, which is what lets the acceptance rule be tested at all: a live model
+would make the interesting cases unreproducible.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from app.schemas.data_model import (
+    ColumnSchema,
+    EntitySchema,
+    RelationshipSchema,
+    SynthesizedModel,
+)
+from app.services.graph_engine import GraphEngine
+from app.services.synthesis_engine import _REPAIRABLE_CODES, SynthesisEngine
+
+
+class _ScriptedGateway:
+    """Returns the queued models in order, and counts how often it was called."""
+
+    def __init__(self, *models: SynthesizedModel) -> None:
+        self._models = list(models)
+        self.calls = 0
+        self.prompts: list[str] = []
+        self.system_prompts: list[str] = []
+
+    async def structured_completion(
+        self,
+        task: str,
+        prompt: str,
+        response_model: type[Any],
+        system_prompt: str | None = None,
+        **_: Any,
+    ) -> SynthesizedModel:
+        self.calls += 1
+        self.prompts.append(prompt)
+        self.system_prompts.append(system_prompt or "")
+        return self._models[min(self.calls - 1, len(self._models) - 1)]
+
+
+class _FailingGateway(_ScriptedGateway):
+    async def structured_completion(self, *a: Any, **k: Any) -> SynthesizedModel:
+        self.calls += 1
+        if self.calls == 1:
+            return self._models[0]
+        raise RuntimeError("provider exploded during repair")
+
+
+def _column(name: str, **over: Any) -> ColumnSchema:
+    base: dict[str, Any] = {
+        "name": name,
+        "data_type": "VARCHAR(50)",
+        "is_primary_key": False,
+        "is_foreign_key": False,
+        "is_pii": False,
+    }
+    base.update(over)
+    return ColumnSchema(**base)
+
+
+def _entity(name: str, columns: list[ColumnSchema], **over: Any) -> EntitySchema:
+    return EntitySchema(
+        entity_name=name,
+        entity_type=over.pop("entity_type", "TABLE"),
+        columns=columns,
+        **over,
+    )
+
+
+def _clean() -> SynthesizedModel:
+    """A graph with no repairable issues."""
+    return SynthesizedModel(
+        paradigm="3NF",  # type: ignore[arg-type]
+        entities=[
+            _entity(
+                "customer",
+                [
+                    _column("customer_id", is_primary_key=True, data_type="BIGINT"),
+                    _column("name"),
+                ],
+            )
+        ],
+        relationships=[],
+    )
+
+
+def _dangling() -> SynthesizedModel:
+    """A foreign key pointing at an entity that is not in the model."""
+    return SynthesizedModel(
+        paradigm="3NF",  # type: ignore[arg-type]
+        entities=[
+            _entity(
+                "orders",
+                [
+                    _column("order_id", is_primary_key=True, data_type="BIGINT"),
+                    _column(
+                        "customer_id",
+                        data_type="BIGINT",
+                        is_foreign_key=True,
+                        references="customer.customer_id",
+                    ),
+                ],
+            )
+        ],
+        relationships=[
+            RelationshipSchema(
+                from_ref="orders.customer_id",
+                to_ref="customer.customer_id",
+                cardinality="N:1",  # type: ignore[arg-type]
+            )
+        ],
+    )
+
+
+def _dangling_repaired() -> SynthesizedModel:
+    """The same model with the missing entity supplied."""
+    model = _dangling()
+    model.entities.append(
+        _entity(
+            "customer",
+            [
+                _column("customer_id", is_primary_key=True, data_type="BIGINT"),
+                _column("name"),
+            ],
+        )
+    )
+    return model
+
+
+def _engine(gateway: Any) -> SynthesisEngine:
+    return SynthesisEngine(session=None, gateway=gateway)  # type: ignore[arg-type]
+
+
+def _issues(model: SynthesizedModel) -> list[str]:
+    report = GraphEngine().validate(model.entities, model.relationships)
+    return [i.code for i in report.issues if i.code in _REPAIRABLE_CODES]
+
+
+# ---------------------------------------------------------------------------
+# Preconditions — the fixtures must actually exhibit what they claim
+# ---------------------------------------------------------------------------
+def test_the_broken_fixture_is_broken_and_the_clean_one_is_clean() -> None:
+    """Without this, every assertion below could be passing vacuously.
+
+    A `_dangling()` that the linter did not flag would make the repair pass a
+    no-op and three tests would go green having exercised nothing.
+    """
+    assert "DANGLING_REF" in _issues(_dangling())
+    assert _issues(_clean()) == []
+    assert _issues(_dangling_repaired()) == []
+
+
+def test_every_repairable_code_is_one_the_linter_can_emit() -> None:
+    """A typo in the allowlist would silently narrow the pass to nothing.
+
+    `_REPAIRABLE_CODES` is matched against `issue.code` by string, so
+    `"DANGLNG_REF"` would never match and never fail — the repair pass would
+    simply stop firing for that class with no signal anywhere.
+    """
+    import inspect
+
+    source = inspect.getsource(GraphEngine)
+    for code in _REPAIRABLE_CODES:
+        assert f'code="{code}"' in source, f"{code} is not emitted by GraphEngine"
+
+
+def test_the_advisory_codes_are_deliberately_excluded() -> None:
+    """The S5-2 guard, as an assertion rather than a comment.
+
+    `MISSING_SLA` fires when an entity claims a tier and states no SLA. Feeding
+    it back reads as "supply an SLA" — inventing a governance commitment that is
+    exported into a data contract as fact, which is the exact defect the system
+    prompt was rewritten to suppress. If someone widens the allowlist to "all
+    codes", this is what stops it.
+    """
+    for code in (
+        "MISSING_SLA",
+        "NAMING_CONVENTION",
+        "MISSING_DESCRIPTION",
+        "MISSING_GRAIN",
+        "FAN_OUT_RISK",
+        "PII_EXPOSURE",
+        "ORPHAN_ENTITY",
+    ):
+        assert code not in _REPAIRABLE_CODES
+
+
+# ---------------------------------------------------------------------------
+# The pass itself
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_a_clean_graph_costs_no_second_call() -> None:
+    """No repairable issue, no repair — and therefore no extra egress.
+
+    Every repair is a real provider request written to the ledger before it is
+    sent. A pass that fired unconditionally would double the egress of every
+    synthesis in the product to fix nothing.
+    """
+    gateway = _ScriptedGateway(_clean())
+    model, report = await _engine(gateway)._repair_once(
+        _clean(), GraphEngine().validate(_clean().entities, _clean().relationships),
+        _request(), user_id=None,
+    )
+    assert gateway.calls == 0
+    assert _issues(model) == []
+    assert report.is_valid
+
+
+@pytest.mark.asyncio
+async def test_a_repair_that_fixes_the_defect_is_kept() -> None:
+    broken = _dangling()
+    gateway = _ScriptedGateway(_dangling_repaired())
+    model, report = await _engine(gateway)._repair_once(
+        broken,
+        GraphEngine().validate(broken.entities, broken.relationships),
+        _request(),
+        user_id=None,
+    )
+    assert gateway.calls == 1
+    assert _issues(model) == []
+    assert {e.entity_name for e in model.entities} == {"orders", "customer"}
+    assert not [i for i in report.issues if i.code == "DANGLING_REF"]
+
+
+@pytest.mark.asyncio
+async def test_a_repair_that_does_not_improve_is_discarded() -> None:
+    """The gate, in the case it exists for.
+
+    The provider returns the *same broken graph*. Without an acceptance rule
+    this would be adopted silently, and the pass would have spent a provider
+    call to replace a model with itself — or, with a worse second answer, to
+    make the product's output worse than the model it charged for.
+    """
+    broken = _dangling()
+    gateway = _ScriptedGateway(_dangling())
+    model, report = await _engine(gateway)._repair_once(
+        broken,
+        GraphEngine().validate(broken.entities, broken.relationships),
+        _request(),
+        user_id=None,
+    )
+    assert gateway.calls == 1
+    assert model is broken, "the original model must be returned unchanged"
+    assert "DANGLING_REF" in [i.code for i in report.issues]
+
+
+@pytest.mark.asyncio
+async def test_a_repair_that_trades_one_defect_for_two_is_discarded() -> None:
+    """Strictly fewer, not merely different.
+
+    A rule of "the defect I named is gone" would accept this: the dangling
+    reference is resolved, and two entities with no primary key arrive in its
+    place. Counting repairable issues rather than checking the named one is what
+    makes the trade visible.
+    """
+    broken = _dangling()
+    worse = _dangling_repaired()
+    for entity in worse.entities:
+        for column in entity.columns:
+            column.is_primary_key = False
+
+    gateway = _ScriptedGateway(worse)
+    model, _ = await _engine(gateway)._repair_once(
+        broken,
+        GraphEngine().validate(broken.entities, broken.relationships),
+        _request(),
+        user_id=None,
+    )
+    assert len(_issues(worse)) >= len(_issues(broken)), "fixture must be a real trade"
+    assert model is broken
+
+
+@pytest.mark.asyncio
+async def test_a_provider_failure_during_repair_keeps_the_original() -> None:
+    """A failed repair is not a failed synthesis.
+
+    The user still gets the model they asked for, with the issues shown on the
+    canvas exactly as they were before this pass existed. Synthesis is the
+    expensive call; losing it because an optional second call failed would make
+    the product worse for adding a feature.
+    """
+    broken = _dangling()
+    gateway = _FailingGateway(broken)
+    gateway.calls = 1  # the synthesis call already happened
+    model, report = await _engine(gateway)._repair_once(
+        broken,
+        GraphEngine().validate(broken.entities, broken.relationships),
+        _request(),
+        user_id=None,
+    )
+    assert model is broken
+    assert "DANGLING_REF" in [i.code for i in report.issues]
+
+
+@pytest.mark.asyncio
+async def test_the_repair_prompt_lists_only_repairable_codes() -> None:
+    """What is sent is what the allowlist permits, not the whole report.
+
+    Asserted on the prompt actually handed to the gateway rather than on the
+    allowlist, because the allowlist is only a claim about behaviour until
+    something reads the string that leaves.
+    """
+    broken = _dangling()
+    broken.entities[0].tier = "TIER_1_CRITICAL"  # type: ignore[assignment]
+    report = GraphEngine().validate(broken.entities, broken.relationships)
+    assert any(i.code == "MISSING_SLA" for i in report.issues), "fixture precondition"
+
+    gateway = _ScriptedGateway(_dangling_repaired())
+    await _engine(gateway)._repair_once(broken, report, _request(), user_id=None)
+
+    sent = gateway.prompts[0]
+    assert "DANGLING_REF" in sent
+    assert "MISSING_SLA" not in sent
+    assert "do not supply a tier" in gateway.system_prompts[0].lower()
+
+
+def _request() -> Any:
+    from app.schemas.data_model import SynthesizeRequest
+
+    return SynthesizeRequest(
+        source_type="natural_language",  # type: ignore[arg-type]
+        content="orders and customers",
+        target_paradigm="3NF",  # type: ignore[arg-type]
+        dialect="postgres",
+    )

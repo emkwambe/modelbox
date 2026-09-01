@@ -495,6 +495,64 @@ as a syntax error.
 Frontend 32 files / **339 tests** (fewer cases because thirteen budget entries
 disappeared). `tsc` clean, lint clean.
 
+### 2026-09-01 — Task 7, the linter's findings reach the model
+
+`synthesis_engine.py` computed a full `ValidationReport`, logged the error
+*count*, and discarded the issues. They reached the canvas for a human to fix by
+hand and never reached the model that produced them. This is the one form of
+self-correction with evidence behind it: a model critiquing itself gets worse; a
+model handed an **external** deterministic verdict does not.
+
+**The plan said "errors only". That did not survive the severity map.** Exactly
+two of the thirteen codes are `error` — `CYCLIC_FK` and `DANGLING_REF`.
+`MISSING_PK` is a *warning*, and so is the entire invented-constraint family
+(`INVALID_RANGE`, `INVALID_REGEX`, `PATTERN_EXCEEDS_LENGTH`). Keying on severity
+would have excluded the most mechanically fixable defects in the linter while
+admitting nothing else.
+
+So the partition is drawn where it actually lies: **a code is repairable when a
+correct answer is objectively checkable from the graph alone.** Six codes
+qualify. The seven excluded are excluded because they invite invention —
+`MISSING_SLA` most of all, since "fix it" reads as "supply an SLA", which is
+S5-2 arriving through the back door, and that exclusion is now an assertion
+rather than a comment.
+
+The three constraint codes are worth their place for a specific reason: an
+invented `0-120` age range is repaired by *removing* it. They are the one family
+where the fix direction is subtraction, which is the safest thing a repair pass
+can be asked to do.
+
+**One round, and a gate.** The repaired graph replaces the original only when it
+carries strictly fewer repairable issues; otherwise the original is returned
+untouched, including when the provider raises. A loop would need a termination
+argument there is no evidence for, and each round is a real provider call
+written to the egress ledger — doubling every synthesis's egress for an
+unbounded gain is not a trade a governance product makes silently.
+
+**Mutation results.**
+
+| Mutant | Killed by |
+| :-- | :-- |
+| Acceptance gate removed (`if False`) | *does not improve is discarded* and *trades one defect for two is discarded* |
+| Allowlist bypassed — whole report fed back | four tests, including *a clean graph costs no second call* and *the prompt lists only repairable codes* |
+
+The second mutant is the one worth keeping: it is the change someone makes when
+they think the pass is too conservative, and it silently re-opens S5-2.
+
+**A precondition caught my own bad fixture.** The prompt-contents test sets a
+tier to make `MISSING_SLA` fire; I wrote `"critical"` where the linter checks
+`TIER_1_CRITICAL`, so the issue never appeared and the test would have "passed"
+its real assertion by asserting the absence of something that was never there.
+The `assert ..., "fixture precondition"` line failed instead. That is standard 8
+working on a test written the same afternoon as the standard was quoted.
+
+App suite 682 → **691 passed**, 41 skipped, 22 xfailed. Ruff unchanged at 69.
+
+**Not claimed:** no provider was called. These tests pin the gate and the prompt
+contents with a scripted stub — they say nothing about whether a real model
+repairs a real graph, which is a question for D10's runs and for a Proof Log
+entry that does not exist yet.
+
 ---
 
 ## Carried, and why each is still open
