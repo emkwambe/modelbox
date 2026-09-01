@@ -9,6 +9,7 @@
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
+import { toneTint } from '@/components/ui';
 import { useCanvasStore } from '@/store/canvasStore';
 import { color, entityAccent, semantic } from '@/styles/tokens';
 import type { EntityNode as EntityNodeType, EntityType } from '@/types/schema';
@@ -29,6 +30,39 @@ export const ENTITY_ACCENT: Record<EntityType, string> = entityAccent;
 // decorative rather than legible.
 const ERROR_COLOR = semantic.breaking.onLight;
 const WARNING_COLOR = semantic.preview.onLight;
+
+/**
+ * Row tints, from the same helper the badges and banners use.
+ *
+ * These four grounds were `#fef2f2`, `#fffbeb` and `#dbeafe` — Tailwind's 50
+ * and 100 steps, none of them in the ramp, and each chosen against a foreground
+ * nobody measured them with. `toneTint` derives the ground from the foreground
+ * at an alpha `Badge.test.tsx` holds to the contrast floor, so the pair cannot
+ * drift apart.
+ */
+const ERROR_TINT = toneTint('breaking', 'light');
+const WARNING_TINT = toneTint('preview', 'light');
+const SELECTED_TINT = toneTint('accent', 'light');
+
+/**
+ * The node's elevation, at the two depths it ships. `rgba(15, 23, 42, …)` is
+ * `neutral-900` written out — the hex-alpha suffix keeps it derived, at 0.102
+ * and 0.078 rather than 0.10 and 0.08.
+ */
+const SHADOW_SELECTED = `0 4px 14px ${color.neutral[900]}1A`;
+const SHADOW_RESTING = `0 2px 8px ${color.neutral[900]}14`;
+
+/**
+ * The physical data type beside each column name.
+ *
+ * It was `#94a3b8`, which is `neutral-400` exactly — and `neutral-400` measures
+ * **2.56:1** on the white node body, well under the 4.5:1 body floor, at 12px.
+ * Converting it to the token it matched would have put a contrast failure
+ * behind a token name and made it look sanctioned, so it moves one step:
+ * `neutral-500` is 4.76:1, the lightest step in the ramp that clears the floor,
+ * and it is what the grain row above already uses.
+ */
+const TYPE_COLOR = color.neutral[500];
 
 export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
   const accent = ENTITY_ACCENT[data.entity_type] ?? entityAccent.TABLE;
@@ -67,7 +101,7 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
     : hasWarning
       ? WARNING_COLOR
       : null;
-  const borderColor = statusColor ?? (selected ? accent : '#e2e8f0');
+  const borderColor = statusColor ?? (selected ? accent : color.neutral[200]);
   const tooltip = issues.map((i) => `[${i.code}] ${i.message}`).join('\n');
 
   return (
@@ -79,9 +113,9 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
         boxShadow: statusColor
           ? `0 0 0 3px ${statusColor}33`
           : selected
-            ? `0 0 0 2px ${accent}33, 0 4px 14px rgba(15,23,42,0.10)`
-            : '0 2px 8px rgba(15,23,42,0.08)',
-        background: '#ffffff',
+            ? `0 0 0 2px ${accent}33, ${SHADOW_SELECTED}`
+            : SHADOW_RESTING,
+        background: color.white,
         fontSize: 12,
         overflow: 'hidden',
       }}
@@ -90,7 +124,7 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
       <div
         style={{
           background: accent,
-          color: '#ffffff',
+          color: color.white,
           padding: '7px 11px',
           fontWeight: 700,
           letterSpacing: 0.2,
@@ -106,7 +140,7 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
               title={tooltip}
               style={{
                 background: statusColor ?? WARNING_COLOR,
-                color: '#fff',
+                color: color.white,
                 borderRadius: 10,
                 padding: '0 6px',
                 fontSize: 11,
@@ -126,7 +160,7 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
           title="This entity has no primary key."
           style={{
             padding: '2px 10px',
-            background: '#fffbeb',
+            background: WARNING_TINT,
             color: WARNING_COLOR,
             fontWeight: 600,
             borderBottom: `1px solid ${WARNING_COLOR}33`,
@@ -153,8 +187,14 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
             padding: '2px 10px',
             fontSize: 11,
             fontWeight: 600,
+            // The one colour in this file with no token equivalent. Violet-600
+            // is not in the ramp and the nearest palette value, `HUB` at
+            // `#9333EA`, is a canvas *entity* accent — reusing it here would
+            // make a tier label read as an entity type. Whether a data tier
+            // earns a hue of its own is a design decision, not a conversion,
+            // so it stays literal and stays in the F1 budget at 1.
             color: '#7c3aed',
-            borderBottom: '1px solid #f1f5f9',
+            borderBottom: `1px solid ${color.neutral[100]}`,
           }}
         >
           {data.tier.replace('TIER_', 'Tier ').replace('_', ' · ')}
@@ -189,11 +229,11 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
                 padding: '2px 10px',
                 cursor: 'pointer',
                 background: isSelected
-                  ? '#dbeafe'
+                  ? SELECTED_TINT
                   : isDangling
-                    ? '#fef2f2'
+                    ? ERROR_TINT
                     : isPiiExposure
-                      ? '#fffbeb'
+                      ? WARNING_TINT
                       : undefined,
                 color: isDangling ? ERROR_COLOR : undefined,
                 fontWeight:
@@ -224,12 +264,12 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
               {col.is_metric ? (
                 <span
                   title={`Measure (${col.aggregation ?? 'SUM'})`}
-                  style={{ color: '#2563eb', fontWeight: 700, fontSize: 11 }}
+                  style={{ color: color.blue, fontWeight: 700, fontSize: 11 }}
                 >
                   Σ {(col.aggregation ?? 'SUM').toUpperCase()}
                 </span>
               ) : (
-                <span style={{ color: '#94a3b8' }}>{col.data_type}</span>
+                <span style={{ color: TYPE_COLOR }}>{col.data_type}</span>
               )}
             </li>
           );

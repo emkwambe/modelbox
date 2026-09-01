@@ -4,8 +4,9 @@
  * `tokens.ts` and `theme.test.ts` keep the *token layer* single-sourced, and
  * `ui.css.test.ts` keeps the stylesheet reading variables rather than values.
  * None of them can say anything about a call site that never reached for a
- * token at all, and that is where the frontend actually is: 358 colour
- * literals across 20 files, written before the token layer existed. `#dc2626`
+ * token at all, and that is where the frontend actually is: this gate landed
+ * on 358 colour literals across 20 files, written before the token layer
+ * existed, and the ceiling below comes down as they are converted. `#dc2626`
  * appeared 22 times and `#16a34a` eleven — Tailwind's defaults, neither of
  * them the brand's, and the second measures 3.30:1 on white.
  *
@@ -69,7 +70,9 @@ const BUDGET: Readonly<Record<string, number>> = {
   'app/canvas/page.tsx': 20,
   'components/TemplateLibraryModal.tsx': 20,
   'app/settings/connectors/page.tsx': 17,
-  'components/canvas/EntityNode.tsx': 14,
+  // The remaining one is violet-600 on the tier label, which has no token
+  // equivalent and needs a design decision rather than a conversion.
+  'components/canvas/EntityNode.tsx': 1,
   'components/canvas/ValidationPanel.tsx': 13,
   'components/trainer/LabModal.tsx': 12,
   'app/docs/page.tsx': 11,
@@ -198,10 +201,10 @@ describe('colour comes from tokens', () => {
     expect(unbudgeted.map(({ path, n }) => `${path} (${n})`)).toEqual([]);
   });
 
-  it('has 358 colour literals left to convert', () => {
+  it('has 345 colour literals left to convert, of the 358 it started with', () => {
     // F1's burn-down in one number. It exists so a run reports progress rather
     // than only failure, and so a budget entry edited upwards to silence the
     // per-file assertion fails here as well.
-    expect(BUDGET_TOTAL).toBeLessThanOrEqual(358);
+    expect(BUDGET_TOTAL).toBeLessThanOrEqual(345);
   });
 });
