@@ -11,7 +11,7 @@ other way, and the evidence would define the claim.
 No subjective judgement is involved. The instrument already exists and has been
 verified: the graph linter grades against thirteen codes and every one of them
 was shown to discriminate in Task 0, *before* three claims were allowed to lean
-on it. The five gold graphs are the reference answers. `test_trainer_labs.py`
+on it. The gold graphs are the reference answers. `test_trainer_labs.py`
 already establishes set-equality against linter output as a grading method, so
 providers are scored with the same tool the Trainer grades students with.
 
@@ -19,8 +19,8 @@ providers are scored with the same tool the Trainer grades students with.
 
 ## What is measured
 
-For each of the five gold graphs, a provider is given the same prompt and its
-synthesised model is compared with the gold graph on two axes.
+For each gold graph, a provider is given the same prompt and its synthesised
+model is compared with the gold graph on two axes.
 
 **1. Lint burden.** `GraphEngine.validate` over the candidate, counted by code.
 The gold graphs are not lint-free, so what matters is the *delta* against the
@@ -41,7 +41,7 @@ told to produce a warehouse schema is over-generation, not omission.
 
 ## The threshold
 
-A provider **passes** when, averaged over the five gold graphs:
+A provider **passes** when, averaged over the gold graphs:
 
 | Measure | Pass requires | Why this number |
 | :-- | :-- | :-- |
@@ -49,7 +49,7 @@ A provider **passes** when, averaged over the five gold graphs:
 | Column F1 | `>= 0.70` | columns are more numerous and more forgivable; a user adds a column far more cheaply than they discover a missing table |
 | Relationship F1 | `>= 0.60` | the hardest part, and the one degradation is expected to concentrate in. A lower bar acknowledges that while still requiring the majority to be right |
 | Lint delta | `<= +2.0` issues per graph | the linter carries thirteen codes; two extra findings is roughly one systematic omission (descriptions on a couple of entities), where a structural failure produces far more |
-| New codes | no code absent from the gold graph's own findings on `>= 3` of 5 graphs | a code appearing once is noise; on three of five it is a systematic behaviour |
+| New codes | no code absent from the gold graph's own findings on a **majority** of graphs — `NEW_CODE_GRAPH_COUNT`, currently `>= 4` of 6 | a code appearing once is noise; on a majority it is a systematic behaviour |
 
 **"Materially worse than cloud" is a separate, relative test**, applied only when
 a cloud provider was also scored in the same run: a drop of more than **0.15**
@@ -107,7 +107,25 @@ MIN_ENTITY_F1: Final[float] = 0.80
 MIN_COLUMN_F1: Final[float] = 0.70
 MIN_RELATIONSHIP_F1: Final[float] = 0.60
 MAX_LINT_DELTA_PER_GRAPH: Final[float] = 2.0
-NEW_CODE_GRAPH_COUNT: Final[int] = 3
+# **Raised 3 -> 4 on 2026-09-01, before any run under this version.**
+#
+# This is the one threshold whose *meaning* depended on the size of the gold
+# set. It was banked in `b6a3e1a` as ">= 3 of 5" and its published rationale was
+# "on three of five it is a systematic behaviour" — a majority. `aml-financial-
+# crime` made the gold set six, and 3 of 6 is not a majority; the constant did
+# not move, so the gate silently loosened from "most graphs" to "half".
+#
+# This satisfies the a-priori rule above rather than breaking it. The ground is
+# the denominator, not a score: no run has been made under the rewritten metric,
+# so there is no result this could have been fitted to, and the direction is
+# stricter. `THRESHOLD_VERSION` is bumped with it so a report cannot be compared
+# across the change by accident.
+#
+# It is a count rather than a computed majority deliberately. Deriving it from
+# `len(GOLD_IDS)` would make it move on its own the next time a graph lands,
+# which is the property this file exists to deny a threshold — the number is
+# supposed to require a decision.
+NEW_CODE_GRAPH_COUNT: Final[int] = 4
 
 # --- entity matching, structural ---------------------------------------------
 # How much of two entities' column vocabulary must coincide before they are
@@ -154,7 +172,7 @@ REQUIRED_PROVENANCE: Final[tuple[str, ...]] = (
 )
 
 # Set once, here, so the report cannot claim a threshold it did not apply.
-THRESHOLD_VERSION: Final[str] = "1.0"
+THRESHOLD_VERSION: Final[str] = "1.1"
 
 __all__ = [
     "CONCENTRATION_SHARE",
