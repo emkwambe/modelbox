@@ -202,9 +202,23 @@ outline-offset: 2px;
 non-text UI boundaries.** WCAG 2.1 AA.
 
 Every pair the product actually uses is declared in `PAIRS` in `tokens.ts` and
-asserted by `test_every_declared_pair_meets_its_contrast_floor`. A pair that is
-not declared cannot be built by the token API, because a foreground is only
-reachable through the surface it sits on.
+asserted by the contrast test in `tokens.test.ts`. A pair that is not declared
+cannot be built by the token API, because a foreground is only reachable
+through the surface it sits on.
+
+> **There are two dark surfaces, not one — found 2026-09-01.** `surface.dark` is
+> navy `#0A1628`, the canvas node-header ground. The export panel is
+> `neutral-900` `#0F172A`, and a conversion had already put the `onDark`
+> semantic variants on it. That is precisely the undeclared pair this rule
+> exists to prevent, and because it was undeclared **nothing measured it**: the
+> status colours on the one dark surface a user reads paragraphs on were
+> unasserted. `surface.panel` now names it and five pairs are declared against
+> it, including `neutral-400`, whose "never body text" warning in the palette
+> above is about *light* grounds — on the panel it is 6.96:1.
+>
+> Declared rather than repainted: the two grounds differ by 1.6% in luminance
+> and every pair clears its floor on both, so moving the panel to navy would
+> have been a visual change made to satisfy a list rather than a reader.
 
 `test_the_spec_contrast_table_matches_computed_ratios` recomputes every ratio
 published in this file and fails on a discrepancy over ±0.05 — so the table

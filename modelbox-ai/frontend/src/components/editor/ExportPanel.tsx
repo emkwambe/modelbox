@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 
 import CodeEditor from '@/components/editor/CodeEditor';
+import { StatusText } from '@/components/ui';
 import {
   downloadExportZip,
   exportArtifact,
@@ -21,7 +22,7 @@ import {
 } from '@/lib/api';
 import { errMessage } from '@/lib/errors';
 import { useCanvasStore } from '@/store/canvasStore';
-import { color, semantic } from '@/styles/tokens';
+import { color, semantic, surface } from '@/styles/tokens';
 import type {
   ArtifactStatusInfo,
   ContractFormat,
@@ -252,8 +253,8 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
             }}
             style={{
               ...tabBtn,
-              background: kind === k.value ? '#2563eb' : 'transparent',
-              color: kind === k.value ? '#ffffff' : '#94a3b8',
+              background: kind === k.value ? color.blue : 'transparent',
+              color: kind === k.value ? color.white : color.neutral[400],
             }}
           >
             {k.label}
@@ -292,7 +293,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
                 </option>
               ))}
             </select>
-            <label style={{ color: '#94a3b8', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ color: color.neutral[400], fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
               Rows
               <input
                 type="range"
@@ -301,7 +302,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
                 value={rowCount}
                 onChange={(e) => setRowCount(Number(e.target.value))}
               />
-              <span style={{ color: '#e2e8f0', width: 30 }}>{rowCount}</span>
+              <span style={{ color: color.neutral[200], width: 30 }}>{rowCount}</span>
             </label>
           </>
         )}
@@ -372,8 +373,8 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
           disabled={loading || !modelId}
           style={{
             ...actionBtn,
-            background: loading ? '#64748b' : '#2563eb',
-            color: '#fff',
+            background: loading ? color.neutral[500] : color.blue,
+            color: color.white,
             cursor: loading || !modelId ? 'default' : 'pointer',
           }}
         >
@@ -385,7 +386,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
             onClick={handleDownloadZip}
             disabled={downloading || !modelId}
             title="Download the full project as a .zip"
-            style={{ ...actionBtn, border: '1px solid #334155', color: '#e2e8f0' }}
+            style={{ ...actionBtn, border: `1px solid ${color.neutral[700]}`, color: color.neutral[200] }}
           >
             {downloading ? 'Zipping…' : '.ZIP'}
           </button>
@@ -395,7 +396,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
             type="button"
             onClick={handleDownloadFile}
             title="Download the current file"
-            style={{ ...actionBtn, border: '1px solid #334155', color: '#e2e8f0' }}
+            style={{ ...actionBtn, border: `1px solid ${color.neutral[700]}`, color: color.neutral[200] }}
           >
             Download
           </button>
@@ -419,7 +420,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
         <select
           value={activeFile ?? ''}
           onChange={(e) => setActiveFile(e.target.value)}
-          style={{ ...selectStyle, margin: 8, background: '#1e293b', color: '#e2e8f0' }}
+          style={{ ...selectStyle, margin: 8, background: color.neutral[800], color: color.neutral[200] }}
         >
           {fileNames.map((name) => (
             <option key={name} value={name}>
@@ -431,15 +432,29 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
 
       <div style={{ flex: 1, minHeight: 0 }}>
         {error ? (
-          <p style={{ color: '#f87171', padding: 12 }} role="alert">
-            {error}
-          </p>
+          /*
+            `#f87171` is Tailwind's red-400. Stated plainly because it is the
+            uncomfortable direction: measured on this panel it is **6.45:1**,
+            and the `breaking.onDark` token replacing it is **4.86:1**. The
+            conversion *lowers* contrast here.
+            Both clear the 4.5:1 body floor, and the reason to take the token
+            anyway is that a product with two reds has no red — the panel would
+            otherwise disagree with every other failure in the product about
+            what failure looks like. Where that trade is not available, the
+            floor wins and the token moves; that is what `neutral-400` ->
+            `neutral-500` did inside `EntityNode`.
+          */
+          <div style={{ padding: 12 }}>
+            <StatusText tone="breaking" on="dark">
+              {error}
+            </StatusText>
+          </div>
         ) : !modelId ? (
-          <p style={{ color: '#94a3b8', padding: 12 }}>
+          <p style={{ color: color.neutral[400], padding: 12 }}>
             Synthesize or introspect a model first to export.
           </p>
         ) : fileNames.length === 0 ? (
-          <p style={{ color: '#94a3b8', padding: 12 }}>
+          <p style={{ color: color.neutral[400], padding: 12 }}>
             Choose options and click Generate.
           </p>
         ) : (
@@ -459,8 +474,8 @@ const containerStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   height: '100%',
-  borderLeft: '1px solid #e2e8f0',
-  background: '#0f172a',
+  borderLeft: `1px solid ${color.neutral[200]}`,
+  background: surface.panel,
 };
 
 const tabRow: React.CSSProperties = {
@@ -468,7 +483,7 @@ const tabRow: React.CSSProperties = {
   alignItems: 'center',
   gap: 4,
   padding: '6px 8px',
-  background: '#1e293b',
+  background: color.neutral[800],
 };
 
 const tabBtn: React.CSSProperties = {
@@ -476,7 +491,7 @@ const tabBtn: React.CSSProperties = {
   borderRadius: 6,
   border: 'none',
   background: 'transparent',
-  color: '#94a3b8',
+  color: color.neutral[400],
   fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
@@ -487,10 +502,10 @@ const controlRow: React.CSSProperties = {
   alignItems: 'center',
   gap: 8,
   padding: '8px 12px',
-  background: '#1e293b',
-  color: '#e2e8f0',
+  background: color.neutral[800],
+  color: color.neutral[200],
   flexWrap: 'wrap',
-  borderTop: '1px solid #0f172a',
+  borderTop: `1px solid ${surface.panel}`,
 };
 
 /**
@@ -509,7 +524,7 @@ const statusBanner = (status: string): React.CSSProperties => {
     margin: '0 8px 8px',
     padding: '8px 10px',
     borderRadius: 6,
-    background: color.neutral[900],
+    background: surface.panel,
     border: `1px solid ${accent}`,
     color: accent,
     fontSize: 12,
@@ -520,7 +535,7 @@ const statusBanner = (status: string): React.CSSProperties => {
 const selectStyle: React.CSSProperties = {
   padding: '4px 8px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  border: `1px solid ${color.neutral[300]}`,
   fontSize: 12,
 };
 
@@ -528,7 +543,7 @@ const actionBtn: React.CSSProperties = {
   padding: '4px 12px',
   borderRadius: 6,
   border: 'none',
-  background: '#0f172a',
+  background: surface.panel,
   fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',

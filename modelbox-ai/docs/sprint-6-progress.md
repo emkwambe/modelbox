@@ -393,6 +393,41 @@ would have caught it.
 Frontend 32 files / 346 → 32 / **345**: one fewer because a parametrised budget
 case disappeared with the entry. `tsc` clean, lint clean.
 
+### 2026-09-01 — Task 3, second screen, and an unmeasured surface
+
+`components/editor/ExportPanel.tsx`, 26 → 0. Burn-down **302 → 276**. Entry
+deleted rather than zeroed, as before.
+
+**The find: the product has two dark surfaces and only declared one.**
+`surface.dark` is navy `#0A1628` (canvas node headers). The export panel is
+`neutral-900` `#0F172A`, and an earlier conversion had already put the `onDark`
+semantic variants on it — an undeclared pair, which is exactly what naming the
+surface is supposed to make unreachable. Because it was undeclared **nothing
+measured it**: the status colours on the one dark surface a user reads
+paragraphs on were never asserted. `surface.panel` now names it, with five pairs
+declared against it, all passing.
+
+`neutral-400` is one of them, deliberately. The palette warns it can never carry
+body text — that warning is about *light* grounds, where it is 2.35:1. On the
+panel it is **6.96:1**, and a declared pair is the only thing that can say so
+rather than leaving a reader to assume the warning is universal.
+
+Declared rather than repainted: the two grounds differ by **1.6%** in luminance
+and every pair clears its floor on both, so moving the panel to navy would have
+been a visual change made to satisfy a list rather than a reader.
+
+**A conversion that lowers contrast, stated as such.** The panel's error text
+was `#f87171` (Tailwind red-400) at **6.45:1**; `breaking.onDark` is **4.86:1**.
+The token is worse on this axis. Both clear the 4.5:1 floor, and the reason to
+take it anyway is that a product with two reds has no red — the panel would
+otherwise disagree with every other failure in the product about what failure
+looks like. Where that trade is *not* available the floor wins and the token
+moves instead; that is what `neutral-400` → `neutral-500` did inside
+`EntityNode`. Recording the direction because the previous entry recorded me
+inventing numbers in the other one.
+
+Frontend 32 files / **349 tests**. `tsc` clean, lint clean.
+
 ---
 
 ## Carried, and why each is still open

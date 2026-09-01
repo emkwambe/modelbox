@@ -39,6 +39,22 @@ export const surface = {
   page: color.neutral[50],
   card: color.white,
   dark: color.navy,
+  /**
+   * The export panel's ground, and the second dark surface in the product.
+   *
+   * Added 2026-09-01 because it was already in use and not declared. `dark` is
+   * navy, the canvas node-header ground; `ExportPanel` is `neutral-900`, and a
+   * previous conversion had already put the `onDark` semantic variants on it.
+   * That made a pair the token API is supposed to forbid — the whole point of
+   * naming the surface is that a foreground is only reachable through the
+   * ground it sits on — and, worse, one no assertion covered, so the panel's
+   * status colours were unmeasured on the surface they actually appear on.
+   *
+   * Declaring it rather than repainting the panel navy: the two grounds differ
+   * by 1.6% in luminance, every pair clears its floor on both, and moving the
+   * panel would be a visual change made to satisfy a list rather than a reader.
+   */
+  panel: color.neutral[900],
 } as const;
 
 /**
@@ -159,6 +175,16 @@ export const PAIRS: readonly ContrastPair[] = [
   { name: 'breaking on page', fg: semantic.breaking.onLight, bg: surface.page, role: 'body' },
   { name: 'breaking on card', fg: semantic.breaking.onLight, bg: surface.card, role: 'body' },
   { name: 'breaking on dark', fg: semantic.breaking.onDark, bg: surface.dark, role: 'body' },
+  // The export panel's ground. These three were in use and undeclared, so the
+  // status colours on the one dark surface a user reads text on were never
+  // asserted. `neutral-400` is here too: the palette warns it can never carry
+  // body text, and that warning is about *light* grounds — on the panel it is
+  // 6.96:1, and the pair is the only thing that can say so.
+  { name: 'breaking on panel', fg: semantic.breaking.onDark, bg: surface.panel, role: 'body' },
+  { name: 'validated on panel', fg: semantic.validated.onDark, bg: surface.panel, role: 'body' },
+  { name: 'preview on panel', fg: semantic.preview.onDark, bg: surface.panel, role: 'body' },
+  { name: 'body on panel', fg: color.neutral[200], bg: surface.panel, role: 'body' },
+  { name: 'muted on panel', fg: color.neutral[400], bg: surface.panel, role: 'body' },
   { name: 'preview on page', fg: semantic.preview.onLight, bg: surface.page, role: 'body' },
   { name: 'preview on card', fg: semantic.preview.onLight, bg: surface.card, role: 'body' },
   { name: 'preview on dark', fg: semantic.preview.onDark, bg: surface.dark, role: 'body' },
