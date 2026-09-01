@@ -149,9 +149,22 @@ task_routing:
     max_egress_class: "cloud"
 
   # Schema normalization, ERD synthesis & constraint checking -> reasoning-heavy.
+  #
+  # `airgapped_vllm` was the primary here until 2026-09-01, which is the same
+  # defect Sprint 5 closed one table down: a default pointing at
+  # `vllm-server.internal`, a host the appliance deliberately does not ship. The
+  # route still worked — it failed over — so nothing surfaced except a failed
+  # connection and a ledger entry on every ERD synthesis. `local_ollama` is not
+  # the answer either: `ollama-engine` is behind the `airgap` compose profile
+  # and is not up in a default deployment.
+  #
+  # The local-first intention this expressed is served by `airgapped_overrides`,
+  # where AIRGAPPED=true collapses this task to `local_ollama` with
+  # `airgapped_vllm` behind it. It is kept last here for the operator who does
+  # run their own vLLM.
   schema_reasoning_and_erd:
-    primary: "airgapped_vllm"
-    fallback: ["anthropic_cloud", "openai_cloud", "deepseek_cloud"]
+    primary: "anthropic_cloud"
+    fallback: ["openai_cloud", "deepseek_cloud", "airgapped_vllm"]
     temperature: 0.0
     max_egress_class: "cloud"
 

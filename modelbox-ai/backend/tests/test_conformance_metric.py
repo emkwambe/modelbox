@@ -58,6 +58,18 @@ from scripts.conformance_scoring import (
 
 GOLD = Path(__file__).resolve().parent / "fixtures" / "gold"
 
+# Derived, never listed.
+#
+# This was a four-name literal, and it had already stopped being exhaustive
+# before anyone noticed: `marketing-attribution` was never in it, and
+# `aml-financial-crime` (e0beb47) did not join it. The identity check — the one
+# that proves the metric can recognise a graph as itself — was covering four of
+# six graphs and reporting green, which is standard 8's shape in the guard for
+# the instrument rather than in the instrument.
+#
+# `index.json` is the catalogue, not a graph.
+GOLD_IDS = sorted(path.stem for path in GOLD.glob("*.json") if path.stem != "index")
+
 
 def _gold(name: str) -> SynthesizedModel:
     raw = json.loads((GOLD / f"{name}.json").read_text(encoding="utf-8"))
@@ -84,16 +96,50 @@ def _rename_entities(model: SynthesizedModel, mapping: dict[str, str]) -> Synthe
 # ---------------------------------------------------------------------------
 # Identity and rename-invariance — what the fix is for
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize(
-    "graph",
-    ["saas-subscription", "ecommerce-orders", "healthcare-ehr", "banking-datavault"],
-)
+def test_the_identity_check_covers_every_gold_graph() -> None:
+    """Precondition. A glob that returned nothing would parametrise to no cases.
+
+    An empty or shrunken `GOLD_IDS` makes every test below vacuous while the run
+    stays green — the exact failure the literal list produced, arriving by a
+    different route. Asserting the floor rather than an exact count keeps this
+    from becoming the next number that needs editing when a graph lands.
+    """
+    assert len(GOLD_IDS) >= 6, f"gold fixtures did not resolve: {GOLD_IDS}"
+
+
+@pytest.mark.parametrize("graph", GOLD_IDS)
 def test_a_graph_scores_perfectly_against_itself(graph: str) -> None:
-    """Fixture sanity. A metric that cannot recognise identity measures nothing."""
-    entity, column, relationship = entity_scores(_gold(graph), _gold(graph))
+    """Fixture sanity. A metric that cannot recognise identity measures nothing.
+
+    The relationship axis is `None` — not 1.0 — for a graph that declares no
+    relationships, which is the empty-set fix this metric was rewritten to make:
+    an axis with nothing to judge is excluded from its mean rather than handed a
+    free top mark. `marketing-attribution` is that graph, a single-table OBT
+    model, and it is the reason this test previously ran on a hand-written list.
+
+    Dropping the whole graph to avoid one inapplicable axis also dropped its
+    entity and column identity checks, which apply perfectly well. The axis is
+    what is inapplicable, not the graph.
+    """
+    gold = _gold(graph)
+    entity, column, relationship = entity_scores(gold, _gold(graph))
     assert entity == 1.0
     assert column == 1.0
-    assert relationship == 1.0
+    assert relationship == (1.0 if gold.relationships else None)
+
+
+def test_at_least_one_gold_graph_exercises_each_branch_of_that_rule() -> None:
+    """The discriminating half: a rule with only one branch taken proves nothing.
+
+    If every gold graph had relationships, the `None` arm above would never run
+    and the assertion would be indistinguishable from `== 1.0`. If none did, the
+    reverse. Both arms must be reachable from the fixtures for the test to mean
+    what it says.
+    """
+    with_edges = [gid for gid in GOLD_IDS if _gold(gid).relationships]
+    without_edges = [gid for gid in GOLD_IDS if not _gold(gid).relationships]
+    assert with_edges, "no gold graph declares relationships"
+    assert without_edges, "no gold graph exercises the inapplicable-axis arm"
 
 
 def test_renaming_every_table_does_not_change_the_score() -> None:

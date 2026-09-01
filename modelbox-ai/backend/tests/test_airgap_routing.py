@@ -281,6 +281,47 @@ def test_no_airgapped_primary_is_bring_your_own() -> None:
     )
 
 
+def test_no_default_primary_is_bring_your_own() -> None:
+    """The same rule, in the half the original fix did not cover.
+
+    Sprint 5 found `airgapped_vllm` sitting as the *air-gapped* primary and
+    closed it, and the test above guards that half. It iterates
+    ``airgapped_overrides`` only, so the identical shape survived untouched in
+    the default `task_routing` table: `schema_reasoning_and_erd` — schema
+    normalisation, ERD synthesis and constraint checking — declared a primary
+    whose host the appliance deliberately does not ship, and every call on it
+    spent a failed connection before failing over.
+
+    That is not a second bug so much as the first one's other venue, and it is
+    the shape CLAUDE.md keeps recording: the reasoning was right and the guard
+    was scoped to the instance that provoked it. Both tables, one rule.
+    """
+    offenders = [
+        (task, route["primary"])
+        for task, route in ROUTER["task_routing"].items()
+        if ROUTER["providers"][route["primary"]].get("byo")
+    ]
+    assert not offenders, (
+        f"default primaries requiring operator-supplied infrastructure: "
+        f"{offenders}"
+    )
+
+
+def test_both_routing_tables_are_actually_checked() -> None:
+    """Precondition for the pair above.
+
+    Each of those tests is a comprehension over a config key. A renamed or
+    emptied table yields an empty list, which asserts clean — a green run having
+    checked nothing, which is the failure mode this file was written against.
+    """
+    for table in ("task_routing", "airgapped_overrides"):
+        routes = ROUTER.get(table)
+        assert routes, f"router declares no '{table}' to check"
+        assert all("primary" in route for route in routes.values()), (
+            f"a route in '{table}' declares no primary"
+        )
+
+
 def test_the_shipped_local_runtime_is_reachable_from_the_backend() -> None:
     """The compose service exists *and* the backend can address it.
 
