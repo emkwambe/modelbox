@@ -17,6 +17,7 @@ import remarkGfm from 'remark-gfm';
 import { AUTH_BADGE_RESERVE } from '@/components/auth/AuthBadge';
 import { ErrorState, LoadingState } from '@/components/ui';
 import { errMessage } from '@/lib/errors';
+import { color } from '@/styles/tokens';
 
 type Tab = 'guide' | 'api';
 
@@ -62,9 +63,9 @@ function CopyPre({ children }: { children?: ReactNode }) {
           right: 8,
           padding: '2px 8px',
           borderRadius: 4,
-          border: '1px solid #334155',
-          background: '#1e293b',
-          color: '#e2e8f0',
+          border: `1px solid ${color.neutral[700]}`,
+          background: color.neutral[800],
+          color: color.neutral[200],
           fontSize: 11,
           fontWeight: 600,
           cursor: 'pointer',
@@ -185,7 +186,7 @@ export default function DocsPage() {
       >
         <Link
           href="/"
-          style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}
+          style={{ color: color.blue, fontWeight: 600, textDecoration: 'none' }}
         >
           ← ModelBox AI
         </Link>
@@ -198,9 +199,9 @@ export default function DocsPage() {
               style={{
                 padding: '6px 14px',
                 borderRadius: 8,
-                border: '1px solid #cbd5e1',
-                background: tab === key ? '#2563eb' : '#ffffff',
-                color: tab === key ? '#ffffff' : '#334155',
+                border: `1px solid ${color.neutral[300]}`,
+                background: tab === key ? color.blue : color.white,
+                color: tab === key ? color.white : color.neutral[700],
                 fontSize: 13,
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -232,7 +233,7 @@ export default function DocsPage() {
             style={{
               padding: '6px 10px',
               borderRadius: 6,
-              border: '1px solid #cbd5e1',
+              border: `1px solid ${color.neutral[300]}`,
               fontSize: 13,
             }}
           />
@@ -243,7 +244,7 @@ export default function DocsPage() {
                 href={`#${h.id}`}
                 style={{
                   fontSize: 13,
-                  color: '#475569',
+                  color: color.neutral[600],
                   textDecoration: 'none',
                   paddingLeft: h.level === 3 ? 12 : 0,
                   paddingBlock: 2,

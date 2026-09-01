@@ -18,6 +18,7 @@ import {
   listConnections,
 } from '@/lib/api';
 import { ErrorState, LoadingState, StatusText } from '@/components/ui';
+import { color, semantic } from '@/styles/tokens';
 import { errMessage, errorKind } from '@/lib/errors';
 import type { ErrorKind } from '@/lib/errors';
 import { useAuthStore } from '@/store/authStore';
@@ -140,7 +141,7 @@ export default function ConnectorsPage() {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
         <Link
           href="/"
-          style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}
+          style={{ color: color.blue, fontWeight: 600, textDecoration: 'none' }}
         >
           ← ModelBox AI
         </Link>
@@ -148,7 +149,7 @@ export default function ConnectorsPage() {
       <h1 style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>
         Database Connectors
       </h1>
-      <p style={{ color: '#475569', marginTop: 4 }}>
+      <p style={{ color: color.neutral[600], marginTop: 4 }}>
         Register an encrypted connection, then reverse-engineer its schema
         directly onto the canvas. Connection URIs are stored AES-256-GCM
         encrypted and never shown in the clear.
@@ -156,7 +157,7 @@ export default function ConnectorsPage() {
 
       {!signedIn && (
         <div style={panelStyle}>
-          <p style={{ margin: 0, color: '#475569' }}>
+          <p style={{ margin: 0, color: color.neutral[600] }}>
             Sign in to manage connectors.
           </p>
           <button type="button" onClick={openModal} style={primaryBtn}>
@@ -228,14 +229,14 @@ export default function ConnectorsPage() {
           ) : connections.length === 0 ? (
             // Only reachable once the request has finished; before this the
             // empty state was shown while the first fetch was still open.
-            <p style={{ color: '#94a3b8' }}>No connections yet.</p>
+            <p style={{ color: color.neutral[500] }}>No connections yet.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {connections.map((conn) => (
                 <div key={conn.connection_id} style={rowStyle}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{conn.name}</div>
-                    <div style={{ fontSize: 12, color: '#64748b' }}>
+                    <div style={{ fontSize: 12, color: color.neutral[500] }}>
                       {conn.engine} · {conn.uri_masked ?? 'postgresql://***'}
                     </div>
                   </div>
@@ -284,9 +285,9 @@ const panelStyle: React.CSSProperties = {
   gap: 12,
   marginTop: 20,
   padding: 16,
-  border: '1px solid #e2e8f0',
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 8,
-  background: '#f8fafc',
+  background: color.neutral[50],
 };
 
 const rowStyle: React.CSSProperties = {
@@ -295,9 +296,9 @@ const rowStyle: React.CSSProperties = {
   justifyContent: 'space-between',
   gap: 12,
   padding: '12px 14px',
-  border: '1px solid #e2e8f0',
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 8,
-  background: '#ffffff',
+  background: color.white,
 };
 
 const fieldStyle: React.CSSProperties = {
@@ -311,22 +312,22 @@ const fieldStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
-  color: '#475569',
+  color: color.neutral[600],
 };
 
 const inputStyle: React.CSSProperties = {
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  border: `1px solid ${color.neutral[300]}`,
   fontSize: 14,
 };
 
 const primaryBtn: React.CSSProperties = {
   padding: '8px 14px',
   borderRadius: 6,
-  border: '1px solid #2563eb',
-  background: '#2563eb',
-  color: '#ffffff',
+  border: `1px solid ${color.blue}`,
+  background: color.blue,
+  color: color.white,
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
@@ -336,9 +337,9 @@ const primaryBtn: React.CSSProperties = {
 const dangerBtn: React.CSSProperties = {
   padding: '8px 12px',
   borderRadius: 6,
-  border: '1px solid #dc2626',
-  background: '#ffffff',
-  color: '#dc2626',
+  border: `1px solid ${semantic.breaking.onLight}`,
+  background: color.white,
+  color: semantic.breaking.onLight,
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',

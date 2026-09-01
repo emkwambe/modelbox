@@ -12,7 +12,8 @@
  */
 
 import { LABS, type Lab } from '@/content/trainer';
-import { Modal } from '@/components/ui';
+import { Modal, toneColor, toneTint } from '@/components/ui';
+import { color } from '@/styles/tokens';
 
 export default function LabModal({
   onClose,
@@ -36,10 +37,10 @@ export default function LabModal({
               <span style={difficultyBadge}>{lab.difficulty}</span>
             </div>
             <strong style={{ fontSize: 14, marginTop: 6 }}>{lab.title}</strong>
-            <p style={{ fontSize: 13, color: '#475569', margin: '4px 0', lineHeight: 1.5 }}>
+            <p style={{ fontSize: 13, color: color.neutral[600], margin: '4px 0', lineHeight: 1.5 }}>
               {lab.brief}
             </p>
-            <div style={{ fontSize: 12, color: '#64748b' }}>
+            <div style={{ fontSize: 12, color: color.neutral[500] }}>
               Objectives: clear {lab.expected_flaws.length} flaw
               {lab.expected_flaws.length === 1 ? '' : 's'} —{' '}
               {lab.expected_flaws.map((f) => f.code).join(', ')}
@@ -71,18 +72,18 @@ const grid: React.CSSProperties = {
 const card: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  border: '1px solid #e2e8f0',
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 10,
   padding: 14,
-  background: '#f8fafc',
+  background: color.neutral[50],
 };
 
 const moduleBadge: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: '#2563eb',
-  background: '#eff6ff',
-  border: '1px solid #bfdbfe',
+  color: color.blue,
+  background: toneTint('accent', 'light'),
+  border: `1px solid ${toneColor('accent', 'light')}`,
   borderRadius: 6,
   padding: '2px 8px',
 };
@@ -90,8 +91,8 @@ const moduleBadge: React.CSSProperties = {
 const difficultyBadge: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
-  color: '#334155',
-  background: '#e2e8f0',
+  color: color.neutral[700],
+  background: color.neutral[200],
   borderRadius: 6,
   padding: '2px 8px',
   textTransform: 'capitalize',
@@ -100,9 +101,9 @@ const difficultyBadge: React.CSSProperties = {
 const primaryBtn: React.CSSProperties = {
   padding: '7px 12px',
   borderRadius: 6,
-  border: '1px solid #2563eb',
-  background: '#2563eb',
-  color: '#ffffff',
+  border: `1px solid ${color.blue}`,
+  background: color.blue,
+  color: color.white,
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',

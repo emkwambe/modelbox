@@ -16,6 +16,7 @@ import { AxiosError } from 'axios';
 import { Field, Input, Modal, StatusText } from '@/components/ui';
 import { login, register } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
+import { color, semantic } from '@/styles/tokens';
 
 const DEV_EMAIL = 'dev@modelbox.ai';
 const DEV_PASSWORD = 'password123';
@@ -71,8 +72,8 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
     fontSize: 13,
     fontWeight: 600,
     border: 'none',
-    borderBottom: `2px solid ${active ? '#2563eb' : 'transparent'}`,
-    color: active ? '#2563eb' : '#64748b',
+    borderBottom: `2px solid ${active ? color.blue : 'transparent'}`,
+    color: active ? color.blue : color.neutral[500],
     background: 'transparent',
     cursor: 'pointer',
   });
@@ -82,7 +83,7 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="ModelBox AI" onClose={onClose} width="380px">
-      <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0' }}>
+      <div style={{ display: 'flex', borderBottom: `1px solid ${color.neutral[200]}` }}>
         <button
           type="button"
           style={tab(!isRegister)}
@@ -153,8 +154,8 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
             padding: 10,
             borderRadius: 8,
             border: 'none',
-            background: !canSubmit ? '#94a3b8' : '#2563eb',
-            color: '#fff',
+            background: !canSubmit ? color.neutral[400] : color.blue,
+            color: color.white,
             fontWeight: 600,
             cursor: !canSubmit ? 'default' : 'pointer',
           }}
@@ -179,9 +180,9 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
             marginTop: 10,
             padding: 10,
             borderRadius: 8,
-            border: '1px dashed #94a3b8',
-            background: '#f8fafc',
-            color: '#334155',
+            border: `1px dashed ${color.neutral[400]}`,
+            background: color.neutral[50],
+            color: color.neutral[700],
             fontWeight: 600,
             cursor: loading ? 'default' : 'pointer',
           }}

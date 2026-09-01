@@ -17,6 +17,7 @@
 import { useMemo, useState } from 'react';
 
 import { Modal } from '@/components/ui';
+import { color } from '@/styles/tokens';
 import {
   TEMPLATES,
   TEMPLATE_DOMAINS,
@@ -101,7 +102,7 @@ export default function TemplateLibraryModal({
     >
       <div style={grid}>
         {filtered.length === 0 && (
-          <p style={{ color: '#94a3b8', gridColumn: '1 / -1' }}>
+          <p style={{ color: color.neutral[500], gridColumn: '1 / -1' }}>
             No templates match your filters.
           </p>
         )}
@@ -112,7 +113,7 @@ export default function TemplateLibraryModal({
               <strong style={{ fontSize: 14 }}>{t.title}</strong>
             </div>
             <span style={paradigmBadge}>{t.paradigm}</span>
-            <p style={{ fontSize: 13, color: '#475569', margin: '4px 0' }}>
+            <p style={{ fontSize: 13, color: color.neutral[600], margin: '4px 0' }}>
               {t.description}
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -172,10 +173,10 @@ const card: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 6,
-  border: '1px solid #e2e8f0',
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 10,
   padding: 14,
-  background: '#f8fafc',
+  background: color.neutral[50],
 };
 
 const paradigmBadge: React.CSSProperties = {
@@ -191,8 +192,8 @@ const paradigmBadge: React.CSSProperties = {
 
 const chip: React.CSSProperties = {
   fontSize: 11,
-  color: '#334155',
-  background: '#e2e8f0',
+  color: color.neutral[700],
+  background: color.neutral[200],
   borderRadius: 6,
   padding: '2px 8px',
 };
@@ -200,21 +201,21 @@ const chip: React.CSSProperties = {
 const detail: React.CSSProperties = {
   marginTop: 6,
   padding: 10,
-  background: '#ffffff',
-  border: '1px solid #e2e8f0',
+  background: color.white,
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 8,
 };
 
 const detailLabel: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: '#64748b',
+  color: color.neutral[500],
   marginTop: 6,
 };
 
 const detailText: React.CSSProperties = {
   fontSize: 12,
-  color: '#475569',
+  color: color.neutral[600],
   margin: '2px 0 0',
   lineHeight: 1.5,
 };
@@ -222,16 +223,16 @@ const detailText: React.CSSProperties = {
 const select: React.CSSProperties = {
   padding: '6px 10px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  border: `1px solid ${color.neutral[300]}`,
   fontSize: 13,
 };
 
 const primaryBtn: React.CSSProperties = {
   padding: '6px 12px',
   borderRadius: 6,
-  border: '1px solid #2563eb',
-  background: '#2563eb',
-  color: '#ffffff',
+  border: `1px solid ${color.blue}`,
+  background: color.blue,
+  color: color.white,
   fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
@@ -240,9 +241,9 @@ const primaryBtn: React.CSSProperties = {
 const ghostBtn: React.CSSProperties = {
   padding: '6px 12px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
-  background: '#ffffff',
-  color: '#334155',
+  border: `1px solid ${color.neutral[300]}`,
+  background: color.white,
+  color: color.neutral[700],
   fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',

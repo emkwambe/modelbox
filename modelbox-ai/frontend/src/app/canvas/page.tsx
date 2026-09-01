@@ -17,7 +17,7 @@ import DiffPanel from '@/components/migration/DiffPanel';
 import ExportPanel from '@/components/editor/ExportPanel';
 import { deleteModel, saveGraph, updateModel } from '@/lib/api';
 import { errMessage } from '@/lib/errors';
-import { StatusText } from '@/components/ui';
+import { StatusText, toneColor, toneTint } from '@/components/ui';
 import { useCanvasStore } from '@/store/canvasStore';
 
 export default function CanvasPage() {
@@ -112,12 +112,16 @@ export default function CanvasPage() {
     }
   }
 
-  const actionBtn = (color: string): React.CSSProperties => ({
+  // The parameter was named `color`, which shadowed the token module the
+  // moment this file started importing it — `color.white` silently resolved to
+  // a property of the string parameter. `tsc` caught it; nothing else would
+  // have, because the shadowed name is still a valid expression.
+  const actionBtn = (accent: string): React.CSSProperties => ({
     padding: '6px 12px',
     borderRadius: 6,
-    border: `1px solid ${color}`,
-    background: '#ffffff',
-    color,
+    border: `1px solid ${accent}`,
+    background: color.white,
+    color: accent,
     fontSize: 13,
     fontWeight: 600,
     cursor: modelId && !busy ? 'pointer' : 'default',
@@ -135,18 +139,18 @@ export default function CanvasPage() {
           // Reserve space on the right for the fixed AuthBadge overlay. The
           // badge declares how much it needs; do not restate the number here.
           paddingRight: AUTH_BADGE_RESERVE,
-          borderBottom: '1px solid #e2e8f0',
-          background: '#ffffff',
+          borderBottom: `1px solid ${color.neutral[200]}`,
+          background: color.white,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
           <Link
             href="/"
-            style={{ fontWeight: 700, textDecoration: 'none', color: '#0f172a' }}
+            style={{ fontWeight: 700, textDecoration: 'none', color: color.neutral[900] }}
           >
             ModelBox AI
           </Link>
-          <span style={{ color: '#64748b', fontSize: 13 }}>
+          <span style={{ color: color.neutral[500], fontSize: 13 }}>
             {paradigm ?? 'No model'} · {entityCount} entities
           </span>
           {validStatus && (
@@ -217,8 +221,8 @@ export default function CanvasPage() {
               padding: '6px 14px',
               borderRadius: 6,
               border: '1px solid #7c3aed',
-              background: showDiff ? '#7c3aed' : '#ffffff',
-              color: showDiff ? '#ffffff' : '#7c3aed',
+              background: showDiff ? '#7c3aed' : color.white,
+              color: showDiff ? color.white : '#7c3aed',
               fontSize: 13,
               fontWeight: 600,
               cursor: modelId ? 'pointer' : 'default',
@@ -237,9 +241,9 @@ export default function CanvasPage() {
             style={{
               padding: '6px 14px',
               borderRadius: 6,
-              border: '1px solid #2563eb',
-              background: showExport ? '#2563eb' : '#ffffff',
-              color: showExport ? '#ffffff' : '#2563eb',
+              border: `1px solid ${color.blue}`,
+              background: showExport ? color.blue : color.white,
+              color: showExport ? color.white : color.blue,
               fontSize: 13,
               fontWeight: 600,
               cursor: modelId ? 'pointer' : 'default',
@@ -259,9 +263,9 @@ export default function CanvasPage() {
             gap: 12,
             flexWrap: 'wrap',
             padding: '8px 16px',
-            background: '#fffbeb',
-            borderBottom: '1px solid #fde68a',
-            color: '#92400e',
+            background: toneTint('preview', 'light'),
+            borderBottom: `1px solid ${toneColor('preview', 'light')}`,
+            color: toneColor('preview', 'light'),
             fontSize: 13,
           }}
         >
@@ -277,8 +281,8 @@ export default function CanvasPage() {
                 marginLeft: 'auto',
                 padding: '4px 12px',
                 borderRadius: 6,
-                border: '1px solid #b45309',
-                color: '#92400e',
+                border: `1px solid ${semantic.preview.onLight}`,
+                color: toneColor('preview', 'light'),
                 fontWeight: 600,
                 textDecoration: 'none',
                 whiteSpace: 'nowrap',

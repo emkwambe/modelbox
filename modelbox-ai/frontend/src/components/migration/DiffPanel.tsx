@@ -13,6 +13,8 @@ import { diffModels, listModels } from '@/lib/api';
 import { errMessage } from '@/lib/errors';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { DiffResponse, ModelInfo } from '@/types/schema';
+import { toneColor, toneTint } from '@/components/ui';
+import { color, semantic } from '@/styles/tokens';
 
 const DIALECTS = ['postgres', 'snowflake', 'databricks', 'bigquery', 'duckdb', 'redshift'];
 
@@ -65,7 +67,7 @@ export default function DiffPanel({ onClose }: { onClose: () => void }) {
       <div style={headerStyle}>
         <div>
           <div style={{ fontWeight: 700 }}>Schema Diff &amp; Migration</div>
-          <div style={{ fontSize: 12, color: '#64748b' }}>
+          <div style={{ fontSize: 12, color: color.neutral[500] }}>
             Current model → target model
           </div>
         </div>
@@ -76,7 +78,7 @@ export default function DiffPanel({ onClose }: { onClose: () => void }) {
 
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {!modelId && (
-          <p style={{ color: '#dc2626', fontSize: 13 }}>
+          <p style={{ color: semantic.breaking.onLight, fontSize: 13 }}>
             Load or save a model first to use it as the diff source.
           </p>
         )}
@@ -124,7 +126,7 @@ export default function DiffPanel({ onClose }: { onClose: () => void }) {
           {busy ? 'Computing…' : 'Compute diff'}
         </button>
 
-        {error && <p style={{ color: '#dc2626', fontSize: 13 }}>{error}</p>}
+        {error && <p style={{ color: semantic.breaking.onLight, fontSize: 13 }}>{error}</p>}
 
         {result && (
           <>
@@ -140,7 +142,7 @@ export default function DiffPanel({ onClose }: { onClose: () => void }) {
                 ))}
               </div>
             ) : (
-              <span style={{ color: '#16a34a', fontSize: 13, fontWeight: 600 }}>
+              <span style={{ color: semantic.validated.onLight, fontSize: 13, fontWeight: 600 }}>
                 ✓ No breaking changes
               </span>
             )}
@@ -193,8 +195,8 @@ export default function DiffPanel({ onClose }: { onClose: () => void }) {
 
 const containerStyle: React.CSSProperties = {
   height: '100%',
-  borderLeft: '1px solid #e2e8f0',
-  background: '#ffffff',
+  borderLeft: `1px solid ${color.neutral[200]}`,
+  background: color.white,
   overflowY: 'auto',
 };
 
@@ -203,10 +205,10 @@ const headerStyle: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'space-between',
   padding: '12px 16px',
-  borderBottom: '1px solid #e2e8f0',
+  borderBottom: `1px solid ${color.neutral[200]}`,
   position: 'sticky',
   top: 0,
-  background: '#ffffff',
+  background: color.white,
 };
 
 const fieldStyle: React.CSSProperties = {
@@ -218,22 +220,22 @@ const fieldStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
-  color: '#475569',
+  color: color.neutral[600],
 };
 
 const inputStyle: React.CSSProperties = {
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  border: `1px solid ${color.neutral[300]}`,
   fontSize: 14,
 };
 
 const primaryBtn: React.CSSProperties = {
   padding: '8px 14px',
   borderRadius: 6,
-  border: '1px solid #2563eb',
-  background: '#2563eb',
-  color: '#ffffff',
+  border: `1px solid ${color.blue}`,
+  background: color.blue,
+  color: color.white,
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
@@ -243,7 +245,7 @@ const closeBtn: React.CSSProperties = {
   border: 'none',
   background: 'transparent',
   fontSize: 16,
-  color: '#64748b',
+  color: color.neutral[500],
   cursor: 'pointer',
   lineHeight: 1,
 };
@@ -251,9 +253,9 @@ const closeBtn: React.CSSProperties = {
 const copyBtn: React.CSSProperties = {
   padding: '2px 8px',
   borderRadius: 4,
-  border: '1px solid #cbd5e1',
-  background: '#ffffff',
-  color: '#334155',
+  border: `1px solid ${color.neutral[300]}`,
+  background: color.white,
+  color: color.neutral[700],
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
@@ -261,9 +263,9 @@ const copyBtn: React.CSSProperties = {
 
 const breakingBadge: React.CSSProperties = {
   fontSize: 12,
-  color: '#b91c1c',
-  background: '#fef2f2',
-  border: '1px solid #fecaca',
+  color: toneColor('breaking', 'light'),
+  background: toneTint('breaking', 'light'),
+  border: `1px solid ${toneColor('breaking', 'light')}`,
   borderRadius: 6,
   padding: '4px 8px',
 };
@@ -280,8 +282,8 @@ const semanticBadge: React.CSSProperties = {
 const ddlStyle: React.CSSProperties = {
   margin: 0,
   padding: 12,
-  background: '#0f172a',
-  color: '#e2e8f0',
+  background: color.neutral[900],
+  color: color.neutral[200],
   borderRadius: 6,
   fontSize: 12,
   fontFamily: 'monospace',

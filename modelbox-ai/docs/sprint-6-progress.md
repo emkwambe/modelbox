@@ -453,6 +453,48 @@ the pair cannot drift. The delete button's `#dc2626` border and text became
 
 Frontend 32 files / **348 tests**. `tsc` clean, lint clean.
 
+### 2026-09-01 — Task 3 complete: the colour burn-down is 332 → 22
+
+Fourteen remaining files converted. **All 22 that are left are deliberate**, and
+the budget now says which of the two reasons applies to each.
+
+| Left | Why |
+| --: | :-- |
+| 6 | `app/global-error.tsx` — the one file where an unreachable token is correct. It catches a throw in the root layout, which is exactly when `ui.css` may never have loaded. Its own header made this call before the burn-down existed. Held at 6 rather than deleted, so the exemption stays bounded |
+| 16 | Violet — `#7c3aed` with its `#f5f3ff` tint and `#ddd6fe` border, in five places plus the tier label. **The palette contains no violet.** `entityAccent.HUB` is `#9333EA`, but that is an *entity type* accent; spending it on a Requirements Library button would conflate two vocabularies that happen to share a hue |
+
+So F1's colour half is finished except for one design decision, and the decision
+is now stated as one colour, one tint and one border rather than as sixteen
+scattered literals.
+
+**Two genuine contrast failures were removed on the way**, both invisible to
+every contrast test because neither pair was ever declared:
+
+* `#16a34a` as text — **3.30:1** on white, named in the burn-down's own opening
+  paragraph as failing — in `app/page.tsx` and `DiffPanel.tsx`. Now
+  `validated.onLight` at 5.5:1.
+* `#94a3b8` as text at 11–12px in four canvas and settings files — **2.56:1**.
+  Now `neutral-500`. The conversion script treated `color: '#94a3b8'`
+  differently from every other use of the same literal for exactly this reason:
+  as a border or a ground it is fine, as text it is half the floor.
+
+**A bug the compiler caught that nothing else would have.**
+`app/canvas/page.tsx` had `const actionBtn = (color: string) => ...`. The moment
+the file imported the token module, `color.white` inside that function silently
+resolved to a property of the string parameter — a shadowed name that is still a
+valid expression. `tsc` failed it; no test would have. The parameter is `accent`
+now.
+
+Two mechanical faults in my own conversion, both caught before commit: a
+template-literal wrapper (`` `${color.blue}` ``) left by an over-broad
+substitution, unwrapped only where the template's entire content was a single
+expression; and an import inserted *inside* a multi-line `import type { … }`
+block by an "insert after the last import line" heuristic, which `tsc` rejected
+as a syntax error.
+
+Frontend 32 files / **339 tests** (fewer cases because thirteen budget entries
+disappeared). `tsc` clean, lint clean.
+
 ---
 
 ## Carried, and why each is still open

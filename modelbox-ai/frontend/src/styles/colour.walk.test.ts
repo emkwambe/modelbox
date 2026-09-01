@@ -62,27 +62,27 @@ import {
  * zero. Do not raise one — a new literal is what this exists to stop.
  */
 const BUDGET: Readonly<Record<string, number>> = {
-  'app/trainer/page.tsx': 65,
-  // `app/settings/egress/page.tsx` reached zero and is deleted from the budget
-  // rather than left at 0 — the unbudgeted sweep now holds it there, which is
-  // a stricter guard than an entry saying "should be none".
-  'components/migration/DiffPanel.tsx': 25,
-  'app/page.tsx': 22,
-  'components/canvas/ColumnSemanticEditor.tsx': 22,
-  'app/canvas/page.tsx': 20,
-  'components/TemplateLibraryModal.tsx': 20,
-  'app/settings/connectors/page.tsx': 17,
-  // The remaining one is violet-600 on the tier label, which has no token
-  // equivalent and needs a design decision rather than a conversion.
-  'components/canvas/EntityNode.tsx': 1,
-  'components/trainer/LabModal.tsx': 12,
-  'app/docs/page.tsx': 11,
-  'components/auth/AuthModal.tsx': 10,
-  'components/canvas/EntitySettingsEditor.tsx': 9,
-  'components/auth/AuthBadge.tsx': 8,
+  // **The one file where an unreachable token is the right call**, and it says
+  // so itself: `global-error.tsx` catches a throw in the root layout, which is
+  // the case where `ui.css` — imported by that layout — may never have loaded.
+  // A boundary that depends on the thing that broke is not a boundary. Held at
+  // exactly 6 rather than removed, so the exemption stays visible and bounded.
   'app/global-error.tsx': 6,
-  'components/canvas/ControlPanel.tsx': 2,
-  'components/canvas/ERDCanvas.tsx': 1,
+
+  // **Violet, and it needs a design decision rather than a conversion.**
+  // `#7c3aed` with its `#f5f3ff` tint and `#ddd6fe` border is the Requirements
+  // Library accent, and the palette contains no violet. `entityAccent.HUB` is
+  // `#9333EA`, but that is an *entity type* accent — spending it on a library
+  // button would conflate two vocabularies that happen to be the same hue.
+  // Recorded per file so the shape of the decision is visible: it is one
+  // colour, one tint and one border, in five places.
+  'app/canvas/page.tsx': 3,
+  'app/page.tsx': 3,
+  'app/trainer/page.tsx': 3,
+  'components/migration/DiffPanel.tsx': 3,
+  'components/TemplateLibraryModal.tsx': 3,
+  // The tier label, flagged at the burn-down's own opening and still open.
+  'components/canvas/EntityNode.tsx': 1,
 };
 
 /** The burn-down as one number, so a run says how much of F1 is left. */

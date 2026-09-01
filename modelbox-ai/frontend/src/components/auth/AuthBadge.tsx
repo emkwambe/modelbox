@@ -8,7 +8,8 @@
 import { useEffect, useState } from 'react';
 
 import AuthModal from '@/components/auth/AuthModal';
-import { Badge } from '@/components/ui';
+import { Badge, toneColor, toneTint } from '@/components/ui';
+import { color, semantic } from '@/styles/tokens';
 import { listWorkspaces } from '@/lib/api';
 import { errMessage } from '@/lib/errors';
 import { useAuthStore } from '@/store/authStore';
@@ -112,8 +113,8 @@ export default function AuthBadge() {
   const btn: React.CSSProperties = {
     padding: '4px 10px',
     borderRadius: 14,
-    border: '1px solid #cbd5e1',
-    background: '#ffffff',
+    border: `1px solid ${color.neutral[300]}`,
+    background: color.white,
     cursor: 'pointer',
   };
 
@@ -156,9 +157,9 @@ export default function AuthBadge() {
             )}
             <span
               style={{
-                background: '#ecfdf5',
-                color: '#047857',
-                border: '1px solid #6ee7b7',
+                background: toneTint('validated', 'light'),
+                color: semantic.validated.onLight,
+                border: `1px solid ${toneColor('validated', 'light')}`,
                 borderRadius: 14,
                 padding: '4px 10px',
                 // Truncate rather than widen the badge; the full address stays
@@ -186,9 +187,9 @@ export default function AuthBadge() {
             type="button"
             style={{
               ...btn,
-              borderColor: '#2563eb',
-              color: '#fff',
-              background: '#2563eb',
+              borderColor: color.blue,
+              color: color.white,
+              background: color.blue,
             }}
             onClick={openModal}
           >

@@ -15,6 +15,7 @@
  */
 
 import { useCanvasStore } from '@/store/canvasStore';
+import { color } from '@/styles/tokens';
 
 const AGGREGATIONS = ['SUM', 'COUNT', 'COUNT_DISTINCT', 'AVG', 'MIN', 'MAX'];
 
@@ -63,7 +64,7 @@ export default function ColumnSemanticEditor() {
       <div style={header}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: 13 }}>Semantic role</div>
-          <div style={{ fontSize: 12, color: '#64748b' }}>
+          <div style={{ fontSize: 12, color: color.neutral[500] }}>
             <code>
               {selectedColumn.entityName}.{selectedColumn.columnName}
             </code>
@@ -96,7 +97,7 @@ export default function ColumnSemanticEditor() {
           marginTop: 10,
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: color.neutral[600] }}>
           Name
         </span>
         <input
@@ -125,7 +126,7 @@ export default function ColumnSemanticEditor() {
           marginTop: 10,
           fontSize: 13,
           fontWeight: 600,
-          color: '#334155',
+          color: color.neutral[700],
         }}
       >
         <input
@@ -166,7 +167,7 @@ export default function ColumnSemanticEditor() {
             marginTop: 10,
           }}
         >
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: color.neutral[600] }}>
             Aggregation
           </span>
           <select
@@ -191,7 +192,7 @@ export default function ColumnSemanticEditor() {
           marginTop: 12,
           fontSize: 13,
           fontWeight: 600,
-          color: '#334155',
+          color: color.neutral[700],
         }}
       >
         <input
@@ -227,7 +228,7 @@ export default function ColumnSemanticEditor() {
       )}
 
       <div style={qualityBox}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: color.neutral[700] }}>
           Quality rules
         </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
@@ -311,7 +312,7 @@ export default function ColumnSemanticEditor() {
           />
           NOT NULL
           {column.is_primary_key && (
-            <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>
+            <span style={{ fontSize: 11, color: color.neutral[500], fontWeight: 400 }}>
               (implied by the key)
             </span>
           )}
@@ -392,7 +393,7 @@ export default function ColumnSemanticEditor() {
         </label>
       </div>
 
-      <p style={{ fontSize: 11, color: '#94a3b8', margin: '10px 0 0' }}>
+      <p style={{ fontSize: 11, color: color.neutral[500], margin: '10px 0 0' }}>
         Save the model to persist. Declared measures drive the exports; classified
         PII clears the exposure warning; quality rules export as dbt / ODCS tests.
       </p>
@@ -406,10 +407,11 @@ const card: React.CSSProperties = {
   bottom: 16,
   width: 280,
   zIndex: 30,
-  background: '#ffffff',
-  border: '1px solid #e2e8f0',
+  background: color.white,
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 10,
-  boxShadow: '0 8px 24px rgba(15,23,42,0.16)',
+  // `neutral-900` at 0.16 as a hex-alpha suffix, so the shadow stays derived.
+  boxShadow: `0 8px 24px ${color.neutral[900]}29`,
   padding: 14,
 };
 
@@ -424,7 +426,7 @@ const closeBtn: React.CSSProperties = {
   border: 'none',
   background: 'transparent',
   fontSize: 15,
-  color: '#64748b',
+  color: color.neutral[500],
   cursor: 'pointer',
   lineHeight: 1,
 };
@@ -433,9 +435,9 @@ const roleBtn = (active: boolean): React.CSSProperties => ({
   flex: 1,
   padding: '7px 10px',
   borderRadius: 6,
-  border: `1px solid ${active ? '#2563eb' : '#cbd5e1'}`,
-  background: active ? '#2563eb' : '#ffffff',
-  color: active ? '#ffffff' : '#334155',
+  border: `1px solid ${active ? color.blue : color.neutral[300]}`,
+  background: active ? color.blue : color.white,
+  color: active ? color.white : color.neutral[700],
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
@@ -444,7 +446,7 @@ const roleBtn = (active: boolean): React.CSSProperties => ({
 const select: React.CSSProperties = {
   padding: '7px 10px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  border: `1px solid ${color.neutral[300]}`,
   fontSize: 13,
   width: '100%',
   boxSizing: 'border-box',
@@ -453,7 +455,7 @@ const select: React.CSSProperties = {
 const qualityBox: React.CSSProperties = {
   marginTop: 12,
   paddingTop: 10,
-  borderTop: '1px solid #f1f5f9',
+  borderTop: `1px solid ${color.neutral[100]}`,
 };
 
 const checkRow: React.CSSProperties = {
@@ -463,7 +465,7 @@ const checkRow: React.CSSProperties = {
   marginTop: 6,
   fontSize: 13,
   fontWeight: 600,
-  color: '#334155',
+  color: color.neutral[700],
 };
 
 const fieldRow: React.CSSProperties = {
@@ -476,5 +478,5 @@ const fieldRow: React.CSSProperties = {
 const qualityLabel: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
-  color: '#475569',
+  color: color.neutral[600],
 };

@@ -16,6 +16,7 @@ import type { Template } from '@/lib/templates';
 import { useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { Paradigm, SynthesizeResponse } from '@/types/schema';
+import { color, semantic } from '@/styles/tokens';
 
 const PARADIGMS: Paradigm[] = ['3NF', 'KIMBALL', 'DATA_VAULT', 'OBT'];
 
@@ -190,7 +191,7 @@ export default function HomePage() {
         }}
       >
         <span style={{ fontWeight: 800, fontSize: 18, letterSpacing: -0.3 }}>
-          ◆ ModelBox<span style={{ color: '#2563eb' }}>AI</span>
+          ◆ ModelBox<span style={{ color: color.blue }}>AI</span>
         </span>
         <div style={{ display: 'flex', gap: 18, fontSize: 14, flexWrap: 'wrap' }}>
           <Link href="/canvas" style={navLink}>
@@ -229,7 +230,7 @@ export default function HomePage() {
         <br />
         &amp; governance mesh
       </h1>
-      <p style={{ color: '#475569', marginTop: 12, fontSize: 16, maxWidth: 640 }}>
+      <p style={{ color: color.neutral[600], marginTop: 12, fontSize: 16, maxWidth: 640 }}>
         Synthesize validated models from plain language, reverse-engineer live
         warehouses, diff &amp; migrate schemas, and ship dbt, data contracts, and
         semantic layers — with governance built in.
@@ -271,7 +272,7 @@ export default function HomePage() {
           marginTop: 24,
           padding: 12,
           borderRadius: 8,
-          border: '1px solid #cbd5e1',
+          border: `1px solid ${color.neutral[300]}`,
           fontFamily: 'inherit',
           fontSize: 14,
         }}
@@ -283,7 +284,7 @@ export default function HomePage() {
           <select
             value={paradigm}
             onChange={(e) => setParadigm(e.target.value as Paradigm)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #cbd5e1' }}
+            style={{ padding: 8, borderRadius: 6, border: `1px solid ${color.neutral[300]}` }}
           >
             {PARADIGMS.map((p) => (
               <option key={p} value={p}>
@@ -298,7 +299,7 @@ export default function HomePage() {
           <input
             value={dialect}
             onChange={(e) => setDialect(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #cbd5e1' }}
+            style={{ padding: 8, borderRadius: 6, border: `1px solid ${color.neutral[300]}` }}
           />
         </label>
       </div>
@@ -312,8 +313,8 @@ export default function HomePage() {
             padding: '10px 20px',
             borderRadius: 8,
             border: 'none',
-            background: loading ? '#94a3b8' : '#2563eb',
-            color: '#ffffff',
+            background: loading ? color.neutral[400] : color.blue,
+            color: color.white,
             fontWeight: 600,
             cursor: loading ? 'default' : 'pointer',
           }}
@@ -331,9 +332,9 @@ export default function HomePage() {
             style={{
               padding: '10px 16px',
               borderRadius: 8,
-              border: '1px solid #2563eb',
-              background: '#ffffff',
-              color: '#2563eb',
+              border: `1px solid ${color.blue}`,
+              background: color.white,
+              color: color.blue,
               fontWeight: 600,
               cursor: 'pointer',
             }}
@@ -344,20 +345,20 @@ export default function HomePage() {
       </div>
 
       {mounted && signedIn && (
-        <p style={{ color: '#16a34a', marginTop: 8, fontSize: 13 }}>
+        <p style={{ color: semantic.validated.onLight, marginTop: 8, fontSize: 13 }}>
           ✓ Signed in — ready to synthesize.
         </p>
       )}
 
       {loading && (
-        <p style={{ color: '#64748b', marginTop: 8, fontSize: 13 }}>
+        <p style={{ color: color.neutral[500], marginTop: 8, fontSize: 13 }}>
           {progress ?? 'Working…'} — runs as a background job, so it won&apos;t
           time out (up to a couple of minutes).
         </p>
       )}
 
       {error && (
-        <p style={{ color: '#dc2626', marginTop: 12 }} role="alert">
+        <p style={{ color: semantic.breaking.onLight, marginTop: 12 }} role="alert">
           {error}
         </p>
       )}
@@ -369,7 +370,7 @@ export default function HomePage() {
             fontWeight: 700,
             letterSpacing: 0.8,
             textTransform: 'uppercase',
-            color: '#64748b',
+            color: color.neutral[500],
           }}
         >
           One platform · the full modeling lifecycle
@@ -386,17 +387,17 @@ export default function HomePage() {
             <div
               key={cap.title}
               style={{
-                border: '1px solid #e2e8f0',
+                border: `1px solid ${color.neutral[200]}`,
                 borderRadius: 10,
                 padding: 16,
-                background: '#ffffff',
+                background: color.white,
               }}
             >
               <div style={{ fontSize: 22 }}>{cap.icon}</div>
               <div style={{ fontWeight: 700, fontSize: 14, marginTop: 8 }}>
                 {cap.title}
               </div>
-              <div style={{ fontSize: 13, color: '#64748b', marginTop: 4, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 13, color: color.neutral[500], marginTop: 4, lineHeight: 1.5 }}>
                 {cap.desc}
               </div>
             </div>
@@ -408,7 +409,7 @@ export default function HomePage() {
 }
 
 const navLink: React.CSSProperties = {
-  color: '#334155',
+  color: color.neutral[700],
   fontWeight: 600,
   textDecoration: 'none',
 };

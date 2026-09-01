@@ -26,6 +26,8 @@ import {
 import type { Template } from '@/lib/templates';
 import { useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
+import { toneColor, toneTint } from '@/components/ui';
+import { color, semantic } from '@/styles/tokens';
 import type {
   Assignment,
   GradeResult,
@@ -173,7 +175,7 @@ export default function TrainerPage() {
     return (
       <main style={{ maxWidth: 640, margin: '0 auto', padding: '64px 24px' }}>
         <h1 style={{ fontSize: 26, fontWeight: 700 }}>ModelBox Trainer</h1>
-        <p style={{ color: '#475569', marginTop: 8 }}>
+        <p style={{ color: color.neutral[600], marginTop: 8 }}>
           Sign in to work through data-modeling challenges with the Socratic tutor.
         </p>
         <button
@@ -184,8 +186,8 @@ export default function TrainerPage() {
             padding: '10px 18px',
             borderRadius: 8,
             border: 'none',
-            background: '#2563eb',
-            color: '#fff',
+            background: color.blue,
+            color: color.white,
             fontWeight: 600,
             cursor: 'pointer',
           }}
@@ -197,12 +199,12 @@ export default function TrainerPage() {
   }
 
   const scoreColor = !grade
-    ? '#64748b'
+    ? color.neutral[500]
     : grade.score >= 80
-      ? '#16a34a'
+      ? semantic.validated.onLight
       : grade.score >= 50
-        ? '#f59e0b'
-        : '#dc2626';
+        ? semantic.preview.onDark
+        : semantic.breaking.onLight;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -214,14 +216,14 @@ export default function TrainerPage() {
           padding: '10px 16px',
           // The badge declares how much space it needs; do not restate it.
           paddingRight: AUTH_BADGE_RESERVE,
-          borderBottom: '1px solid #e2e8f0',
-          background: '#ffffff',
+          borderBottom: `1px solid ${color.neutral[200]}`,
+          background: color.white,
           flexWrap: 'wrap',
         }}
       >
         <Link
           href="/"
-          style={{ fontWeight: 700, textDecoration: 'none', color: '#0f172a' }}
+          style={{ fontWeight: 700, textDecoration: 'none', color: color.neutral[900] }}
         >
           ModelBox Trainer
         </Link>
@@ -231,7 +233,7 @@ export default function TrainerPage() {
           style={{
             padding: '6px 8px',
             borderRadius: 6,
-            border: '1px solid #cbd5e1',
+            border: `1px solid ${color.neutral[300]}`,
             fontSize: 13,
           }}
         >
@@ -264,9 +266,9 @@ export default function TrainerPage() {
           style={{
             padding: '6px 12px',
             borderRadius: 6,
-            border: '1px solid #2563eb',
-            background: '#eff6ff',
-            color: '#2563eb',
+            border: `1px solid ${color.blue}`,
+            background: toneTint('accent', 'light'),
+            color: color.blue,
             fontSize: 13,
             fontWeight: 600,
             cursor: 'pointer',
@@ -282,9 +284,9 @@ export default function TrainerPage() {
             style={{
               padding: '6px 14px',
               borderRadius: 6,
-              border: '1px solid #2563eb',
-              background: '#2563eb',
-              color: '#fff',
+              border: `1px solid ${color.blue}`,
+              background: color.blue,
+              color: color.white,
               fontSize: 13,
               fontWeight: 600,
               cursor: labBusy ? 'default' : 'pointer',
@@ -300,9 +302,9 @@ export default function TrainerPage() {
           style={{
             padding: '6px 14px',
             borderRadius: 6,
-            border: '1px solid #16a34a',
-            background: '#16a34a',
-            color: '#fff',
+            border: `1px solid ${semantic.validated.onLight}`,
+            background: semantic.validated.onLight,
+            color: color.white,
             fontSize: 13,
             fontWeight: 600,
             cursor: active && !busy ? 'pointer' : 'default',
@@ -332,10 +334,10 @@ export default function TrainerPage() {
                 width: 340,
                 maxHeight: 'calc(100% - 24px)',
                 overflowY: 'auto',
-                background: '#ffffff',
-                border: '1px solid #e2e8f0',
+                background: color.white,
+                border: `1px solid ${color.neutral[200]}`,
                 borderRadius: 8,
-                boxShadow: '0 8px 24px rgba(15,23,42,0.12)',
+                boxShadow: `0 8px 24px ${color.neutral[900]}1F`,
                 padding: 12,
                 zIndex: 25,
               }}
@@ -348,18 +350,18 @@ export default function TrainerPage() {
                     setActiveLab(null);
                     setLabGrade(null);
                   }}
-                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' }}
+                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: color.neutral[500] }}
                   aria-label="Exit lab"
                 >
                   ✕
                 </button>
               </div>
-              <p style={{ fontSize: 12, color: '#475569', margin: '6px 0', lineHeight: 1.5 }}>
+              <p style={{ fontSize: 12, color: color.neutral[600], margin: '6px 0', lineHeight: 1.5 }}>
                 {activeLab.brief}
               </p>
 
               {!labGrade && (
-                <div style={{ fontSize: 12, color: '#64748b' }}>
+                <div style={{ fontSize: 12, color: color.neutral[500] }}>
                   Fix the seeded flaws, then <strong>Submit Lab</strong> to grade.
                 </div>
               )}
@@ -370,7 +372,7 @@ export default function TrainerPage() {
                     style={{
                       fontWeight: 700,
                       fontSize: 13,
-                      color: labGrade.solved ? '#16a34a' : '#b45309',
+                      color: labGrade.solved ? semantic.validated.onLight : semantic.preview.onLight,
                     }}
                   >
                     {labGrade.solved
@@ -386,14 +388,14 @@ export default function TrainerPage() {
                           fontSize: 12,
                           padding: '6px 8px',
                           borderRadius: 6,
-                          background: done ? '#f0fdf4' : '#fffbeb',
-                          border: `1px solid ${done ? '#bbf7d0' : '#fde68a'}`,
-                          color: done ? '#166534' : '#92400e',
+                          background: toneTint(done ? 'validated' : 'preview', 'light'),
+                          border: `1px solid ${toneColor(done ? 'validated' : 'preview', 'light')}`,
+                          color: toneColor(done ? 'validated' : 'preview', 'light'),
                         }}
                       >
                         {done ? '✓' : '○'} <code>{f.code}</code> · {f.target}
                         {!done && (
-                          <div style={{ marginTop: 2, color: '#78716c' }}>{f.hint}</div>
+                          <div style={{ marginTop: 2, color: color.neutral[500] }}>{f.hint}</div>
                         )}
                       </div>
                     );
@@ -409,15 +411,15 @@ export default function TrainerPage() {
                 left: 12,
                 bottom: 12,
                 width: 360,
-                background: '#fff',
-                border: '1px solid #fecaca',
+                background: color.white,
+                border: `1px solid ${toneColor('breaking', 'light')}`,
                 borderRadius: 8,
-                boxShadow: '0 4px 12px #0000001a',
+                boxShadow: `0 4px 12px ${color.neutral[900]}1A`,
                 padding: 10,
                 zIndex: 20,
               }}
             >
-              <strong style={{ color: '#dc2626', fontSize: 13 }}>
+              <strong style={{ color: semantic.breaking.onLight, fontSize: 13 }}>
                 {grade.violations.length} violation(s)
               </strong>
               <ul style={{ margin: '6px 0 0', paddingLeft: 0, listStyle: 'none' }}>
@@ -427,8 +429,8 @@ export default function TrainerPage() {
                     <li key={v} style={{ fontSize: 12, marginTop: 4 }}>
                       <span
                         style={{
-                          background: '#dc2626',
-                          color: '#fff',
+                          background: semantic.breaking.onLight,
+                          color: color.white,
                           borderRadius: 4,
                           padding: '0 6px',
                           fontSize: 10,
@@ -438,7 +440,7 @@ export default function TrainerPage() {
                       >
                         {code}
                       </span>
-                      <span style={{ color: '#334155' }}>{rest.join(':').trim()}</span>
+                      <span style={{ color: color.neutral[700] }}>{rest.join(':').trim()}</span>
                     </li>
                   );
                 })}
@@ -451,16 +453,16 @@ export default function TrainerPage() {
         <div
           style={{
             width: 360,
-            borderLeft: '1px solid #e2e8f0',
+            borderLeft: `1px solid ${color.neutral[200]}`,
             display: 'flex',
             flexDirection: 'column',
-            background: '#f8fafc',
+            background: color.neutral[50],
           }}
         >
           <div
             style={{
               padding: '10px 12px',
-              borderBottom: '1px solid #e2e8f0',
+              borderBottom: `1px solid ${color.neutral[200]}`,
               fontWeight: 700,
               fontSize: 13,
             }}
@@ -469,12 +471,12 @@ export default function TrainerPage() {
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
             {!active && (
-              <p style={{ color: '#64748b', fontSize: 13 }}>
+              <p style={{ color: color.neutral[500], fontSize: 13 }}>
                 Select an assignment to begin.
               </p>
             )}
             {active && messages.length === 0 && (
-              <p style={{ color: '#64748b', fontSize: 13 }}>
+              <p style={{ color: color.neutral[500], fontSize: 13 }}>
                 {active.description}
               </p>
             )}
@@ -487,24 +489,25 @@ export default function TrainerPage() {
                   borderRadius: 8,
                   fontSize: 13,
                   whiteSpace: 'pre-wrap',
-                  background: m.role === 'assistant' ? '#eff6ff' : '#ffffff',
-                  border: '1px solid #e2e8f0',
-                  color: '#0f172a',
+                  background:
+                    m.role === 'assistant' ? toneTint('accent', 'light') : color.white,
+                  border: `1px solid ${color.neutral[200]}`,
+                  color: color.neutral[900],
                 }}
               >
-                <strong style={{ color: m.role === 'assistant' ? '#2563eb' : '#334155' }}>
+                <strong style={{ color: m.role === 'assistant' ? color.blue : color.neutral[700] }}>
                   {m.role === 'assistant' ? 'Tutor' : 'You'}
                 </strong>
                 <div style={{ marginTop: 4 }}>{m.content}</div>
               </div>
             ))}
             {tutorBusy && (
-              <p style={{ color: '#64748b', fontSize: 13, marginTop: 8 }}>
+              <p style={{ color: color.neutral[500], fontSize: 13, marginTop: 8 }}>
                 Thinking…
               </p>
             )}
           </div>
-          <div style={{ borderTop: '1px solid #e2e8f0', padding: 10 }}>
+          <div style={{ borderTop: `1px solid ${color.neutral[200]}`, padding: 10 }}>
             {messages.length === 0 ? (
               <button
                 type="button"
@@ -515,8 +518,8 @@ export default function TrainerPage() {
                   padding: 10,
                   borderRadius: 8,
                   border: 'none',
-                  background: active && !tutorBusy ? '#2563eb' : '#94a3b8',
-                  color: '#fff',
+                  background: active && !tutorBusy ? color.blue : color.neutral[400],
+                  color: color.white,
                   fontWeight: 600,
                   cursor: active && !tutorBusy ? 'pointer' : 'default',
                 }}
@@ -539,7 +542,7 @@ export default function TrainerPage() {
                     flex: 1,
                     padding: 8,
                     borderRadius: 6,
-                    border: '1px solid #cbd5e1',
+                    border: `1px solid ${color.neutral[300]}`,
                     fontSize: 13,
                   }}
                 />
@@ -550,8 +553,8 @@ export default function TrainerPage() {
                     padding: '8px 12px',
                     borderRadius: 6,
                     border: 'none',
-                    background: '#2563eb',
-                    color: '#fff',
+                    background: color.blue,
+                    color: color.white,
                     fontWeight: 600,
                     cursor: 'pointer',
                   }}
@@ -567,7 +570,7 @@ export default function TrainerPage() {
       {error && (
         <p
           style={{
-            color: '#dc2626',
+            color: semantic.breaking.onLight,
             fontSize: 13,
             padding: '6px 16px',
             margin: 0,
