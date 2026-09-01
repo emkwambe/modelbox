@@ -217,6 +217,83 @@ SHA-256 was checked directly, because the conformance record stores it as
 provenance and a comment edit inside a string concatenation is exactly where
 that could go wrong unnoticed.
 
+### 2026-09-01 — Task 2, F4's gateable half
+
+F4 had no evidence because its subject could not be built. `src/test/fixtures/
+largeGraph.ts` builds an N-entity graph with deterministic, *varying* column
+counts — varying because a fixture of uniform height cannot tell a layout that
+measures height from one that assumes a constant, which is the defect.
+
+**The re-render storm, fixed and pinned.** `EntityNode` had two subscriptions
+that could not be memoised: `s.validation?.issues.filter(...) ?? []` built a new
+array on every notification, and `s.selectedColumn` is an object every node
+watched. Either alone re-renders all 500 nodes; `React.memo` could not help,
+because the component genuinely did re-subscribe. Fixed by narrowing both — a
+stable `s.validation` reference with the filter moved to `useMemo`, and a
+selector returning this entity's selected column *name* — with `memo` last,
+which is the only order in which it does anything.
+
+Measured with React's own `Profiler` rather than a wrapper, because a wrapper
+does not re-render when its child's subscription fires.
+
+| Assertion | Before | After |
+| :-- | :-- | :-- |
+| renders after one `selectColumn` | 500 | **2** |
+| renders after a store write naming no entity | 500 | **0** |
+| renders for a new validation report | 500 | 500 — see below |
+
+The third is deliberate and stated in the test: a new report is a new object, so
+every node re-evaluates whether it is named. That is correct and rare —
+validation runs on demand, not per frame. Narrowing it further means indexing
+issues per entity in the store, which is more change than the defect warranted.
+
+**Mutation results.** Both arms run against the fixed component, one at a time,
+and they kill *different* assertions — which is what shows they are two defects
+rather than one described twice:
+
+| Reverted | Killed by |
+| :-- | :-- |
+| the `issues` selector | **both** the selection test (500 ≰ 2) and the unrelated-write test (500 ≠ 0) |
+| the `selectedColumn` object subscription | the selection test only; the unrelated-write test still passes |
+
+So the unrelated-write assertion is the only thing in the file that pins the
+`issues` selector specifically.
+
+**The layout defect was geometry, not performance.** `NODE_HEIGHT = 160` went to
+dagre for every node regardless of column count, while a 40-column entity is
+~750px tall — so ranks were spaced for a node a quarter of the size and the tall
+ones overlapped everything beneath. Replaced with `estimatedNodeHeight(columns,
+banners)` derived from `EntityNode`'s own row and header metrics. Validation
+banners are excluded on purpose: a layout that moved every time the linter ran
+would be worse than one a row short on a node missing a primary key.
+
+Mutation: restoring the fixed 160 makes the overlap sweep fail with real
+collisions (`fact_events_0` among them), so the assertion is not vacuous.
+
+**dagre was measured before anything was optimised**, which was the plan's own
+condition:
+
+| Entities | Edges | `applyLayout` |
+| --: | --: | --: |
+| 100 | 90 | 80 ms |
+| 250 | 225 | 118 ms |
+| **500** | **450** | **248 ms** |
+| 1000 | 900 | 635 ms |
+
+Near-linear at this size and 248 ms at F4's number. **A web worker is therefore
+premature** — the plan said measure first precisely so that could be decided
+rather than assumed. The committed ceiling is 10 s, far above the measurement,
+because it exists to catch a change in complexity and not a busy runner.
+
+Frontend suite 29 files / 312 tests → **31 / 320**. `tsc --noEmit` clean,
+`next lint --max-warnings 0` clean.
+
+**Not done in this task, and still F4's larger half:** virtualisation
+(`onlyRenderVisibleElements`, level-of-detail below zoom ~0.5), the
+`structuredClone`-per-mutation history cost, and the recorded browser benchmark
+that carries the smoothness claim. None of them should start before the
+benchmark exists, or there is nothing to say they helped.
+
 ---
 
 ## Carried, and why each is still open

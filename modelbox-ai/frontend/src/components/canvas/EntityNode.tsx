@@ -8,11 +8,26 @@
  */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { memo, useMemo } from 'react';
 
 import { toneTint } from '@/components/ui';
 import { useCanvasStore } from '@/store/canvasStore';
 import { color, entityAccent, semantic } from '@/styles/tokens';
-import type { EntityNode as EntityNodeType, EntityType } from '@/types/schema';
+import type {
+  EntityNode as EntityNodeType,
+  EntityType,
+  ValidationIssue,
+} from '@/types/schema';
+
+/**
+ * One frozen empty array, shared.
+ *
+ * `?? []` allocates a fresh array every time the selector runs, and zustand
+ * compares selector results with `Object.is` — so the literal was enough on its
+ * own to re-render every node on every store write, including when there was no
+ * validation report at all. A shared constant is `Object.is`-equal to itself.
+ */
+const NO_ISSUES: readonly ValidationIssue[] = Object.freeze<ValidationIssue[]>([]);
 
 /**
  * Accent colour per entity type, re-exported from the token module.
@@ -64,37 +79,68 @@ const SHADOW_RESTING = `0 2px 8px ${color.neutral[900]}14`;
  */
 const TYPE_COLOR = color.neutral[500];
 
-export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
+function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
   const accent = ENTITY_ACCENT[data.entity_type] ?? entityAccent.TABLE;
   const selectColumn = useCanvasStore((s) => s.selectColumn);
-  const selectedColumn = useCanvasStore((s) => s.selectedColumn);
 
-  // Pull this entity's lint issues from the validation report (FR-2.3).
-  const issues = useCanvasStore(
-    (s) =>
-      s.validation?.issues.filter((i) =>
-        i.entities.includes(data.entity_name),
-      ) ?? [],
+  /**
+   * The selected column's name **if it belongs to this entity**, else null.
+   *
+   * Subscribing to `s.selectedColumn` itself meant every node watched an object
+   * that changes identity whenever *any* column anywhere is selected — so
+   * clicking one row re-rendered all of them. This returns a string or null, so
+   * only the entity gaining the selection and the one losing it see a change.
+   */
+  const selectedColumnName = useCanvasStore((s) =>
+    s.selectedColumn?.entityName === data.entity_name
+      ? s.selectedColumn.columnName
+      : null,
   );
+
+  /**
+   * This entity's lint issues (FR-2.3), derived rather than selected.
+   *
+   * The filter has to run somewhere, and running it *inside* the selector was
+   * the defect: a new array every notification, unequal under `Object.is`,
+   * re-rendering every node on every store write. `s.validation` is a stable
+   * reference between reports, so the subscription is now quiet until a report
+   * actually arrives, and the filtering moves to `useMemo`.
+   */
+  const validation = useCanvasStore((s) => s.validation);
+  const issues = useMemo(
+    () =>
+      validation?.issues.filter((i) => i.entities.includes(data.entity_name)) ??
+      NO_ISSUES,
+    [validation, data.entity_name],
+  );
+
   const hasError = issues.some((i) => i.severity === 'error');
   const hasWarning = issues.some((i) => i.severity === 'warning');
   const missingPk = issues.some((i) => i.code === 'MISSING_PK');
   // Columns holding a dangling foreign-key reference (precise source metadata).
-  const danglingColumns = new Set(
-    issues
-      .filter(
-        (i) =>
-          i.code === 'DANGLING_REF' &&
-          i.entity_name === data.entity_name &&
-          i.column_name,
-      )
-      .map((i) => i.column_name as string),
+  const danglingColumns = useMemo(
+    () =>
+      new Set(
+        issues
+          .filter(
+            (i) =>
+              i.code === 'DANGLING_REF' &&
+              i.entity_name === data.entity_name &&
+              i.column_name,
+          )
+          .map((i) => i.column_name as string),
+      ),
+    [issues, data.entity_name],
   );
   // Columns flagged as unclassified PII by the governance lint (Pick 1).
-  const piiExposureColumns = new Set(
-    issues
-      .filter((i) => i.code === 'PII_EXPOSURE' && i.column_name)
-      .map((i) => i.column_name as string),
+  const piiExposureColumns = useMemo(
+    () =>
+      new Set(
+        issues
+          .filter((i) => i.code === 'PII_EXPOSURE' && i.column_name)
+          .map((i) => i.column_name as string),
+      ),
+    [issues],
   );
   const statusColor = hasError
     ? ERROR_COLOR
@@ -205,9 +251,9 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
         {data.columns.map((col) => {
           const isDangling = danglingColumns.has(col.name);
           const isPiiExposure = !isDangling && piiExposureColumns.has(col.name);
-          const isSelected =
-            selectedColumn?.entityName === data.entity_name &&
-            selectedColumn?.columnName === col.name;
+          // The entity check already happened in the selector, which is what
+          // makes the subscription a string rather than an object.
+          const isSelected = selectedColumnName === col.name;
           return (
             <li
               key={col.name}
@@ -287,3 +333,13 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
     </div>
   );
 }
+
+/**
+ * Memoised, and it is the *last* of the three changes rather than the first.
+ *
+ * On its own this does nothing: both store subscriptions above genuinely
+ * changed on every write, so the component re-rendered for a reason `memo`
+ * cannot see. With the selectors narrowed, this is what stops a parent's
+ * re-render cascading into five hundred children.
+ */
+export default memo(EntityNode);

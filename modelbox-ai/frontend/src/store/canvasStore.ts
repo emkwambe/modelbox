@@ -35,8 +35,43 @@ import type {
 } from '@/types/schema';
 
 const HISTORY_LIMIT = 50;
-const NODE_WIDTH = 240;
-const NODE_HEIGHT = 160;
+export const NODE_WIDTH = 240;
+
+/**
+ * What a node actually occupies, rather than a constant.
+ *
+ * This was `NODE_HEIGHT = 160` for every node, handed to dagre regardless of
+ * how many columns the entity had. A 40-column entity renders around 750px
+ * tall, so dagre spaced ranks for a node less than a quarter of that size and
+ * the tall ones overlapped everything beneath them. It reads as a rendering or
+ * performance problem and it is neither: it is one number being wrong.
+ *
+ * The figures come from `EntityNode`'s own styles — a 12px row at
+ * `padding: '2px 10px'`, a header at `'7px 11px'` and 700 weight, and the two
+ * optional banners (`grain`, `tier`) at the row padding. They are an estimate
+ * and are meant to be: jsdom cannot measure a box, and the alternative —
+ * measuring in the browser and feeding it back — would make layout depend on
+ * having rendered first. An estimate that tracks column count is the difference
+ * between "wrong by a factor of four on the widest nodes" and "wrong by a few
+ * pixels", and only the first one stacks nodes on top of each other.
+ *
+ * Validation banners are deliberately **not** counted. They come and go with a
+ * lint report, and a layout that moved every time the linter ran would be worse
+ * than one that is a row short on a node with a missing primary key.
+ */
+const HEADER_HEIGHT = 30;
+const ROW_HEIGHT = 18;
+const BANNER_HEIGHT = 18;
+const NODE_CHROME = 4;
+
+export function estimatedNodeHeight(columnCount: number, banners = 0): number {
+  return (
+    HEADER_HEIGHT +
+    banners * BANNER_HEIGHT +
+    columnCount * ROW_HEIGHT +
+    NODE_CHROME
+  );
+}
 
 type LayoutDirection = 'TB' | 'LR';
 
@@ -179,8 +214,16 @@ function layoutNodes(
   graph.setDefaultEdgeLabel(() => ({}));
   graph.setGraph({ rankdir: direction, ranksep: 80, nodesep: 60 });
 
+  // Height per node, not one height for all of them. `heights` is kept so the
+  // offset below uses the *same* number dagre was given — reading it back from
+  // the graph would work too, but a second source is a second thing to get
+  // wrong, and this pair was already wrong once.
+  const heights = new Map<string, number>();
   nodes.forEach((node) => {
-    graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
+    const banners = (node.data.grain ? 1 : 0) + (node.data.tier ? 1 : 0);
+    const height = estimatedNodeHeight(node.data.columns.length, banners);
+    heights.set(node.id, height);
+    graph.setNode(node.id, { width: NODE_WIDTH, height });
   });
   edges.forEach((edge) => {
     graph.setEdge(edge.source, edge.target);
@@ -190,9 +233,11 @@ function layoutNodes(
 
   return nodes.map((node) => {
     const { x, y } = graph.node(node.id);
+    // dagre reports a centre; React Flow positions by top-left corner.
+    const height = heights.get(node.id) ?? estimatedNodeHeight(0);
     return {
       ...node,
-      position: { x: x - NODE_WIDTH / 2, y: y - NODE_HEIGHT / 2 },
+      position: { x: x - NODE_WIDTH / 2, y: y - height / 2 },
     };
   });
 }
