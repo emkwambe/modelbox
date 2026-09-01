@@ -73,7 +73,6 @@ const BUDGET: Readonly<Record<string, number>> = {
   // The remaining one is violet-600 on the tier label, which has no token
   // equivalent and needs a design decision rather than a conversion.
   'components/canvas/EntityNode.tsx': 1,
-  'components/canvas/ValidationPanel.tsx': 13,
   'components/trainer/LabModal.tsx': 12,
   'app/docs/page.tsx': 11,
   'components/auth/AuthModal.tsx': 10,
@@ -201,10 +200,10 @@ describe('colour comes from tokens', () => {
     expect(unbudgeted.map(({ path, n }) => `${path} (${n})`)).toEqual([]);
   });
 
-  it('has 345 colour literals left to convert, of the 358 it started with', () => {
+  it('has 332 colour literals left to convert, of the 358 it started with', () => {
     // F1's burn-down in one number. It exists so a run reports progress rather
     // than only failure, and so a budget entry edited upwards to silence the
     // per-file assertion fails here as well.
-    expect(BUDGET_TOTAL).toBeLessThanOrEqual(345);
+    expect(BUDGET_TOTAL).toBeLessThanOrEqual(332);
   });
 });
