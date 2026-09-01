@@ -632,7 +632,7 @@ class ExporterService:
             avro_type = self._avro_type(col.data_type)
             # Nullability comes from `is_nullable`, never from `is_primary_key`.
             # This branched on the key flag until Sprint 5, which is the same
-            # fact on all five gold graphs — every key is non-nullable and every
+            # fact on all six gold graphs — every key is non-nullable and every
             # non-key column is nullable — so the defect was invisible to every
             # test that existed (correction C7). A column declared NOT NULL in
             # DDL and `required` in ODCS was emitted as a nullable union here,

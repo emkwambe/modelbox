@@ -78,8 +78,10 @@ _SYSTEM_PROMPT = (
     "rejects the customer's own valid data.\n"
     "- references: the qualified 'entity.column' that a foreign key points at.\n"
     # S5-2 again, at entity level, found by the first conformance run. The
-    # gold graphs declare no tier at all, yet MISSING_SLA fired on 5 of 5
-    # candidate graphs — which it can only do when an entity claims a critical
+    # gold graphs declare no tier at all, yet MISSING_SLA fired on all 5 of the
+    # candidate graphs that run scored — the gold set was five at the time, and
+    # this number is that run's, not a current count — which it can only do when
+    # a candidate entity claims a critical
     # or important tier and gives no SLA. The model was inventing the tier. A
     # tier is a governance classification that reaches the ODCS contract and
     # the linter, so it is exactly the kind of term the omission rule exists

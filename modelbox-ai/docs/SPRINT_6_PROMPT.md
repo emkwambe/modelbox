@@ -82,7 +82,8 @@ residue is prose, and some of it is contractual.
    `5/5` ratio), `synthetic/README.md:3`, and the source comments in
    `exporter_service.py:635`, `synthesis_engine.py:81`,
    `test_cross_artifact_consistency.py:88`.
-4. **`docs/marketing/conformance-report.json`** — produced under
+4. **`docs/marketing/conformance-report.json`** — *done: moved to
+   `docs/marketing/superseded/` with a README stating why.* Produced under
    `THRESHOLD_VERSION 1.0` by a metric its own run invalidated, holding five
    graphs and entity F1 0.288. Delete it or move it out of `marketing/`. The
    1.0→1.1 bump makes it *detectable*; it does not make it harmless while it

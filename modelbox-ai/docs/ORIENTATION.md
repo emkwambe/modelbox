@@ -93,7 +93,7 @@ linear.
 Next.js 14 App Router, six routes: `/`, `/canvas`, `/docs`, `/trainer`,
 `/settings/api-keys`, `/settings/connectors`. Zustand for canvas state
 (`store/canvasStore.ts`, 508 lines). `lib/templates.ts` is load-bearing beyond
-the UI — the five gold reference graphs are **extracted** from it into the test
+the UI — the six gold reference graphs are **extracted** from it into the test
 fixtures, never transcribed, with a drift guard.
 
 ### Configuration and deployment
@@ -133,11 +133,16 @@ burn-down as `strict=True` xfails, so a fix that leaves its marker in place turn
 the run red. `MODELBOX_FIDELITY_STRICT=1` converts a missing toolchain into a
 failure rather than a skip.
 
-**Five gold graphs.** `backend/tests/fixtures/gold/` — `banking-datavault`,
-`ecommerce-orders`, `healthcare-ehr`, `marketing-attribution`,
-`saas-subscription`. Every emitter is asserted 5/5 against them. They are a
-curriculum and marketing asset: defect reproductions go in
-`fixtures/synthetic/` instead.
+**Six gold graphs.** `backend/tests/fixtures/gold/` — `aml-financial-crime`,
+`banking-datavault`, `ecommerce-orders`, `healthcare-ehr`,
+`marketing-attribution`, `saas-subscription`. Every emitter is asserted 6/6
+against them. They are a curriculum and marketing asset: defect reproductions go
+in `fixtures/synthetic/` instead.
+
+`aml-financial-crime` arrived in `e0beb47` (AML slice 1) after this document was
+written. Nothing in the fixture layer needed changing for it — every per-graph
+test globs the directory or compares sets — which is why the count moved in the
+prose and the documentation before it moved anywhere else.
 
 **Fourteen verification standards** (`docs/ModelBox_AI_Acceptance_Criteria.md`),
 of which the register says ten were *earned* — written after something went
@@ -225,6 +230,17 @@ findings and the 18 preview xfails.** That table exists so a later run can tell
 whether a number *moved* rather than only what it is; two weeks on, nothing has.
 The app suite spins up a disposable PostgreSQL and takes ~2 minutes 42; its 36
 skips are the fidelity tests, which need `.venv-tools`.
+
+> **Superseded 2026-09-01.** Every row above has since moved, and the table is
+> left as it was rather than re-run in place — it is a record of commands run on
+> a date, and editing the numbers would destroy the only thing it is for. The
+> current baseline is `docs/sprint-6-progress.md`: app suite 682 / 41 / 22,
+> fidelity 274 / 5 / 0, preview 22 xfail / 2 pass, Ruff still exactly 69,
+> versions 1.10.0. The cause is `e0beb47` adding a sixth gold graph plus the
+> Sprint 5 tail; the preview arithmetic is exact (3 dialects × 6 graphs, plus
+> LookML's list going from 3 names to 4), and all 22 carry a preview reason. The
+> sentence above — "two weeks on, nothing has" — was true when written and is
+> now the thing this note exists to correct.
 
 Two notes on the skips, because a silent skip is the thing this repo distrusts
 most. Under `MODELBOX_FIDELITY_STRICT=1` a missing toolchain is a hard failure,

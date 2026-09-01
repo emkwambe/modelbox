@@ -27,7 +27,7 @@ and API keys.
    **Auto-layout**. **Save** persists the graph and re-validates; **Rename** and
    **Delete** manage the model.
 
-> New to the tool? Click **📚 Explore Requirements Library** for 5 gold-standard
+> New to the tool? Click **📚 Explore Requirements Library** for 6 gold-standard
 > starter scenarios — load one onto the canvas instantly (no LLM call) or use it
 > as a prompt.
 

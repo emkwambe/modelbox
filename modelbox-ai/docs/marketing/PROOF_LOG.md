@@ -26,8 +26,8 @@ reason; do not delete it — the history is the argument.
 DuckDB — are verified against real dialect grammars on every push, not against
 our own parser."
 
-**Evidence:** `test_artifact_fidelity.py::test_ddl_dialect_grammar`, 20/20
-certified cases (4 dialects × 5 gold graphs), zero unparsable segments under
+**Evidence:** `test_artifact_fidelity.py::test_ddl_dialect_grammar`, 24/24
+certified cases (4 dialects × 6 gold graphs), zero unparsable segments under
 `sqlfluff` 4.3.0. The same test marks `bigquery`, `databricks` and `clickhouse`
 `@preview`: each rejects the emitted `CREATE TABLE` constraint body, which is why
 they are labelled rather than advertised.
@@ -49,10 +49,10 @@ the `sqlglot` or `sqlfluff` pin in `requirements.lock`, or the certified-dialect
 ## PL-002 — Generated DDL executes on a real engine, not just a parser
 
 **Claim:** "Our generated schemas don't just parse — we execute them. Every
-release runs all five reference models' DDL against a live DuckDB instance and
+release runs all six reference models' DDL against a live DuckDB instance and
 asserts the tables that come back are the tables you modelled."
 
-**Evidence:** `test_artifact_fidelity.py::test_ddl_executes_on_duckdb`, 5/5 gold
+**Evidence:** `test_artifact_fidelity.py::test_ddl_executes_on_duckdb`, 6/6 gold
 graphs. Each emits DDL in the `duckdb` dialect, executes it in an in-memory
 database, then queries `information_schema.tables` and asserts the created set
 equals the model's entity set.
@@ -154,7 +154,7 @@ release, not assumed."
 
 **Evidence:**
 `test_migration_0013_populated.py::test_artifact_generation_is_deterministic`.
-All five reference models are exported twice from a real PostgreSQL 16 — DDL
+All six reference models are exported twice from a real PostgreSQL 16 — DDL
 across 7 dialects, dbt, Cube, LookML, MetricFlow, ODCS, Avro, Protobuf, three
 dictionary formats, two seed formats — in **separate processes**, and every
 artifact compared by SHA-256. Separate processes matter: Python randomises
@@ -228,7 +228,9 @@ connection; we supply everything else — models, tests, sources, package
 dependencies. No hand-editing to make it parse."
 
 **Evidence:** `test_artifact_fidelity.py::test_dbt_project_is_self_contained`,
-5/5 reference models. The project handed to `dbt parse` contains **only**
+6/6 reference models — and a seventh case, the synthetic `quality-rules`
+fixture, so the claim is not resting only on graphs chosen to showcase the
+product. The project handed to `dbt parse` contains **only**
 exporter output plus `dbt_project.yml` and `profiles.yml` — the two files that
 are genuinely the consumer's, because only they know their warehouse.
 

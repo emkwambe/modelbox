@@ -85,7 +85,8 @@ GOLD_MODELS = _load_gold()
 def _discriminating(model: SynthesizedModel) -> SynthesizedModel:
     """A copy where ``is_nullable`` and ``is_primary_key`` are not the same fact.
 
-    **Mandatory, not defensive.** On all five gold graphs every primary key is
+    **Mandatory, not defensive, and re-checked on 2026-09-01 when the gold set
+    became six.** On all six gold graphs every primary key is
     non-nullable and every non-key column is nullable, so `not is_nullable` and
     `is_primary_key` are the *same partition* — correction C7, which already
     cost one sprint a meaningless assertion. A projection that read the wrong

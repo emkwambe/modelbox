@@ -142,7 +142,7 @@ graphs; the assertion needed a mutated copy to mean anything (correction C7).
 
 ## Gold graphs
 
-The five reference models are **extracted** from `frontend/src/lib/templates.ts`
+The six reference models are **extracted** from `frontend/src/lib/templates.ts`
 into `backend/tests/fixtures/gold/`, never transcribed, with a drift guard that
 re-extracts and diffs. They are a curriculum and marketing asset: do not seed
 them with defects, and do not edit them to satisfy an emitter. Defect

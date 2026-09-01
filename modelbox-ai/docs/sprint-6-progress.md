@@ -87,8 +87,9 @@ fitted it to, and the direction is stricter. Left as a count rather than a
 computed majority deliberately — deriving it from `len(GOLD_IDS)` would let it
 move without a decision, which is the property that file exists to deny.
 
-`THRESHOLD_VERSION` 1.0 → 1.1, so `docs/marketing/conformance-report.json`
-cannot be compared across the change by accident.
+`THRESHOLD_VERSION` 1.0 → 1.1, so the first run's report cannot be compared
+across the change by accident. (That report has since moved to
+`docs/marketing/superseded/` — see the Task 1 entry below.)
 
 ### 2026-09-01 — `17e6ff2` Two guards scoped to the instance that provoked them
 
@@ -149,6 +150,73 @@ This file. Plus:
   so nothing caught it. A criterion stating a number its own command no longer
   produces cannot do the job A7 exists to do.
 
+### 2026-09-01 — Task 1, the five-graph drift
+
+Closed in the live documents. Three findings made it more than a number bump.
+
+**Two claims were historical and must not have been changed.**
+`PROOF_LOG.md:100` describes a semantic-layer exporter that `dbt parse` rejected
+"on 5/5 models" during the 59 green CI runs *before* v1.6.0 — when there were
+five graphs. `synthesis_engine.py:81` records `MISSING_SLA` firing on 5 of 5
+candidate graphs in the first conformance run, which scored five. Both are
+dated facts; rewriting them to six would have made them false. The second was
+reworded to say whose count it is rather than left to be misread.
+
+**Two comments asserted a property, not a count.** `exporter_service.py:635`
+and `test_cross_artifact_consistency.py:88` both state that on the gold graphs
+`not is_nullable` and `is_primary_key` are the *same partition* — correction C7,
+and the reason the cross-artifact test needs a mutated copy to mean anything. A
+sixth graph could have broken that, which would have made the mutated copy
+unnecessary and the comment wrong in a way a number bump would have hidden. So
+it was measured rather than assumed: loaded through `SynthesizedModel`, **all
+six graphs have zero columns where the two differ**, `aml-financial-crime`
+included. The property holds, the mutated copy is still mandatory, and the
+comments now say six on evidence.
+
+Worth recording how nearly that went wrong: read straight from the JSON the
+same check reports 3-12 "discriminating" columns per graph, because a primary
+key is not written with `is_nullable: false` in the fixture — the schema layer
+supplies it. Checking the raw file would have concluded the opposite. That is
+the "verify from outside the layer" standard inverted: here the layer *is* the
+thing that establishes the property, so the raw file is the wrong altitude.
+
+**`test_dbt_project_is_self_contained` runs 7 cases, not 6** — the seventh is
+the synthetic `quality-rules` fixture. `PROOF_LOG.md` now says so, because "6/6
+reference models plus a synthetic defect reproduction" is a stronger claim than
+6/6 alone: it is not resting only on graphs chosen to showcase the product.
+
+**Counts verified by collection before they were written**, not inferred:
+`test_ddl_executes_on_duckdb` 6/6; `test_ddl_dialect_grammar` 7 dialects × 6
+graphs, of which 24 are the certified 4 × 6.
+
+**The stale report moved** to `docs/marketing/superseded/` with a README stating
+what it is, why it is invalid, and why it must not be deleted — D10's method is
+that the threshold predates the first call, and that file is the record of the
+first call. `marketing/` is for public claims; a file of invalidated numbers in
+it is the Proof Log's own failure mode pointing the other way.
+
+**Two Docker-backed migration gates were run** while verifying `PL-006`'s
+determinism claim, since it rests on one of them: `test_migration_0013_populated`
+and `test_migration_0015_egress_audit`, **9 passed**. `8b10c4b` had recorded
+them as "an argument, not a run". They are now a run, and that carried item is
+closed.
+
+**Left alone deliberately:** the dated records — release notes, sprint logs, the
+state report. `ORIENTATION.md` §6 got a superseding note rather than edited
+numbers, because it is a record of commands run on a date and editing the
+numbers destroys the only thing it is for.
+
+**Noticed, not fixed:** `docs/USER_GUIDE.md` and
+`frontend/public/content/USER_GUIDE.md` are byte-identical copies with **no test
+asserting they stay that way**. Both were updated here; the next editor may
+update one. That is a drift guard this sprint has not written.
+
+Suites after: app 682 / 41 / 22, fidelity 274 / 5 / **0 xfail** — both unchanged,
+which is the point of touching only comments and prose. `_SYSTEM_PROMPT`'s
+SHA-256 was checked directly, because the conformance record stores it as
+provenance and a comment edit inside a string concatenation is exactly where
+that could go wrong unnoticed.
+
 ---
 
 ## Carried, and why each is still open
@@ -158,11 +226,11 @@ This file. Plus:
 | **D10** — two conformance runs | Instrument is repaired and verified; the runs need a provider opt-in and a spend decision. The cloud half must pin `claude-sonnet-4-5-20250929` to isolate the metric change from a model change |
 | **F4** — everything | Needs a synthetic N-entity fixture before any measurement is possible |
 | **Task 7** — linter-feedback repair | `synthesis_engine.py:150-159` computes the report, logs a count, discards the issues |
-| Two Docker-backed migration gates | Nine tests, never run — `8b10c4b` records "an argument, not a run". Docker is available again (29.6.1) |
+| ~~Two Docker-backed migration gates~~ | **Closed 2026-09-01** — 9 passed under Docker 29.6.1 |
 | Data dictionary fidelity gate | Does not exist; three formats held at `UNVERIFIED` because of it |
 | Violet-600 tier label | Needs a design decision, not a conversion (`colour.walk.test.ts:73-74`) |
 | Canvas store smoke test | 521 lines, no test file (`PROJECT_STATE_REPORT.md:325`) |
-| Five-graph prose drift | ~14 live documents, including five contractual `5/5` claims in `PROOF_LOG.md` and a `USER_GUIDE.md` shipped inside the app |
+| ~~Five-graph prose drift~~ | **Closed 2026-09-01** — see the Task 1 entry. Dated records left as history; a `USER_GUIDE.md` copy-drift guard remains unwritten |
 
 ---
 
