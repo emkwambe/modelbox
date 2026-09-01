@@ -81,11 +81,20 @@ export const type = {
   caption: { size: '0.75rem', weight: 500, lineHeight: 1.4, tracking: '0.02em' },
   code: { size: '0.8125rem', weight: 400, lineHeight: 1.6, tracking: '0' },
   // The UI-density pair. The content ramp above bottoms out at 0.75rem, but
-  // 78% of the frontend's 158 font sizes are 13/12/11px — dense controls,
+  // 80% of the frontend's 147 font sizes are 13/12/11px — dense controls,
   // labels and badges, which are a different scale from prose rather than
   // small prose. Mapping them onto the content ramp would move type on more
   // than a hundred elements; naming them moves nothing. `uiSmall` shares a
   // size with `code` and not its role: `code` is the monospace face.
+  //
+  // **These two weights do not fit the call sites, and `type.walk.test.ts`
+  // measured it.** Of the 64 places that set a size and a weight in the same
+  // style object, exactly four match a step here — the four at 11/600. The
+  // frontend's commonest type is 13/600 (x20) against `uiSmall`'s 13/400, then
+  // 12/600 (x11) against `caption`'s 12/500. So converting a call site to a
+  // token is not mechanical: every one of those 60 either changes weight or
+  // needs a step that does not exist yet. That is an open design decision, not
+  // a conversion backlog — see the Sprint 6 progress note.
   uiSmall: { size: '0.8125rem', weight: 400, lineHeight: 1.45, tracking: '0' },
   uiXSmall: { size: '0.6875rem', weight: 600, lineHeight: 1.3, tracking: '0.02em' },
 } as const;

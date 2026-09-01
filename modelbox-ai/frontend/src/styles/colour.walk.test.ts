@@ -32,26 +32,28 @@
  * not a proof that no literal can exist — the same claim `modals.walk.test.ts`
  * makes about hand-rolled dialogs.
  *
- * **Colour only.** F1 is colour *and* type, and type is not gated here. The
- * frontend spells 158 font sizes as bare numbers (`fontSize: 13`), which needs
- * a different detector and a budget of its own; leaving it out is a stated gap,
- * not an implied clean bill.
+ * **Colour only.** F1 is colour *and* type, and type is gated by
+ * `type.walk.test.ts` — its twin, which shares this file's walk and comment
+ * stripper through `@/test/sourceWalk`. Until that landed this paragraph read
+ * "type is not gated here… a stated gap, not an implied clean bill", and it
+ * also said the frontend spells **158** font sizes as bare numbers. The
+ * measured figure is **147**, an over-count of eleven, and it had not moved
+ * since this gate opened. Both are corrected there and here in the same commit.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const SRC = join(__dirname, '..');
-
-/**
- * The two files that own colour values. `tokens.ts` is the specification's
- * machine-readable twin, and `cssVars.ts` composes the custom properties the
- * stylesheet reads — including the one value it admits is not a token, the
- * modal shadow. Everything else reaches a colour through one of them.
- */
-const OWNS_THE_VALUES = [join('styles', 'tokens.ts'), join('styles', 'cssVars.ts')];
+import {
+  OWNS_THE_VALUES,
+  SRC,
+  relative,
+  sources,
+  stripComments,
+  walk,
+} from '@/test/sourceWalk';
 
 /**
  * Every file with colour literals left in it, and how many.
@@ -86,59 +88,19 @@ const BUDGET: Readonly<Record<string, number>> = {
 /** The burn-down as one number, so a run says how much of F1 is left. */
 const BUDGET_TOTAL = Object.values(BUDGET).reduce((a, b) => a + b, 0);
 
-const LITERAL = /#[0-9a-fA-F]{3,8}\b|rgba?\(/g;
-
 /**
- * Comments are not call sites.
- *
- * This file's own header names `#dc2626`, and `Banner.tsx` documents the amber
- * palette it no longer hard-codes. Counting those would make the burn-down
- * unreadable and would punish explaining a colour, which is the opposite of
- * what is wanted.
- *
- * The line-comment pass will not fire on a `//` preceded by `:`, `'`, `"` or a
- * backtick, so a URL in a string keeps the rest of its line. The error it can
- * still make is stripping too little — a `//` comment inside a template
- * literal — and that direction over-counts, which fails loudly rather than
- * passing quietly.
+ * What this gate opened at, in `1eaaa05`. 358 literals had been converted down
+ * to 332 by the time the constant was introduced; it is the ceiling the total
+ * is held under, and it does not move when a budget entry is lowered.
  */
-export function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .map((line) => line.replace(/(^|[^:'"`])\/\/.*$/, '$1'))
-    .join('\n');
-}
+const OPENED_AT = 332;
+
+const LITERAL = /#[0-9a-fA-F]{3,8}\b|rgba?\(/g;
 
 /** Colour literals written in code, comments excluded. */
 export function countColourLiterals(source: string): number {
   return (stripComments(source).match(LITERAL) || []).length;
 }
-
-function walk(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) return walk(path);
-    return /\.tsx?$/.test(entry.name) ? [path] : [];
-  });
-}
-
-/**
- * Tests are exempt as a class.
- *
- * A test that asserts a token's value has to name the value, or it compares the
- * token to itself and asserts nothing — `tokens.test.ts` is exactly that check
- * against the specification document. `status-colour.test.tsx` names the three
- * retired colours in order to ban them. Both are the gate, not the debt.
- */
-const isTest = (path: string): boolean => /\.test\.tsx?$/.test(path);
-
-const relative = (path: string): string =>
-  path.slice(SRC.length + 1).split(sep).join('/');
-
-const sources = walk(SRC).filter(
-  (path) => !isTest(path) && !OWNS_THE_VALUES.some((owned) => path.endsWith(owned)),
-);
 
 describe('colour comes from tokens', () => {
   it('found sources to check', () => {
@@ -200,10 +162,17 @@ describe('colour comes from tokens', () => {
     expect(unbudgeted.map(({ path, n }) => `${path} (${n})`)).toEqual([]);
   });
 
-  it('has 332 colour literals left to convert, of the 358 it started with', () => {
+  it('never has more colour literals than the budget opened with', () => {
     // F1's burn-down in one number. It exists so a run reports progress rather
     // than only failure, and so a budget entry edited upwards to silence the
     // per-file assertion fails here as well.
-    expect(BUDGET_TOTAL).toBeLessThanOrEqual(332);
+    //
+    // The comparison is against a fixed `OPENED_AT` rather than a number in
+    // this test's name. It used to read "has 332 colour literals left", which
+    // was true when written and becomes false with the first conversion — the
+    // assertion still passes, so nothing reports that the headline has rotted.
+    // A test whose name states a number the assertion does not enforce will
+    // eventually state a wrong one.
+    expect(BUDGET_TOTAL).toBeLessThanOrEqual(OPENED_AT);
   });
 });

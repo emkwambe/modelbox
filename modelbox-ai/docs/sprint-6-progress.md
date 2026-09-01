@@ -294,6 +294,66 @@ Frontend suite 29 files / 312 tests → **31 / 320**. `tsc --noEmit` clean,
 that carries the smoothness claim. None of them should start before the
 benchmark exists, or there is nothing to say they helped.
 
+### 2026-09-01 — Task 3, F1's type half gets a gate, and the gate finds a spec defect
+
+`type.walk.test.ts`, the colour walk's twin. It counts **four** properties, not
+just `fontSize`: a `type` token supplies size, weight, line height and tracking
+together, so counting only size would let a tokenised size sit beside a
+hand-written `fontWeight: 600` and read as converted. Opening budget **254**
+across 20 files (264 total, less `tokens.ts`, which owns the values).
+
+The walk and the comment stripper moved to `@/test/sourceWalk` rather than being
+copied. A second hand-maintained comment stripper is the arrangement
+`EntityNode`'s own accent-palette comment describes as guaranteeing one copy is
+eventually wrong — and it is the piece most able to fail quietly, because a
+stripper that eats too much makes *both* burn-downs under-count, and an
+under-count reads as progress.
+
+**Mutation:** two bare declarations added to a file outside the budget fail the
+unbudgeted sweep, reported as `test/fixtures/largeGraph.ts (2)`.
+
+**Two corrections to the colour walk while there.**
+
+* Its header claimed **158** bare font sizes. The measured figure is **147**,
+  an over-count of eleven, unchanged since the gate opened.
+* `'has 332 colour literals left'` asserted `toBeLessThanOrEqual(332)`. That
+  does catch a budget entry edited upwards — the total rises past 332 — but it
+  cannot keep the name true: as conversions land the total falls, the assertion
+  still passes, and the number in the test's own name silently becomes a lie.
+  Both burn-downs now compare against a fixed `OPENED_AT` and are named without
+  a figure.
+
+#### The finding: the type ramp cannot express the product's own type
+
+Building the detector produced a measurement nobody had: of the **64** places
+that set a size *and* a weight in one style object, **exactly four match a step
+in the ramp** — the four at 11/600.
+
+| In the code | × | Nearest ramp step |
+| :-- | --: | :-- |
+| 13 / 600 | 20 | `uiSmall` 13 / **400** |
+| 12 / 600 | 11 | `caption` 12 / **500** |
+| 11 / 700 | 5 | `uiXSmall` 11 / **600** |
+| 13 / 700 | 4 | `uiSmall` 13 / **400** |
+| **11 / 600** | **4** | **`uiXSmall` — the only exact match** |
+
+The UI-density pair was specified at weights 400 and 600; the call sites use 600
+and 700 almost throughout. **So type conversion is not the mechanical exercise
+colour conversion was** — 60 of the 64 sites either change weight visibly or
+need a step that does not exist.
+
+This reframes F1's type half from "0% converted" to "blocked on a specification
+decision", which is a different and more honest status. It is recorded in
+`ModelBox_AI_Design_Tokens.md` as the specification's defect rather than the
+call sites': the ramp is the authority, so a ramp the product cannot express
+itself in is the ramp's problem. It joins the violet-600 tier label as an open
+design decision.
+
+Frontend suite 31 files / 320 tests → **32 / 346**. `tsc` clean, lint clean.
+Colour burn-down unmoved at 332 — this task built the instrument for the other
+half and deliberately converted nothing, because the first honest conversion
+needs the decision above.
+
 ---
 
 ## Carried, and why each is still open

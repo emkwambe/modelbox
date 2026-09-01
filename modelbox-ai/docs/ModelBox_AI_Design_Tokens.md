@@ -132,10 +132,26 @@ must not fail.
 **Two scales, not one.** `display` through `code` is the *content* ramp.
 `uiSmall` and `uiXSmall` are the *UI-density* pair: dense controls, field
 labels and badges. They exist because the content ramp bottoms out at 0.75rem
-while 78% of the frontend's 158 font sizes are 13, 12 and 11px — those elements
+while 80% of the frontend's 147 font sizes are 13, 12 and 11px — those elements
 are not small prose, and mapping them onto the content ramp would change type on
 more than a hundred of them. `uiSmall` shares a size with `code` and not its
 role; `code` is the monospace face.
+
+> **Measured 2026-09-01, and it contradicts the pair above.** This section
+> previously said 158 font sizes; the count is **147**, and it had not moved
+> since the burn-down opened. More seriously, `type.walk.test.ts` counted the
+> places that set a size *and* a weight in one style object: **64 of them, of
+> which 4 match a step in this table** — the four at 11/600. The frontend's
+> commonest type is **13/600 (×20)** where `uiSmall` says 13/400, and then
+> **12/600 (×11)** where `caption` says 12/500.
+>
+> The UI-density pair was specified at weights 400 and 600; the call sites use
+> 600 and 700 almost throughout. So converting type is not the mechanical
+> exercise converting colour was — 60 of the 64 sites either change weight
+> visibly or need a step this table does not contain. **This specification owes
+> a decision before that work can start**, and stating it here is the point of
+> the file: the ramp is the authority, so a ramp the product cannot express
+> itself in is the specification's defect rather than the call sites'.
 
 ---
 
