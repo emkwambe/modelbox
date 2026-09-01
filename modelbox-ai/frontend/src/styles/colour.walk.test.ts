@@ -63,7 +63,9 @@ import {
  */
 const BUDGET: Readonly<Record<string, number>> = {
   'app/trainer/page.tsx': 65,
-  'app/settings/egress/page.tsx': 30,
+  // `app/settings/egress/page.tsx` reached zero and is deleted from the budget
+  // rather than left at 0 — the unbudgeted sweep now holds it there, which is
+  // a stricter guard than an entry saying "should be none".
   'components/editor/ExportPanel.tsx': 26,
   'app/settings/api-keys/page.tsx': 25,
   'components/migration/DiffPanel.tsx': 25,

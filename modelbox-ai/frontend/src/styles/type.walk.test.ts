@@ -57,7 +57,7 @@ const BUDGET: Readonly<Record<string, number>> = {
   'components/canvas/ColumnSemanticEditor.tsx': 25,
   'app/settings/api-keys/page.tsx': 19,
   'components/migration/DiffPanel.tsx': 18,
-  'app/settings/egress/page.tsx': 17,
+  'app/settings/egress/page.tsx': 16,
   'app/settings/connectors/page.tsx': 16,
   'components/TemplateLibraryModal.tsx': 15,
   'app/canvas/page.tsx': 15,

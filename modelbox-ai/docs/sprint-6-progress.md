@@ -354,6 +354,45 @@ Colour burn-down unmoved at 332 — this task built the instrument for the other
 half and deliberately converted nothing, because the first honest conversion
 needs the decision above.
 
+### 2026-09-01 — Task 3, the first screen converted
+
+`app/settings/egress/page.tsx`, chosen because the plan says convert by screen
+rather than by file — so a screen leaves in a state F1, F2, F3 and F6 can all
+assert against at once.
+
+**Colour 30 → 0.** The entry is deleted from the budget rather than left at
+zero; the unbudgeted sweep then holds it there, which is stricter than an entry
+saying "should be none". Burn-down **332 → 302**. Type 17 → 16 (253 left) — the
+rest of that file's type is blocked on the ramp decision above.
+
+Both gates behaved as designed: the conversion turned them **red**, demanding
+the budget be lowered, exactly as a burn-down that cannot be beaten silently
+should.
+
+**Two hand-rolled states became primitives**, which is F2 and F3 work on the
+same screen. The amber box was `#fffbeb` / `#fde68a` / `#92400e` — three values
+from Tailwind's amber ramp, none of them this product's, with the foreground
+never measured against the ground it sat on. `Banner` derives both from the
+`preview` role at an alpha the badge tests hold to the floor.
+
+**A correction worth recording, because I nearly shipped it.** The comment I
+first wrote for the error path claimed `#dc2626` measures 4.26:1 and therefore
+*failed* the 4.5:1 body floor. Computed, it is **4.62:1** on this page's
+`neutral-50` ground — it passes. `breaking.onLight` is 6.01:1, not the 5.92:1 I
+also asserted. Both numbers were invented to justify a change that is correct
+for a different reason: `#dc2626` is Tailwind's red-600, one of the two literals
+`status-colour.test.tsx` bans by name and the most-repeated colour in the
+frontend at 22 occurrences, and `StatusText` carries the assertive announcement
+with the tone instead of leaving `role="alert"` to a call site that must
+remember it. The comment now says that, with the measured figures.
+
+This is the failure mode `CLAUDE.md` opens with — claiming a measurement not
+performed — arriving in a code comment rather than in a test, where nothing
+would have caught it.
+
+Frontend 32 files / 346 → 32 / **345**: one fewer because a parametrised budget
+case disappeared with the entry. `tsc` clean, lint clean.
+
 ---
 
 ## Carried, and why each is still open
