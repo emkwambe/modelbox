@@ -221,7 +221,27 @@ async def get_authorized_model(
 AuthorizedModelDep = Annotated[DataModel, Depends(get_authorized_model)]
 
 # Role hierarchy for RBAC: OWNER > ADMIN > MEMBER (Slice B2).
-_ROLE_LEVEL: dict[str, int] = {"MEMBER": 1, "ADMIN": 2, "OWNER": 3}
+#: The role ladder, lowest to highest (G10).
+#:
+#: **Extended rather than replaced.** The sprint plan names the roles
+#: viewer / modeller / approver / admin, and the obvious move is to adopt that
+#: vocabulary wholesale. It would also rewrite the role of every existing
+#: member, invalidate the CHECK constraint every row was written under, and
+#: require a data migration whose failure mode is somebody silently losing
+#: access. `MEMBER` *is* the modeller — it is the role that edits a model — so
+#: the ladder gains the two levels it genuinely lacked and keeps the three it
+#: had.
+#:
+#: `VIEWER` exists because read-only access had no expression at all: the
+#: lowest role could edit every model in the workspace, so "let the auditor
+#: look" and "let the auditor change things" were the same grant.
+_ROLE_LEVEL: dict[str, int] = {
+    "VIEWER": 1,
+    "MEMBER": 2,
+    "APPROVER": 3,
+    "ADMIN": 4,
+    "OWNER": 5,
+}
 
 
 async def require_workspace_role(

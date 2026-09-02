@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import uuid
 import zipfile
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -36,13 +35,14 @@ from app.schemas.data_model import (
     ModelUpdateRequest,
     SemanticEngine,
     SemanticExportResponse,
-    SyntheticSeedRequest,
-    SyntheticSeedResponse,
     SynthesizedModel,
     SynthesizeRequest,
     SynthesizeResponse,
+    SyntheticSeedRequest,
+    SyntheticSeedResponse,
     ValidationReport,
 )
+from app.services import audit_log
 from app.services.diff_engine import DiffEngine
 from app.services.exporter_service import ExporterError
 from app.services.graph_engine import GraphEngine
@@ -235,6 +235,42 @@ async def delete_model(
     """Delete a model and its graph (cascade). Requires ADMIN or higher."""
     await session.delete(model)
     await session.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{model_id}/approve",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Record sign-off on a model (APPROVER or higher)",
+)
+async def approve_model(
+    user: CurrentUserDep,
+    model: Annotated[DataModel, Depends(require_model_role("APPROVER"))],
+) -> Response:
+    """Record that a named person signed off on this model, and when.
+
+    **This exists so that the APPROVER role is not decorative.** A remediation
+    programme's central question is *who signed off on this model*, and a role
+    that grants nothing cannot be asked it. The approval is written to the audit
+    trail rather than to a column on the model, for the reason the trail exists:
+    a column holds the latest answer and silently loses every previous one,
+    while the question a reviewer asks is usually about a version that is no
+    longer current.
+
+    Deliberately not a workflow. There is no pending state, no request-changes,
+    no second approver — those are product decisions nobody has made, and
+    inventing them here would ship a governance process by accident. What is
+    claimed is exactly what is recorded: this person, this model, this moment.
+    """
+    await audit_log.record(
+        action="MODEL_APPROVED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=model.workspace_id,
+        resource_type="model",
+        resource_id=str(model.model_id),
+        detail={"title": model.title, "version": model.version_number},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

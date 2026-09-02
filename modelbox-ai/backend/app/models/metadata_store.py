@@ -41,7 +41,7 @@ from sqlalchemy.orm import (
 # Valid enumerations enforced at the database layer (CHECK constraints).
 PARADIGMS = ("3NF", "KIMBALL", "DATA_VAULT", "OBT")
 CARDINALITIES = ("1:1", "1:N", "N:1", "N:M")
-WORKSPACE_ROLES = ("OWNER", "ADMIN", "MEMBER")
+WORKSPACE_ROLES = ("OWNER", "ADMIN", "APPROVER", "MEMBER", "VIEWER")
 JOB_STATUSES = ("PENDING", "PROCESSING", "COMPLETED", "FAILED")
 CONNECTION_ENGINES = ("POSTGRESQL", "SNOWFLAKE", "BIGQUERY", "MYSQL", "DUCKDB")
 
@@ -123,7 +123,7 @@ class WorkspaceMember(Base):
             "workspace_id", "user_id", name="uq_workspace_member"
         ),
         CheckConstraint(
-            "role IN ('OWNER', 'ADMIN', 'MEMBER')",
+            "role IN ('OWNER', 'ADMIN', 'APPROVER', 'MEMBER', 'VIEWER')",
             name="ck_workspace_members_role",
         ),
     )
@@ -646,6 +646,7 @@ AUDIT_ACTIONS: tuple[str, ...] = (
     "MODEL_CREATED",
     "MODEL_UPDATED",
     "MODEL_DELETED",
+    "MODEL_APPROVED",
     "ARTIFACT_GENERATED",
 )
 
