@@ -553,6 +553,69 @@ contents with a scripted stub — they say nothing about whether a real model
 repairs a real graph, which is a question for D10's runs and for a Proof Log
 entry that does not exist yet.
 
+### 2026-09-01 — Four claims the product had earned and was forbidden to make
+
+`PROOF_LOG.md`'s "not yet provable" table still blocked four claims on findings
+**B1, H6, H2 and H1** — all closed in Sprints 3 and 4. The tests that closed them
+pass 6/6, the non-preview fidelity leg is at **0 xfail**, and by rule E2/G3 the
+product still could not say any of it, because no `PL-` entry named the tests.
+That is the Proof Log producing the failure it exists to prevent, pointing the
+other way: not overclaiming, but forbidding true statements.
+
+`PL-011`–`PL-014` now exist. Every cited test was collected and run before being
+written down — 81 passed, 1 skipped, and the skip is `marketing-attribution`
+having no foreign keys to order, which is stated in the entry rather than
+omitted.
+
+Each entry carries the limit that keeps it honest:
+
+* **PL-011** excludes **LookML** outright — `@preview`, defect M3 — so "semantic
+  layer" means MetricFlow and Cube.
+* **PL-012** is Protobuf tag stability across an *insert*; Avro parses but its
+  compatibility rules are not asserted.
+* **PL-013** rests on the B15 pair, where a mutant emitting well-formed
+  `nullValues` in place of the declared pattern passes the vocabulary test and
+  fails the meaning test.
+* **PL-014** rests on `test_seed_fixtures_exercise_every_declared_rule`, without
+  which the suite could pass by generating data for constraints no fixture
+  declares.
+
+The differentiator line — *"governed contracts and semantic layers, not just
+schemas"* — stays on the blocked list on purpose. Both its blockers are closed
+and the evidence is now PL-011 + PL-013, but register **G5** puts *stating* it
+in Sprint 7. The evidence being ready is not the same as the wording being
+decided.
+
+#### And the rule itself is now enforced
+
+`CLAUDE.md` says a Proof Log entry requires a named passing test. Nothing
+checked it. `test_security_faq_cites_real_proof.py` guards **FAQ → Proof Log**;
+the other link — **Proof Log → tests** — was unguarded, so an entry could cite
+`test_odcs_apiverison_is_current` and no run anywhere would notice. The claim
+would read as evidenced and the citation would be unfollowable.
+
+`test_proof_log_cites_real_tests.py` closes it: 55 citations, one case each so a
+failure names the broken one. Mutation: misspelling a single citation fails
+exactly that case.
+
+**The scanner failed twice on itself first**, which is worth recording because
+both were the same class of error:
+
+1. It matched *file* names — `test_artifact_fidelity.py::…` — and reported eight
+   missing tests that were all modules.
+2. Adding `(?!\.py)` did not fix it: the greedy `+` gave back one character to
+   satisfy the lookahead, so the citation matched as `test_artifact_fidelit`.
+   The word-boundary lookahead has to come first.
+
+A scanner that cannot tell a file from a function would have made every entry in
+the document look broken — a gate whose failure mode is "everything is wrong" is
+as useless as one that never fires.
+
+**Ruff moved 69 → 70** on this file (`FURB167`, `re.M`). Fixed rather than
+absorbed, and back to 69 — the baseline exists so a number that moves is chased.
+
+App suite 691 → **746 passed**, 41 skipped, 22 xfailed.
+
 ---
 
 ## Carried, and why each is still open

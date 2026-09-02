@@ -450,6 +450,165 @@ one. All three are asserted.
 
 ---
 
+## PL-011 — Semantic layer exports compile in the tools that consume them
+
+**Claim:** "Export a semantic layer and the tool parses it. MetricFlow models
+resolve inside a real dbt project; Cube schemas are valid JavaScript. Not
+'looks right' — parsed by dbt and by a JS engine."
+
+**Evidence:** `test_artifact_fidelity.py::test_metricflow_parses_in_dbt`, 6/6
+reference models, and `::test_cube_is_valid_js`, 6/6. MetricFlow is not checked
+in isolation: the semantic models are placed in a generated dbt project and
+`dbt parse` resolves them together with the models they reference, so a
+semantic model naming a table the project does not contain fails. Nine further
+MetricFlow tests hold the details that make the parse meaningful rather than
+merely successful — `::test_metricflow_declares_agg_time_dimension`,
+`::test_metricflow_measures_require_an_aggregation_time_axis`,
+`::test_metricflow_ref_matches_dbt_model_name`,
+`::test_metricflow_semantic_model_has_primary_entity`,
+`::test_metricflow_foreign_entity_names_parent_primary`,
+`::test_metricflow_names_avoid_reserved_granularity`,
+`::test_metricflow_agg_vocabulary_is_valid`, `::test_metricflow_metrics_have_label`.
+
+**Why it is stronger than it looks:** this claim was on the "not yet provable"
+list from Sprint 3, blocked on finding **B1 — MetricFlow parsed on 0 of 5
+graphs**, with 24 xfails behind it. It is listed here now because those xfails
+are gone, not because the wording softened: the burn-down is `strict=True` from
+creation, so every one of them had to be *removed* by a fix that turned the run
+red first. The non-preview fidelity leg stands at **0 xfail**.
+
+The distinction between parsing and resolving is the whole point.
+`test_metricflow_ref_matches_dbt_model_name` exists because a semantic model
+that parses while pointing at a model name the project never emits is a file
+that satisfies a parser and breaks a warehouse.
+
+**Honest limit:** **LookML is excluded and is not covered by this claim.** It
+carries `@pytest.mark.preview` and a live defect (`M3` — `SUM()` emitted over a
+foreign key), and preview dialects are labelled rather than scheduled. "Semantic
+layer" here means MetricFlow and Cube. `dbt parse` also resolves rather than
+executes: it proves the project is coherent, not that a metric returns the
+number a business expects.
+
+**Verified:** 2026-09-01 · **Sprint:** 3 (fix), 6 (claimed) · **Version:** 1.10.0
+**Expires:** if any MetricFlow or Cube test regains an xfail, or if LookML is
+folded into the claim without leaving preview.
+**Usable in:** landing page, semantic-layer positioning, export UI.
+**Not** usable as a claim about LookML.
+
+---
+
+## PL-012 — Data contracts are wire-stable across a schema change
+
+**Claim:** "Insert a column into the middle of a table and your Protobuf
+contract does not break. Field tags are assigned from server-side stable ids,
+not from column order, so a consumer built against yesterday's contract still
+decodes today's data."
+
+**Evidence:** `test_artifact_fidelity.py::test_protobuf_tags_stable_on_insert`
+and `::test_protobuf_tags_are_the_stable_ids`, 6/6 reference models each, with
+`::test_protobuf_compiles` (6/6) handing the output to `protoc`. The insert test
+is the load-bearing one: a column is added mid-table and every pre-existing
+field's tag is asserted unchanged.
+
+**Why it is stronger than it looks:** this was blocked on **H6 — Protobuf tags
+shift when a column is inserted**, which is the defect that makes wire
+compatibility a lie rather than a limitation. Tag stability cannot be asserted
+by reading one emitted file; it is a property of two, and only a test that
+mutates a schema and re-emits can see it. `stable_id` is allocated once by the
+server and never reused, which is what gives the emitter something order-
+independent to key on — the same field the diff engine uses to tell a rename
+from a drop-plus-add.
+
+**Honest limit:** wire stability is claimed for **Protobuf**, where tags are the
+compatibility mechanism. Avro is verified to parse (`::test_avro_parses`) but
+its compatibility rules are resolution-based rather than tag-based and are not
+asserted here. And this is stability across *insertion*: dropping a column is a
+breaking change in any encoding, which is what the diff engine reports rather
+than something an exporter can prevent.
+
+**Verified:** 2026-09-01 · **Sprint:** 3 (fix), 6 (claimed) · **Version:** 1.10.0
+**Expires:** on any change to tag assignment in the Protobuf exporter, or if
+`stable_id` ever becomes reusable.
+**Usable in:** landing page, contract/governance positioning, integration docs.
+
+---
+
+## PL-013 — Our data contracts are valid ODCS v3.1.0, and say what they mean
+
+**Claim:** "Contracts export as Open Data Contract Standard v3.1.0 — the current
+version, with the required fields, and with quality rules that carry the meaning
+of the constraint they came from."
+
+**Evidence:** `test_artifact_fidelity.py::test_odcs_apiversion_is_current` and
+`::test_odcs_conforms_to_v3_fundamentals`, 6/6 reference models;
+`::test_odcs_required_reflects_nullability` and
+`::test_odcs_declares_foreign_keys_as_relationships`, 6/6; and the pair the
+register calls out as B15 — `::test_odcs_quality_entries_use_v3_vocabulary`
+(conformance) with `::test_odcs_carries_the_meaning_of_each_declared_constraint`
+(correctness).
+
+**Why it is stronger than it looks:** blocked on **H2 — stamped v0.9.3, missing
+required v3.1.0 fields**, so the previous output was a document claiming a
+standard it did not meet, which is worse than emitting nothing.
+
+The conformance/correctness split is the part worth understanding. A contract can
+use perfectly valid v3.1.0 quality vocabulary and still say the wrong thing —
+and the register records the mutant that proves the two tests are independent: a
+mutant emitting a well-formed `nullValues` rule in place of the declared pattern
+**passes the vocabulary test and fails the meaning test**. One test alone would
+have certified it.
+
+**Honest limit:** validity is asserted against the v3.1.0 schema and vocabulary,
+not against a consuming platform's interpretation of it. A contract that is
+valid ODCS can still be a contract nobody agreed to — which is why the
+synthesis prompt refuses to invent tiers, SLAs, ranges and patterns rather than
+relying on this gate to catch them.
+
+**Verified:** 2026-09-01 · **Sprint:** 3 (fix), 6 (claimed) · **Version:** 1.10.0
+**Expires:** when ODCS publishes a version beyond 3.1.0, or on any change to the
+quality-rule emitter.
+**Usable in:** landing page, contract positioning, regulated-buyer review.
+
+---
+
+## PL-014 — Generated test data satisfies the contract generated beside it
+
+**Claim:** "The seed data we generate satisfies the data contract we generate
+from the same model — lengths, precision, nullability, uniqueness, check
+expressions and quality rules. It loads, and `dbt build` passes its tests."
+
+**Evidence:** `test_artifact_fidelity.py::test_dbt_build_succeeds_on_generated_seed_data`
+— generated rows are loaded and `dbt build` runs the generated tests against
+them. The per-rule assertions are `::test_seed_respects_declared_length`,
+`::test_seed_respects_declared_precision_and_scale`,
+`::test_seed_never_nulls_a_non_nullable_column`,
+`::test_seed_values_are_unique_where_declared`,
+`::test_seed_satisfies_an_enumerated_check_expression`,
+`::test_seed_respects_quality_rules`, and `::test_seed_generation_order_is_fk_safe`.
+
+**Why it is stronger than it looks:** blocked on **H1 — seed ignores declared
+lengths and quality rules**, and the reason it can be claimed now is one test
+that is not about seed data at all:
+`::test_seed_fixtures_exercise_every_declared_rule` asserts the fixtures contain
+a case for **every** rule the generator claims to honour. Without it the suite
+could pass by generating data for constraints no fixture declares — a green run
+proving that unexercised rules are unbroken.
+
+That is the difference between "the seed satisfies the contract" and "the seed
+satisfies the parts of the contract we happened to test."
+
+**Honest limit:** satisfaction is asserted for the constraint families the IR
+can express. It is synthetic data — statistically meaningless, and useful for
+loading and testing rather than for analysis. `dbt build` runs the generated
+tests, not a consumer's own.
+
+**Verified:** 2026-09-01 · **Sprint:** 4 (fix), 6 (claimed) · **Version:** 1.10.0
+**Expires:** if a constraint family is added to the IR without a fixture case,
+which `test_seed_fixtures_exercise_every_declared_rule` turns red.
+**Usable in:** landing page, seed/demo-data positioning, evaluation guide.
+
+---
+
 ## Claims explicitly NOT yet provable
 
 Recorded so nobody reaches for them early. Each becomes an entry when its test
@@ -457,9 +616,9 @@ passes.
 
 | Prospective claim | Blocked on | Sprint |
 | :-- | :-- | :-- |
-| "Semantic layer exports compile in dbt" | B1 — 24 xfails; MetricFlow parses on 0/5 graphs | 3 |
-| "Data contracts are wire-stable" | H6 — Protobuf tags shift when a column is inserted | 3 |
-| "Our contracts are valid ODCS" | H2 — stamped v0.9.3, missing required v3.1.0 fields | 3 |
-| "Generated test data satisfies the generated contract" | H1 — seed ignores declared lengths and quality rules | 4 |
+| ~~"Semantic layer exports compile in dbt"~~ **now PL-011** (2026-09-01), scoped: MetricFlow and Cube only. **LookML is still blocked** — `@preview`, defect M3 | — | 3 |
+| ~~"Data contracts are wire-stable"~~ **now PL-012** (2026-09-01), scoped to Protobuf tag stability across a column *insert*; Avro parses but its compatibility rules are not asserted | — | 3 |
+| ~~"Our contracts are valid ODCS"~~ **now PL-013** (2026-09-01), with conformance and correctness asserted separately (register B15) | — | 3 |
+| ~~"Generated test data satisfies the generated contract"~~ **now PL-014** (2026-09-01) | — | 4 |
 | ~~"We can *show you* everything that left your network"~~ **now PL-009** (2026-08-29), with one wording caveat: the view is workspace-scoped, so "everything" is everything *in the workspaces you belong to*, plus a count of what cannot be attributed | — | 5 |
-| "Governed contracts and semantic layers, not just schemas" | B1 + H2 together | 3 |
+| ~~"Governed contracts and semantic layers, not just schemas"~~ — both blockers are closed: **PL-013** carries the contracts half and **PL-011** the semantic-layer half. It stays listed rather than becoming an entry of its own because it is the *differentiator line*, and register **G5** puts stating it in Sprint 7. The evidence is ready; the wording is a product decision | — | 3 |
