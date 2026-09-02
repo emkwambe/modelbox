@@ -96,6 +96,29 @@ gate means.
 developer machine — a Windows-generated lock pins Windows packages and omits
 environment markers.
 
+**The same rule binds `frontend/package-lock.json`, and it was learned the
+expensive way.** After changing frontend dependencies, verify the lock with
+`npm ci --dry-run` before committing. Never take `npm install` succeeding as
+evidence that the lock is complete.
+
+`npm install` repairs an incomplete lock silently; `npm ci` refuses it. So a
+lock missing its per-platform optional packages — the `@esbuild/*` set is the
+one that bit us — works forever on the machine that wrote it and can never be
+installed anywhere else. Adding vitest in `ea38547` (2026-08-29) did exactly
+that, and CI was red from that commit until 2026-09-02 without anyone being able
+to see it, because the branch was never pushed. Four days and twenty-odd commits
+of green local `vitest` and `next lint` runs were all executed against a
+`node_modules` tree that `npm ci` could not have produced.
+
+Two lessons, and the second is the general one:
+
+- A lock file is a claim about *other* machines, so it cannot be verified by the
+  machine that wrote it. `npm ci --dry-run` is the cheapest way to ask a
+  different question than the one `npm install` answers.
+- **Work that is never pushed is never verified.** The failure was not subtle
+  and CI would have caught it the first time; nothing ran because nothing left
+  the laptop. Push early enough that CI can disagree with you.
+
 ## The fidelity harness
 
 `backend/tests/test_artifact_fidelity.py` asserts artifacts against the tools
