@@ -1,0 +1,436 @@
+<title>Proof It Loads</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  /* Palette is the product's own: docs/ModelBox_AI_Design_Tokens.md.
+     Light is the specification's page ground; dark takes the on-dark
+     semantic variants, which is what that document exists to get right. */
+  :root {
+    --ground: #F8FAFC;
+    --card: #FFFFFF;
+    --rule: #E2E8F0;
+    --rule-soft: #F1F5F9;
+    --ink: #0F172A;
+    --ink-2: #334155;
+    --body: #475569;
+    --muted: #64748B;
+    --accent: #2563EB;
+    --validated: #047857;
+    --preview: #B45309;
+    --breaking: #BE123C;
+    --band: #0A1628;
+    --band-ink: #F1F5F9;
+    --band-muted: #94A3B8;
+    --chip: #F1F5F9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0A1628;
+      --card: #0F172A;
+      --rule: #1E293B;
+      --rule-soft: #16213A;
+      --ink: #F1F5F9;
+      --ink-2: #E2E8F0;
+      --body: #CBD5E1;
+      --muted: #94A3B8;
+      --accent: #7CA5F7;
+      --validated: #10B981;
+      --preview: #F59E0B;
+      --breaking: #F43F5E;
+      --band: #060E1B;
+      --band-ink: #F1F5F9;
+      --band-muted: #94A3B8;
+      --chip: #16213A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0A1628;
+    --card: #0F172A;
+    --rule: #1E293B;
+    --rule-soft: #16213A;
+    --ink: #F1F5F9;
+    --ink-2: #E2E8F0;
+    --body: #CBD5E1;
+    --muted: #94A3B8;
+    --accent: #7CA5F7;
+    --validated: #10B981;
+    --preview: #F59E0B;
+    --breaking: #F43F5E;
+    --band: #060E1B;
+    --band-ink: #F1F5F9;
+    --band-muted: #94A3B8;
+    --chip: #16213A;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--body);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 28px; }
+  section { padding: 56px 0; border-top: 1px solid var(--rule); }
+  section:first-of-type { border-top: 0; }
+
+  .eyebrow {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--muted);
+    display: flex; align-items: center; gap: 12px; margin: 0 0 22px;
+  }
+  .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+
+  h1 {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: clamp(30px, 4.4vw, 46px); line-height: 1.15; font-weight: 700;
+    letter-spacing: -0.02em; color: var(--ink); margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  h2 {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+    color: var(--ink); margin: 0 0 14px; text-wrap: balance;
+  }
+  h3 {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 14px; font-weight: 700; color: var(--ink-2);
+    margin: 0 0 8px; letter-spacing: -0.005em;
+  }
+  p { margin: 0 0 16px; max-width: 68ch; }
+  strong { color: var(--ink-2); font-weight: 600; }
+  em { color: var(--ink-2); }
+
+  /* Hero ------------------------------------------------------------- */
+  .hero { padding: 64px 0 52px; }
+  .lede { font-size: 18px; color: var(--body); max-width: 62ch; }
+  .kicker {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--accent); font-weight: 700; margin: 0 0 18px;
+  }
+
+  /* Recognition pair -------------------------------------------------- */
+  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+  .recog {
+    background: var(--card); border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent); padding: 22px 24px;
+  }
+  .recog p { font-size: 15.5px; margin: 0; color: var(--ink-2); }
+  .recog .who {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 10px; display: block;
+  }
+
+  /* Evidence table ---------------------------------------------------- */
+  .sheet { border: 1px solid var(--rule); background: var(--card); overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th {
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+    text-align: left; padding: 12px 18px; border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td { padding: 13px 18px; border-bottom: 1px solid var(--rule-soft); color: var(--ink-2); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td.id {
+    font-family: 'JetBrains Mono', monospace; font-size: 12.5px; font-weight: 500;
+    color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  td.tool { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+
+  /* State marker: encodes what is proven, previewed, or scheduled ------ */
+  .state {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap;
+  }
+  .state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .s-ok { color: var(--validated); } .s-ok::before { background: var(--validated); }
+  .s-pre { color: var(--preview); } .s-pre::before { background: var(--preview); }
+  .s-no { color: var(--breaking); } .s-no::before { background: var(--breaking); }
+
+  /* Not-claimed list -------------------------------------------------- */
+  .limits { display: grid; gap: 2px; border: 1px solid var(--rule); background: var(--rule); }
+  .limit { background: var(--card); padding: 16px 20px; display: grid; grid-template-columns: 120px 1fr; gap: 18px; align-items: start; }
+  .limit p { margin: 0; font-size: 14.5px; }
+  @media (max-width: 620px) { .limit { grid-template-columns: 1fr; gap: 8px; } }
+
+  /* Objections -------------------------------------------------------- */
+  .obj { border-top: 1px solid var(--rule); padding: 22px 0; }
+  .obj:first-of-type { border-top: 0; padding-top: 4px; }
+  .obj q {
+    font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 500;
+    color: var(--ink); font-style: normal; display: block; margin-bottom: 10px;
+  }
+  .obj q::before { content: "“"; } .obj q::after { content: "”"; }
+  .obj p { font-size: 15px; }
+
+  /* Demo sequence — numbered because it is genuinely a sequence -------- */
+  ol.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; display: grid; gap: 14px; }
+  ol.steps li { counter-increment: s; display: grid; grid-template-columns: 34px 1fr; gap: 16px; align-items: start; }
+  ol.steps li::before {
+    content: counter(s, decimal-leading-zero);
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
+    color: var(--accent); padding-top: 3px; font-variant-numeric: tabular-nums;
+  }
+  ol.steps p { margin: 0; font-size: 15px; }
+
+  /* Closing band ------------------------------------------------------ */
+  .band { background: var(--band); color: var(--band-ink); margin-top: 8px; }
+  .band .wrap { padding-top: 56px; padding-bottom: 56px; }
+  .band .eyebrow { color: var(--band-muted); }
+  .band .eyebrow::after { background: #1E293B; }
+  .band p { color: var(--band-muted); font-size: 17px; max-width: 60ch; }
+  .band p.line { color: var(--band-ink); font-size: 19px; line-height: 1.5; }
+  .band strong { color: #FFFFFF; }
+
+  footer { padding: 26px 0 44px; color: var(--muted); font-size: 13px; }
+  footer code { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  a { color: var(--accent); }
+  a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="kicker">ModelBox AI</p>
+    <h1>Your model is a document until its artifacts load.</h1>
+    <p class="lede">
+      We generate the model from your requirements, then hand every artifact to the
+      tool that consumes it — the DDL executed, the dbt project parsed, the contract
+      validated — <strong>before you see any of it</strong>. And every byte that left
+      your network to do that is on an append-only record, written before the request
+      was sent.
+    </p>
+  </header>
+
+  <section>
+    <p class="eyebrow">You have already lived through one of these</p>
+    <div class="pair">
+      <div class="recog">
+        <span class="who">If you deliver for clients</span>
+        <p>The model was signed off in week three. Week seven was spent hand-editing the dbt project until it would parse on the client's warehouse. Nobody billed for week seven.</p>
+      </div>
+      <div class="recog">
+        <span class="who">If you answer to a regulator</span>
+        <p>Your remediation programme has to demonstrate that the model in the document is the model in the warehouse. Today that demonstration is a person, a spreadsheet, and their word.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">What is checked, and by what</p>
+    <p>
+      Every row below is a claim we are allowed to make, because a named test proves it
+      and the test runs on every push. The right-hand column is that test's entry in our
+      public Proof Log. A claim with no entry does not appear on this page.
+    </p>
+    <div class="sheet">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Claim</th>
+            <th scope="col">Checked by</th>
+            <th scope="col">State</th>
+            <th scope="col">Entry</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Four SQL dialects verified against real dialect grammars — not our own parser</td>
+            <td class="tool">sqlfluff</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-001</td>
+          </tr>
+          <tr>
+            <td>The DDL is <em>executed</em>, and the tables that come back are the tables you modelled</td>
+            <td class="tool">DuckDB</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-002</td>
+          </tr>
+          <tr>
+            <td>The dbt project runs as-is — you supply the warehouse connection, we supply the rest</td>
+            <td class="tool">dbt parse</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-007</td>
+          </tr>
+          <tr>
+            <td>Semantic layers parsed by dbt and by a JavaScript engine, not eyeballed</td>
+            <td class="tool">dbt · node</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-011</td>
+          </tr>
+          <tr>
+            <td>Insert a column mid-table and the Protobuf contract still decodes for yesterday's consumer</td>
+            <td class="tool">protoc</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-012</td>
+          </tr>
+          <tr>
+            <td>Valid ODCS v3.1.0 that carries what each constraint <em>meant</em>, not just its vocabulary</td>
+            <td class="tool">ODCS v3.1.0</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-013</td>
+          </tr>
+          <tr>
+            <td>Seed data that satisfies the contract generated beside it</td>
+            <td class="tool">dbt build</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-014</td>
+          </tr>
+          <tr>
+            <td>The same model always produces the same bytes</td>
+            <td class="tool">SHA-256</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-005</td>
+          </tr>
+          <tr>
+            <td>Column identity never moves and is never reused</td>
+            <td class="tool">migration</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-006</td>
+          </tr>
+          <tr>
+            <td>Every provider request recorded <em>before</em> it is sent, on a path nothing can bypass</td>
+            <td class="tool">AST scan</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-008</td>
+          </tr>
+          <tr>
+            <td>An operator can read what left the network — and what we cannot account for</td>
+            <td class="tool">ledger</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-009</td>
+          </tr>
+          <tr>
+            <td>Two independent ways to stop egress entirely</td>
+            <td class="tool">routing</td>
+            <td><span class="state s-ok">Verified</span></td>
+            <td class="id">PL-010</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">What we do not claim</p>
+    <p>
+      This is the part a competitor's deck does not have. You would find all of it
+      anyway; volunteering it is cheaper, and it is the same instinct that makes
+      everything above worth trusting.
+    </p>
+    <div class="limits">
+      <div class="limit">
+        <span class="state s-pre">Preview</span>
+        <p><strong>BigQuery, Databricks and ClickHouse DDL do not work.</strong> Neither does LookML — it emits <code>SUM()</code> over a foreign key. All four are labelled in the export picker <em>before</em> you choose one, not in a footnote afterwards.</p>
+      </div>
+      <div class="limit">
+        <span class="state s-no">Not yet</span>
+        <p><strong>No SSO, SCIM, RBAC or audit-log export.</strong> They are scheduled and specified. Until they ship, the honest first engagement inside a bank is a non-production enclave — and we will say so before you ask.</p>
+      </div>
+      <div class="limit">
+        <span class="state s-no">Not yet</span>
+        <p><strong>Single node.</strong> No high-availability story yet, only a stated availability position with a tested restore.</p>
+      </div>
+      <div class="limit">
+        <span class="state s-pre">Bounded</span>
+        <p><strong><code>dbt parse</code> proves a project resolves, not that its SQL returns what you expect.</strong> No test we run knows your business.</p>
+      </div>
+      <div class="limit">
+        <span class="state s-pre">Bounded</span>
+        <p><strong>The ledger is workspace-scoped.</strong> Everything that left from the workspaces you belong to, plus a count of what could not be attributed. We publish the count rather than quietly dropping those rows.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">The four questions everyone asks</p>
+
+    <div class="obj">
+      <q>dbt already does this.</q>
+      <p>
+        It does part of it, and its own documentation states the limits: contracts cover
+        SQL models only, <strong>sources, seeds and snapshots cannot be contracted at
+        all</strong>, and enforcement is not uniform — on Redshift and Snowflake only
+        <code>not_null</code> is enforced, while Postgres enforces every constraint type.
+        If you run both, your enforcement is silently weaker on two platforms and nothing
+        told you. dbt contracts also never cross the wire to a Kafka consumer, and are not
+        a document a reviewer can read.
+      </p>
+    </div>
+
+    <div class="obj">
+      <q>Why not just use a chat model directly?</q>
+      <p>
+        For one table, you should — and we will say so. A frontier model writes plausible
+        DDL, a plausible dbt project and a plausible contract. What it will not tell you is
+        which of the three fails to parse. It also leaves no egress record, no residency
+        guarantee, and no version-to-version diff. The claim here is about the fiftieth
+        artifact and the second version, not the first.
+      </p>
+    </div>
+
+    <div class="obj">
+      <q>Our modellers use erwin and will not switch.</q>
+      <p>
+        Then don't. We are not asking for the canvas. We are the stage after it —
+        reverse-engineer the warehouse erwin forward-engineered into, and emit what erwin
+        does not: the dbt project, the semantic layer, the contracts, the seed data, the
+        governance lint. The modeller's model stays the source of truth.
+      </p>
+    </div>
+
+    <div class="obj">
+      <q>We do not trust a language model with our schema.</q>
+      <p>
+        We will not try to argue you out of that. Pick your position and we will show you
+        the evidence for it: fully air-gapped, where every task resolves to a local runtime
+        and cloud providers are stripped at route resolution — or governed, where every
+        request is written to an append-only ledger <strong>before it is sent</strong>, and
+        if the ledger cannot be written the request is not made. That is the distinction
+        worth keeping: <strong>the ledger is an authorisation record, not a log.</strong>
+        A log tells you what happened. This decides whether it happens.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Ask us to break it in front of you</p>
+    <p>
+      The weakness of a correctness claim is that its value is counterfactual — it shows up
+      as the absence of a failure, which is invisible in a demo. So don't let us present the
+      Proof Log. Make us do this instead:
+    </p>
+    <ol class="steps">
+      <li><p>Bring a page of prose from a real programme. Your requirements, not our sample.</p></li>
+      <li><p>Watch it generate — the DDL executing on DuckDB, the dbt project parsing.</p></li>
+      <li><p>Now edit one column type by hand, the way a hurried engineer would, and re-run. Watch the harness go red and name the artifact that broke.</p></li>
+      <li><p>Then put the same prose through a chat model with no harness, feed <em>that</em> output into the same harness, and see what fails.</p></li>
+    </ol>
+  </section>
+
+</div>
+
+<div class="band">
+  <div class="wrap">
+    <p class="eyebrow">In three sentences</p>
+    <p class="line">
+      Your model is a document until its artifacts load.<br>
+      We hand every artifact to the tool that consumes it before you see any of it.<br>
+      And every byte that left your network to do it is on a record written
+      <strong>before the request was sent</strong>.
+    </p>
+  </div>
+</div>
+
+<div class="wrap">
+  <footer>
+    Every claim on this page carries a <code>PL-</code> id from our public Proof Log, where
+    each entry names the test that proves it, states its honest limit, and declares the
+    condition under which the claim expires. A test we cannot name is a claim we do not make.
+  </footer>
+</div>

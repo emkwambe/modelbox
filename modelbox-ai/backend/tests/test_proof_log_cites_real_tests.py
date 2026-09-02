@@ -106,10 +106,17 @@ def _defined_pl_ids() -> set[str]:
 
 
 def _surfaces() -> list[Path]:
-    """Public-facing marketing documents other than the Proof Log itself."""
+    """Public-facing marketing documents other than the Proof Log itself.
+
+    `.html` is included because the customer-facing page is one — the rule is
+    about what a buyer reads, not about a file extension, and a claim sheet that
+    checked only Markdown would miss the single surface most likely to be sent
+    to a prospect.
+    """
     return [
         p
-        for p in MARKETING.rglob("*.md")
+        for suffix in ("*.md", "*.html")
+        for p in MARKETING.rglob(suffix)
         if p.name != PROOF_LOG.name and "superseded" not in p.parts
     ]
 
