@@ -648,6 +648,41 @@ assertion proves both branches are reachable — if every surface were light, th
 
 Frontend 32 files / **341 tests**. `tsc` clean, lint clean.
 
+### 2026-09-02 — pushed, and CI was red for reasons that predate the session
+
+The branch reached `origin` for the first time at 73 commits. **Its first CI run
+failed two jobs, and both had been broken since `ea38547` — before any of this
+session's work.** Neither was visible while the branch lived on one machine,
+which is the argument for pushing rather than an argument against it.
+
+**`npm ci` had been impossible since the test runner landed.** `ea38547` added
+vitest and wrote a `package-lock.json` missing the per-platform esbuild optional
+packages. `npm install` tolerates that; `npm ci` refuses it. So `vitest` and
+`next lint` ran green locally for weeks against a `node_modules` that `npm ci`
+could never have produced — every local frontend number in this document was
+true and none of it was reproducible. Regenerated: 48 platform entries, and
+verified with `npm ci --dry-run` (exit 0) rather than assumed.
+
+This is the class `CLAUDE.md` already records for `requirements.lock` — *"a
+Windows-generated lock pins Windows packages and omits environment markers"* —
+in an ecosystem where nobody had written it down. The Python remedy is to
+generate the lock inside a Linux image; the npm lock has no equivalent rule yet.
+
+**The dbt package lock had drifted upstream.** `dbt_date` moved 0.19.0 → 0.21.0
+beneath the range the exporter emits. The gate caught it and said so. The lock
+was updated rather than the range tightened — the range is what customers
+receive and is deliberately permissive; the lock is what the harness resolved —
+and the cache was refreshed and the suite re-run **before** committing:
+274 passed, 5 skipped, 0 xfail, identical to the run on 0.19.0. The verdict does
+not change, which is the only thing that makes accepting the drift safe rather
+than convenient.
+
+**Second run green: all six jobs, 3m1s** (`33577877803`). That is the first
+external verification any of this work has had.
+
+No tag. Sprint 6 is not closed — D10 is open, F4's benchmark does not exist, and
+F2 has screens left — and a tag would claim a close that has not happened.
+
 ---
 
 ## Carried, and why each is still open
