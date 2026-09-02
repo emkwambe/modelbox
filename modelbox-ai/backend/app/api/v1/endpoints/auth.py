@@ -35,6 +35,7 @@ from app.schemas.data_model import (
     Token,
     UserOut,
 )
+from app.services import audit_log
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -56,11 +57,26 @@ async def login_for_access_token(
         or not user.hashed_password
         or not verify_password(form_data.password, user.hashed_password)
     ):
+        # Recorded before the raise: a failed sign-in is the event a reviewer
+        # looks for, and it is the one an implementation that logs after a
+        # successful return will never have.
+        await audit_log.record(
+            action="AUTH_LOGIN_FAILED",
+            outcome="DENIED",
+            actor_user_id=user.user_id if user else None,
+            actor_email=form_data.username,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    await audit_log.record(
+        action="AUTH_LOGIN",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+    )
     return Token(access_token=create_access_token(str(user.user_id)))
 
 

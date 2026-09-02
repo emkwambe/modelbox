@@ -179,6 +179,38 @@ class ArtifactStatusOut(BaseModel):
     reason: str
 
 
+class AuditEventOut(BaseModel):
+    """One internal audit event, as a reviewer reads it (G11).
+
+    Deliberately not a mirror of the row: `detail` is included because it
+    carries the *shape* of a change — which role replaced which, which dialect
+    was exported — and deliberately never the resource's contents. The audit
+    log records that a model was exported, not the model, which is the same
+    rule that keeps the egress ledger a digest rather than a second copy of the
+    prompt.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    audit_id: uuid.UUID
+    action: str
+    outcome: str
+    actor_user_id: uuid.UUID | None = None
+    actor_email: str | None = None
+    workspace_id: uuid.UUID | None = None
+    resource_type: str | None = None
+    resource_id: str | None = None
+    detail: dict | None = None
+    occurred_at: datetime.datetime
+
+
+class AuditEventPage(BaseModel):
+    """A page of audit events, with the total so an export can be paged."""
+
+    events: list[AuditEventOut]
+    total: int
+
+
 class EgressEventOut(BaseModel):
     """One row of the egress ledger, as an operator reads it (D4).
 
@@ -266,7 +298,7 @@ class AssignmentCreateRequest(BaseModel):
     description: str = Field(..., min_length=1)
     workspace_id: uuid.UUID | None = None
     # Optional defective seed graph for "Spot the Flaw" mode.
-    flawed_graph: "GraphUpdateRequest | None" = None
+    flawed_graph: GraphUpdateRequest | None = None
     # e.g. {"NO_CYCLIC_FK": true, "PK_PRESENT": true, "NO_DANGLING_REF": true}
     expected_invariants: dict[str, bool] = Field(default_factory=dict)
 
@@ -289,7 +321,7 @@ class SocraticStepRequest(BaseModel):
 
     assignment_id: uuid.UUID
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
-    current_graph: "GraphUpdateRequest | None" = None
+    current_graph: GraphUpdateRequest | None = None
 
 
 class SocraticStepResponse(BaseModel):
@@ -303,7 +335,7 @@ class GradeRequest(BaseModel):
     """Submit a student ERD for auto-grading (FR-3.3)."""
 
     assignment_id: uuid.UUID
-    submitted_graph: "GraphUpdateRequest"
+    submitted_graph: GraphUpdateRequest
 
 
 class GradeResponse(BaseModel):
@@ -568,7 +600,7 @@ class ColumnSchema(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _primary_keys_are_never_nullable(self) -> "ColumnSchema":
+    def _primary_keys_are_never_nullable(self) -> ColumnSchema:
         """A primary key cannot be NULL, whatever the payload claims.
 
         Enforced in the IR rather than left to each emitter, because the four
@@ -648,7 +680,7 @@ class EntitySchema(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _agg_time_column_is_a_temporal_column(self) -> "EntitySchema":
+    def _agg_time_column_is_a_temporal_column(self) -> EntitySchema:
         """Drop an aggregation time dimension that cannot be honoured.
 
         An ``agg_time_column`` naming a column that does not exist, or one that
@@ -788,8 +820,8 @@ class GraphUpdateRequest(BaseModel):
 
     model_config = ConfigDict(use_enum_values=True)
 
-    entities: list["EntitySchema"] = Field(default_factory=list)
-    relationships: list["RelationshipSchema"] = Field(default_factory=list)
+    entities: list[EntitySchema] = Field(default_factory=list)
+    relationships: list[RelationshipSchema] = Field(default_factory=list)
 
 
 class SynthesizeRequest(BaseModel):
@@ -870,56 +902,56 @@ class ExportResponse(BaseModel):
 
 
 __all__ = [
-    "Paradigm",
-    "EntityType",
-    "AssetTier",
-    "Cardinality",
-    "SourceType",
-    "PIIType",
-    "ExportFormat",
-    "ExportResponse",
-    "Token",
-    "RegisterRequest",
-    "UserOut",
-    "ModelUpdateRequest",
-    "ModelInfo",
-    "WorkspaceInfo",
     "ApiKeyCreateRequest",
-    "ApiKeyInfo",
     "ApiKeyCreatedResponse",
-    "JobCreatedResponse",
-    "JobStatusResponse",
+    "ApiKeyInfo",
+    "AssetTier",
     "AssignmentCreateRequest",
     "AssignmentInfo",
-    "SocraticStepRequest",
-    "SocraticStepResponse",
+    "Cardinality",
+    "ColumnSchema",
+    "ConnectionCreateRequest",
+    "ConnectionInfo",
+    "ContractExportResponse",
+    "ContractFormat",
+    "DictionaryExportResponse",
+    "DictionaryFormat",
+    "DiffRequest",
+    "DiffResponse",
+    "EntitySchema",
+    "EntityType",
+    "ExportFormat",
+    "ExportResponse",
     "GradeRequest",
     "GradeResponse",
-    "ColumnSchema",
-    "EntitySchema",
+    "GraphUpdateRequest",
+    "IntrospectRequest",
+    "JobCreatedResponse",
+    "JobStatusResponse",
+    "ModelInfo",
+    "ModelUpdateRequest",
+    "PIIType",
+    "Paradigm",
+    "RegisterRequest",
     "RelationshipSchema",
+    "SeedFormat",
+    "SemanticEngine",
+    "SemanticExportResponse",
+    "SocraticStepRequest",
+    "SocraticStepResponse",
+    "SourceType",
     "SuggestedMetric",
-    "SynthesizedModel",
     "SynthesizeRequest",
     "SynthesizeResponse",
-    "GraphUpdateRequest",
+    "SynthesizedModel",
+    "SyntheticSeedRequest",
+    "SyntheticSeedResponse",
+    "Token",
     "TransformOptions",
     "TransformParadigmRequest",
     "TransformParadigmResponse",
+    "UserOut",
     "ValidationIssue",
     "ValidationReport",
-    "ConnectionCreateRequest",
-    "ConnectionInfo",
-    "IntrospectRequest",
-    "DiffRequest",
-    "DiffResponse",
-    "SeedFormat",
-    "SyntheticSeedRequest",
-    "SyntheticSeedResponse",
-    "ContractFormat",
-    "SemanticEngine",
-    "ContractExportResponse",
-    "SemanticExportResponse",
-    "DictionaryFormat",
-    "DictionaryExportResponse",
+    "WorkspaceInfo",
 ]

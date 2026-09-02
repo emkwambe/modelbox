@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    audit,
     auth,
     connectors,
     egress,
@@ -28,6 +29,7 @@ api_router.include_router(transform.router)
 api_router.include_router(workspaces.router)
 api_router.include_router(trainer.router)
 api_router.include_router(connectors.router)
+api_router.include_router(audit.router)
 api_router.include_router(egress.router)
 api_router.include_router(export_status.router)
 

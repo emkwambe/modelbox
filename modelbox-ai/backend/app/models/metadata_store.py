@@ -82,7 +82,7 @@ class User(Base):
         nullable=False,
     )
 
-    memberships: Mapped[list["WorkspaceMember"]] = relationship(
+    memberships: Mapped[list[WorkspaceMember]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -102,12 +102,12 @@ class Workspace(Base):
         nullable=False,
     )
 
-    data_models: Mapped[list["DataModel"]] = relationship(
+    data_models: Mapped[list[DataModel]] = relationship(
         back_populates="workspace",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    members: Mapped[list["WorkspaceMember"]] = relationship(
+    members: Mapped[list[WorkspaceMember]] = relationship(
         back_populates="workspace",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -145,8 +145,8 @@ class WorkspaceMember(Base):
         String(16), nullable=False, server_default=text("'MEMBER'")
     )
 
-    workspace: Mapped["Workspace"] = relationship(back_populates="members")
-    user: Mapped["User"] = relationship(back_populates="memberships")
+    workspace: Mapped[Workspace] = relationship(back_populates="members")
+    user: Mapped[User] = relationship(back_populates="memberships")
 
 
 class DataModel(Base):
@@ -194,13 +194,13 @@ class DataModel(Base):
         nullable=False,
     )
 
-    workspace: Mapped["Workspace"] = relationship(back_populates="data_models")
-    entities: Mapped[list["ModelEntity"]] = relationship(
+    workspace: Mapped[Workspace] = relationship(back_populates="data_models")
+    entities: Mapped[list[ModelEntity]] = relationship(
         back_populates="data_model",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    relationships: Mapped[list["EntityRelationship"]] = relationship(
+    relationships: Mapped[list[EntityRelationship]] = relationship(
         back_populates="data_model",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -248,8 +248,8 @@ class ModelEntity(Base):
         Integer, nullable=False, default=1, server_default=text("1")
     )
 
-    data_model: Mapped["DataModel"] = relationship(back_populates="entities")
-    columns: Mapped[list["EntityColumn"]] = relationship(
+    data_model: Mapped[DataModel] = relationship(back_populates="entities")
+    columns: Mapped[list[EntityColumn]] = relationship(
         back_populates="entity",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -314,7 +314,7 @@ class EntityColumn(Base):
     # SQL word; the IR field keeps its name.
     reference_target: Mapped[str | None] = mapped_column(String(257), nullable=True)
 
-    entity: Mapped["ModelEntity"] = relationship(back_populates="columns")
+    entity: Mapped[ModelEntity] = relationship(back_populates="columns")
 
 
 class EntityRelationship(Base):
@@ -359,7 +359,7 @@ class EntityRelationship(Base):
     )
     cardinality: Mapped[str] = mapped_column(String(16), nullable=False)
 
-    data_model: Mapped["DataModel"] = relationship(back_populates="relationships")
+    data_model: Mapped[DataModel] = relationship(back_populates="relationships")
 
 
 class SynthesisJob(Base):
@@ -632,28 +632,114 @@ class EgressAudit(Base):
     )
 
 
+#: Audit actions. Vocabulary rather than free text, so an export can be
+#: filtered and a reviewer can be told what the complete set is.
+AUDIT_ACTIONS: tuple[str, ...] = (
+    "AUTH_LOGIN",
+    "AUTH_LOGIN_FAILED",
+    "AUTH_LOGOUT",
+    "API_KEY_CREATED",
+    "API_KEY_REVOKED",
+    "MEMBER_ADDED",
+    "MEMBER_ROLE_CHANGED",
+    "MEMBER_REMOVED",
+    "MODEL_CREATED",
+    "MODEL_UPDATED",
+    "MODEL_DELETED",
+    "ARTIFACT_GENERATED",
+)
+
+#: Outcomes. `DENIED` is separate from `FAILURE` on purpose: a refused
+#: authorisation and a crashed handler are different events to a reviewer, and
+#: collapsing them hides the one they came to look for.
+AUDIT_OUTCOMES: tuple[str, ...] = ("SUCCESS", "DENIED", "FAILURE")
+
+
+class AuditEvent(Base):
+    """Append-only record of who did what inside the appliance (G11).
+
+    **Distinct from `EgressAudit`, and the distinction is the point.** That
+    ledger answers *what left the network*. This answers *who did what here*.
+    A supervisor asks both, and a single table answering neither cleanly is
+    worse than two answering one each.
+
+    **The actor's email is denormalised on purpose.** ``actor_user_id`` is not a
+    foreign key and the email is copied at write time, because the audit trail
+    has to survive the user being deleted — which is precisely the moment
+    somebody wants to read it. A join that returns NULL for a departed employee
+    is an audit log that forgets the people most worth remembering.
+
+    **Append-only in the same sense as the egress ledger**: rows are inserted
+    and never updated. There is no ``updated_at`` because there is no update.
+    """
+
+    __tablename__ = "audit_event"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN (" + ", ".join(f"'{a}'" for a in AUDIT_ACTIONS) + ")",
+            name="ck_audit_event_action",
+        ),
+        CheckConstraint(
+            "outcome IN (" + ", ".join(f"'{o}'" for o in AUDIT_OUTCOMES) + ")",
+            name="ck_audit_event_outcome",
+        ),
+        Index("ix_audit_event_workspace", "workspace_id"),
+        Index("ix_audit_event_actor", "actor_user_id"),
+        Index("ix_audit_event_occurred", "occurred_at"),
+    )
+
+    audit_id: Mapped[uuid.UUID] = _uuid_pk()
+
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    # Nullable: an unauthenticated failed login has no user, and recording
+    # "unknown" honestly beats attributing it to somebody.
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    actor_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+
+    resource_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # Structured, and never the resource's contents. The audit log records that
+    # a model was exported, not the model — the same rule that keeps the egress
+    # ledger a digest rather than a second copy of the prompt.
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    occurred_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+        index=True,
+    )
+
+
 __all__ = [
-    "Base",
-    "EgressAudit",
+    "AUDIT_ACTIONS",
+    "AUDIT_OUTCOMES",
+    "CARDINALITIES",
+    "CONNECTION_ENGINES",
     "EGRESS_ATTEMPT",
     "EGRESS_EVENTS",
     "EGRESS_FAILURE",
     "EGRESS_SUCCESS",
+    "JOB_STATUSES",
+    "PARADIGMS",
+    "WORKSPACE_ROLES",
+    "ApiKey",
+    "AuditEvent",
+    "Base",
+    "DataModel",
+    "DatabaseConnection",
+    "EgressAudit",
+    "EntityColumn",
+    "EntityRelationship",
+    "ModelEntity",
+    "SynthesisJob",
+    "TrainerAssignment",
+    "TrainerSubmission",
     "User",
     "Workspace",
     "WorkspaceMember",
-    "DataModel",
-    "ModelEntity",
-    "EntityColumn",
-    "EntityRelationship",
-    "SynthesisJob",
-    "DatabaseConnection",
-    "ApiKey",
-    "TrainerAssignment",
-    "TrainerSubmission",
-    "PARADIGMS",
-    "CARDINALITIES",
-    "WORKSPACE_ROLES",
-    "JOB_STATUSES",
-    "CONNECTION_ENGINES",
 ]
