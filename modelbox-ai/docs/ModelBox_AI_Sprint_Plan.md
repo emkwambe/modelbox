@@ -220,8 +220,60 @@ unstyled error or empty state remains; `next lint` passes in CI; contrast verifi
 
 ---
 
+## Sprint 6.5 — Enterprise Access
+**Duration:** 1.5 weeks · **Blocked by:** Sprint 5 (workspaces, API keys, ledger)
+**Added:** 2026-09-02, from buyer research. See `docs/sprint-6-progress.md`.
+
+**Why this exists, and why it is numbered between two sprints rather than
+appended.** Buyer research put the largest funded opportunity in EU/UK banking
+and insurance **regulatory remediation** — bought from an MRA / consent-order /
+SREP-finding budget rather than a tooling budget, which is the difference
+between a three-year commitment and a one-year pilot that dies. Every artifact
+this product already proves is well matched to that buyer.
+
+And it is unreachable. **A bank's architecture review board rejects the appliance
+on identity and auditability before it ever evaluates an emitter.** Before this
+entry, the words SSO, SAML, SCIM, RBAC and audit export appeared **nowhere** in
+this plan or in the acceptance register — the gap was not unscheduled, it was
+unnamed. Sprint 7 assembles a landing page for a segment that cannot buy;
+sequencing this first is what makes Sprint 7 worth doing.
+
+**Scope**
+
+- **SSO via SAML 2.0 and OIDC.** The identity providers that matter are Entra ID,
+  Okta and Ping. Local password auth stays for air-gapped installs where there
+  is no IdP to federate with — an appliance that *requires* an IdP is unusable
+  in the one segment where air-gap is mandatory.
+- **SCIM provisioning and de-provisioning.** De-provisioning is the half that
+  gets audited: a leaver's access disappearing is the control, not their arrival.
+- **RBAC with roles that mean something here.** At minimum: viewer, modeller,
+  approver, admin. The approver role is the one a remediation programme needs,
+  because it is what makes "who signed off on this model" answerable.
+- **Audit-log export.** Append-only, covering authentication, authorisation
+  changes, model mutations and artifact generation — in a format an operator can
+  ship to Splunk or Sentinel without writing a parser. The egress ledger already
+  answers *what left the network*; this answers *who did what inside the
+  appliance*, and a supervisor asks both.
+- **A documented availability position.** Not necessarily HA. Single-node with a
+  stated RPO/RTO, a tested restore, and an honest limitation is a reviewable
+  answer; silence is not. Decide and write it down.
+
+**Explicitly out of scope:** multi-node clustering, and any attempt to match a
+hyperscaler's AI-output indemnity. Both are real asks from this buyer and
+neither is winnable at this size; the honest answer is that in an air-gapped
+deployment the customer holds the model contract, so the provider's own
+indemnity flows to them.
+
+**Definition of Done:** a bank's standard identity and audit questionnaire can
+be answered from the product rather than from a roadmap; every claim added to
+the register carries a passing test; and the availability position is written
+down even where the answer is "single node, restore in N minutes, tested on
+DATE".
+
+---
+
 ## Sprint 7 — Landing and Content
-**Duration:** 1 week · **Blocked by:** Sprint 6, Proof Log
+**Duration:** 1 week · **Blocked by:** Sprint 6, Sprint 6.5, Proof Log
 
 **Scope**
 
@@ -274,6 +326,7 @@ preserved against all 12 codes.
 | 5 | Governance that holds | 1 wk | Ledger complete; air-gap real |
 | ◆ | Paradigm determinism decision | — | Wedge-dependent |
 | 6 | UI credibility | 1.5 wk | Tokens everywhere; states covered |
+| 6.5 | Enterprise access | 1.5 wk | The priority buyer can pass its own review |
 | 7 | Landing and content | 1 wk | Every claim traced to a test |
 | 8 | Curriculum | 1 wk | One grading path |
 

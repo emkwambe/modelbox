@@ -143,6 +143,14 @@ fails on the pair that matters.
 
 ## G. Commercial readiness
 
+**G8–G12 added 2026-09-02 from buyer research.** They are the identity and
+auditability floor for the segment that research identified as the largest
+funded opportunity — EU/UK banking and insurance regulatory remediation. None of
+these words appeared anywhere in this register or the sprint plan before that
+date, which is worth recording: the gap was not deprioritised, it was never
+named, and a register that does not name a blocker cannot report it as
+outstanding.
+
 | ID | Criterion | Evidence | Sprint |
 |---|---|---|---|
 | G1 ◆ | An evaluator can install the appliance and export a working artifact without assistance | Unassisted install transcript from someone who has never seen it | 5 |
@@ -152,6 +160,11 @@ fails on the pair that matters.
 | G5 | The differentiator line — governed contracts and semantic layers, not just schemas — is true and stated | Product surface | 3 (true), 7 (stated) |
 | G6 | Pricing and licensing model exists in writing | Commercial doc | Phase II |
 | G7 ◆ | The 90-day wedge is decided and written down: appliance-to-enterprise or Trainer-as-GTM | Decision record | before Phase II |
+| G8 | SSO via SAML 2.0 and OIDC against Entra ID, Okta and Ping; local password auth survives for air-gapped installs with no IdP to federate with | Integration test per protocol against a containerised IdP, plus one recorded end-to-end login | 6.5 |
+| G9 | SCIM provisioning **and de-provisioning** | Test asserting a de-provisioned user's session and API keys stop working — de-provisioning is the audited half, because a leaver losing access is the control, not their arrival | 6.5 |
+| G10 | RBAC with viewer / modeller / approver / admin, enforced at the API rather than in the UI | Per-role authorisation tests on every mutating endpoint. The **approver** role is what makes "who signed off on this model" answerable, which is the question a remediation programme exists to answer | 6.5 |
+| G11 | Audit-log export covering authentication, authorisation changes, model mutations and artifact generation, in a format shippable to Splunk or Sentinel without a custom parser | Export fixture asserted against a declared schema. Distinct from the egress ledger: that records *what left the network*, this records *who did what inside the appliance*, and a supervisor asks both | 6.5 |
+| G12 | A written availability position — RPO, RTO, and a **tested** restore | The restore, performed and dated. Single-node with a stated limitation is a reviewable answer; silence is not. Not a commitment to HA | 6.5 |
 
 ## H. Curriculum
 
