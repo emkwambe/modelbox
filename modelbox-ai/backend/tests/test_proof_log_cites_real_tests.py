@@ -95,6 +95,53 @@ def test_the_scan_finds_the_test_suite() -> None:
     assert "test_the_scan_finds_the_test_suite" in defined
 
 
+MARKETING = PROOF_LOG.parent
+_PL_ID = re.compile(r"\bPL-(\d{3})\b")
+
+
+def _defined_pl_ids() -> set[str]:
+    return set(
+        re.findall(r"^## (PL-\d{3})", PROOF_LOG.read_text(encoding="utf-8"), re.MULTILINE)
+    )
+
+
+def _surfaces() -> list[Path]:
+    """Public-facing marketing documents other than the Proof Log itself."""
+    return [
+        p
+        for p in MARKETING.rglob("*.md")
+        if p.name != PROOF_LOG.name and "superseded" not in p.parts
+    ]
+
+
+def test_there_are_marketing_surfaces_and_entries_to_check() -> None:
+    """Precondition for the rule below, which is a loop over two globs."""
+    assert _defined_pl_ids(), "no PL- entries parsed from the Proof Log"
+    assert _surfaces(), "no marketing surfaces found to check"
+
+
+def test_every_pl_id_a_public_surface_cites_is_defined() -> None:
+    """Register G3, enforced: every landing-page claim traces to a Proof Log ID.
+
+    `VALUE_NARRATIVE.md` cites a dozen ids by hand. A typo — `PL-015`, or a
+    number kept after an entry was renumbered — would read to a buyer as
+    evidence and resolve to nothing, which is the precise failure the Claims
+    rule exists to prevent, committed on the one surface a customer actually
+    reads.
+
+    Deliberately *not* the inverse assertion. An entry nothing cites yet is
+    fine: the Proof Log is the register of what we have earned, and the
+    marketing is a selection from it.
+    """
+    defined = _defined_pl_ids()
+    broken: list[str] = []
+    for surface in _surfaces():
+        for number in _PL_ID.findall(surface.read_text(encoding="utf-8")):
+            if f"PL-{number}" not in defined:
+                broken.append(f"{surface.name} cites PL-{number}")
+    assert not broken, f"public surfaces cite undefined Proof Log ids: {broken}"
+
+
 @pytest.mark.parametrize("name", sorted(_cited_test_names()))
 def test_every_test_the_proof_log_names_exists(name: str) -> None:
     """One case per citation, so a failure names the broken one.
