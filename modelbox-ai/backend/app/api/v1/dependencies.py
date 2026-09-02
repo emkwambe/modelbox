@@ -128,15 +128,14 @@ async def get_current_user(
     except TokenError as exc:
         raise unauthorized from exc
 
-    subject = payload.get("sub")
-    if not subject:
-        raise unauthorized
-    try:
-        user_id = uuid.UUID(str(subject))
-    except ValueError as exc:
-        raise unauthorized from exc
+    # Resolution is delegated, because "who is this token" stopped being a
+    # primary-key lookup the moment an external IdP was in scope. An OIDC
+    # subject is an opaque provider string, so the old `uuid.UUID(sub)` path
+    # rejected every real identity provider with a 401 that looked like a
+    # signature problem. See `services/federated_identity.py`.
+    from app.services import federated_identity
 
-    user = await session.get(User, user_id)
+    user = await federated_identity.resolve(session, payload)
     if user is None or not user.is_active:
         raise unauthorized
     return user

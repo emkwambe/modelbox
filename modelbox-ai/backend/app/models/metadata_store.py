@@ -149,6 +149,46 @@ class WorkspaceMember(Base):
     user: Mapped[User] = relationship(back_populates="memberships")
 
 
+class FederatedIdentity(Base):
+    """A link between an external IdP subject and a local user (G8).
+
+    **Keyed on (issuer, subject), never on email.** An email address is mutable
+    and, worse, reassignable: organisations recycle addresses when people leave,
+    so matching on it would eventually hand a new joiner the previous holder's
+    account and every workspace they belonged to. The OIDC `sub` claim is the
+    only identifier a provider promises is stable and unique within its issuer,
+    and pairing it with `iss` keeps two providers' subject spaces from colliding.
+
+    **A separate table rather than columns on `users`.** One person can federate
+    from more than one issuer — a migration between IdPs is exactly when both
+    are live — and a single pair of columns forces a destructive choice at the
+    moment continuity matters most.
+
+    The email is still stored on the user for display and for the audit trail,
+    and is refreshed from the token; it is simply not the key.
+    """
+
+    __tablename__ = "federated_identities"
+    __table_args__ = (
+        UniqueConstraint("issuer", "subject", name="uq_federated_identity"),
+        Index("ix_federated_identities_user", "user_id"),
+    )
+
+    identity_id: Mapped[uuid.UUID] = _uuid_pk()
+    issuer: Mapped[str] = mapped_column(String(512), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
 class DataModel(Base):
     """A schema instance: a single data model in one paradigm/dialect."""
 
@@ -736,6 +776,7 @@ __all__ = [
     "EgressAudit",
     "EntityColumn",
     "EntityRelationship",
+    "FederatedIdentity",
     "ModelEntity",
     "SynthesisJob",
     "TrainerAssignment",

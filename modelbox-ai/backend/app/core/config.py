@@ -129,6 +129,16 @@ class Settings(BaseSettings):
         default=None,
         description="Expected `aud` claim. Required when jwt_algorithm is RS*.",
     )
+    # Issuers permitted to create users on first sign-in (G8). Empty means
+    # just-in-time provisioning is OFF, which is the fail-closed default: a
+    # deployment that configured a signing key has said what it trusts to
+    # *sign*, not what it trusts to *enrol*. Without this, every principal a
+    # shared IdP will sign for — other tenants, service accounts, guests —
+    # creates an account here on first contact.
+    oidc_allowed_issuers: list[str] = Field(
+        default_factory=list,
+        description="Issuers allowed to provision users just-in-time.",
+    )
     jwt_issuer: str | None = Field(
         default=None,
         description="Expected `iss` claim. Required when jwt_algorithm is RS*.",
