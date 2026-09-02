@@ -49,6 +49,40 @@ describe('contrast', () => {
     expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(CONTRAST_FLOOR[role]);
   });
 
+  it('declares every semantic role against every surface in the product', () => {
+    // **The hole this closes was live until 2026-09-01.** `ExportPanel` sits on
+    // `neutral-900` and had already been converted to the `onDark` semantic
+    // variants — a pair the token API is meant to make unreachable, and one no
+    // assertion covered, so the status colours on the one dark surface a user
+    // reads paragraphs on were unmeasured while looking fully tokenised.
+    //
+    // Declaring `surface.panel` fixed that instance. This fixes the *class*:
+    // adding a surface now fails until its pairs are declared, which is the
+    // difference between a defect corrected and a defect prevented.
+    //
+    // Light or dark is derived from the surface's own luminance rather than
+    // from a hand-kept list, so a new ground cannot be classified wrongly by
+    // someone adding it in a hurry.
+    for (const [name, bg] of Object.entries(surface)) {
+      const onLight = relativeLuminance(bg) > 0.5;
+      for (const role of ['validated', 'breaking', 'preview'] as const) {
+        const fg = onLight ? semantic[role].onLight : semantic[role].onDark;
+        expect(
+          PAIRS.some((pair) => pair.fg === fg && pair.bg === bg),
+          `${role} on surface.${name} is used by the product but not declared in PAIRS`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('has surfaces of both kinds, or the rule above tests one branch', () => {
+    // The discriminating half. If every surface were light, the `onDark` arm
+    // would never execute and the loop would assert half of what it claims.
+    const luminances = Object.values(surface).map(relativeLuminance);
+    expect(luminances.some((l) => l > 0.5)).toBe(true);
+    expect(luminances.some((l) => l <= 0.5)).toBe(true);
+  });
+
   it('computes the ratios a reference implementation would', () => {
     // Fixture sanity for the maths itself. Black on white is exactly 21:1 and
     // any colour against itself is exactly 1:1; a broken luminance function

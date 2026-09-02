@@ -616,6 +616,38 @@ absorbed, and back to 69 — the baseline exists so a number that moves is chase
 
 App suite 691 → **746 passed**, 41 skipped, 22 xfailed.
 
+### 2026-09-01 — F6 says what it actually covers, and the hole it named is closed
+
+F6 read *"Contrast meets the brand system's own WCAG standard"*, which implies
+screen coverage the tests do not have: every assertion is against declared token
+pairs or the ten `ui` primitives, and there is no page-level sweep — jsdom
+computes no layout, so it could not do one honestly.
+
+Marked **MET at a stated breadth** rather than either overclaimed or left
+ambiguous. What makes the narrower claim worth having is F1: the colour
+burn-down is at 22 of 358 and all 22 are recorded decisions, so nearly every
+colour in the product now arrives through a pair this test measures. That is a
+real change in what the criterion is worth, and it is why the honest wording is
+"declared pairs" rather than "screens".
+
+**The residual risk is named in the criterion, and then closed.** A pair can be
+*used* and never *declared* — not hypothetical, since the export panel's
+`neutral-900` ground was exactly that until this morning, with its status
+colours unasserted while looking fully tokenised. Declaring `surface.panel`
+fixed that instance; a new assertion fixes the class:
+
+> every semantic role must be declared against every surface in `surface`,
+> with light-or-dark derived from the surface's own luminance rather than from
+> a hand-kept list.
+
+Adding a surface now fails until its pairs are declared. **Mutation:** adding
+`drawer: color.neutral[800]` with no `PAIRS` entries fails with *"validated on
+surface.drawer is used by the product but not declared in PAIRS"*. A companion
+assertion proves both branches are reachable — if every surface were light, the
+`onDark` arm would never run and the loop would assert half of what it claims.
+
+Frontend 32 files / **341 tests**. `tsc` clean, lint clean.
+
 ---
 
 ## Carried, and why each is still open
