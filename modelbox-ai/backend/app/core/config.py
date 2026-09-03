@@ -139,6 +139,16 @@ class Settings(BaseSettings):
         default=None,
         description="Expected `aud` claim. Required when jwt_algorithm is RS*.",
     )
+    # Bearer token an IdP presents to the SCIM endpoints (G9). None disables
+    # SCIM entirely — the fail-closed default, and the right one: an
+    # unauthenticated user-provisioning API is a way to create administrators.
+    # Deliberately separate from every other credential here, because a SCIM
+    # token is machine-to-machine, lives in an IdP's configuration, and must be
+    # revocable without disturbing a single human login.
+    scim_token: str | None = Field(
+        default=None,
+        description="Bearer token for /scim/v2. Unset disables SCIM.",
+    )
     # Issuers permitted to create users on first sign-in (G8). Empty means
     # just-in-time provisioning is OFF, which is the fail-closed default: a
     # deployment that configured a signing key has said what it trusts to
