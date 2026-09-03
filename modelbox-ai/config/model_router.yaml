@@ -33,6 +33,13 @@ providers:
     type: "anthropic"
     api_key_env: "ANTHROPIC_API_KEY"
     default_model: "claude-sonnet-4-5-20250929"
+    # Required when the configured key is an Anthropic **identity-linked** key:
+    # those refuse every request that does not name the workspace it acts in.
+    # Declared here, read from the environment, and optional in practice —
+    # remove this block when using a classic key, because a declared header with
+    # no value is refused at load rather than sent empty.
+    headers:
+      anthropic-workspace-id: ANTHROPIC_WORKSPACE_ID
     egress: "cloud"
 
   openai_cloud:

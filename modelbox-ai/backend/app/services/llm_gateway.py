@@ -396,6 +396,36 @@ class LLMGateway:
         api_key_env = provider.get("api_key_env")
         if api_key_env:
             kwargs["api_key"] = os.environ.get(api_key_env)
+
+        # Provider-declared headers, read from the environment rather than the
+        # config file — the same discipline as `api_key_env`, because a header
+        # can carry a tenant identifier and a committed YAML is the wrong place
+        # for one.
+        #
+        # This exists because of a real failure rather than for generality.
+        # Anthropic's **identity-linked** API keys refuse every request that does
+        # not carry `anthropic-workspace-id`, and the appliance had no way to
+        # send one: a customer holding that kind of key could configure this
+        # provider correctly and still have every call rejected, with an error
+        # that reads like a bad key. Encoded per-provider rather than as an
+        # Anthropic special case, since the shape recurs across vendors.
+        headers: dict[str, str] = {}
+        for header_name, env_name in (provider.get("headers") or {}).items():
+            value = os.environ.get(env_name)
+            if not value:
+                # Declared and unset is a configuration error, not an implicit
+                # "send nothing" — the same ruling `max_egress_class` gets. The
+                # provider would otherwise reject the call with a message about
+                # its own API, several layers from the line that caused it.
+                raise LLMRouterError(
+                    f"provider '{provider_name}' declares header "
+                    f"'{header_name}' from ${env_name}, which is unset. Set it "
+                    f"or remove the declaration; sending the request without "
+                    f"the header would fail at the provider."
+                )
+            headers[header_name] = value
+        if headers:
+            kwargs["extra_headers"] = headers
         # Global call settings last: every provider in every chain gets the
         # deployment's declared timeout and retry budget, because they are
         # assembled here — the one place call kwargs are built.
