@@ -1,24 +1,30 @@
 {
   "threshold_version": "1.1",
   "run_started_at": "2026-09-03T02:49:37.510275+00:00",
+  "rescored": {
+    "at": "2026-09-03T03:38:34.185046+00:00",
+    "reason": "entity matcher: Jaccard ratio replaced by overlap coefficient (55afaaf); the old ratio scored identical entities at 0.200, below its own 0.50 match floor",
+    "from_candidates": "conformance-report-sonnet-5.candidates.json",
+    "note": "No provider was contacted. These scores come from the candidate graphs captured during the run above, re-scored with the current metric."
+  },
   "providers": [
     {
       "provider": "anthropic_cloud",
       "egress_class": "cloud",
       "model_identifier": "claude-sonnet-5",
       "model_version": "claude-sonnet-5",
-      "entity_f1": 0.2392,
-      "column_f1": 0.0942,
-      "relationship_f1": 0.0,
+      "entity_f1": 0.3171,
+      "column_f1": 0.1228,
+      "relationship_f1": 0.24,
       "lint_delta_per_graph": 1.5,
       "systematic_new_codes": [],
       "passed": false,
       "failures": [
-        "entity F1 0.239 < 0.8",
-        "column F1 0.094 < 0.7",
-        "relationship F1 0.000 < 0.6"
+        "entity F1 0.317 < 0.8",
+        "column F1 0.123 < 0.7",
+        "relationship F1 0.240 < 0.6"
       ],
-      "remedy": "narrow the air-gap claim \u2014 degradation is spread across axes ({'entity': 0.561, 'column': 0.606, 'relationship': 0.6}), so no fix at the synthesis layer is indicated"
+      "remedy": "narrow the air-gap claim \u2014 degradation is spread across axes ({'entity': 0.483, 'column': 0.577, 'relationship': 0.36}), so no fix at the synthesis layer is indicated"
     }
   ],
   "materially_worse_than_cloud": [],
@@ -41,9 +47,9 @@
     {
       "gold_graph_id": "banking-datavault",
       "provider": "anthropic_cloud",
-      "entity_f1": 0.3636,
-      "column_f1": 0.2,
-      "relationship_f1": 0.0,
+      "entity_f1": 0.5455,
+      "column_f1": 0.2667,
+      "relationship_f1": 0.4,
       "lint_delta": 4,
       "new_codes": [
         "NAMING_CONVENTION"
@@ -55,9 +61,9 @@
     {
       "gold_graph_id": "ecommerce-orders",
       "provider": "anthropic_cloud",
-      "entity_f1": 0.5714,
-      "column_f1": 0.2105,
-      "relationship_f1": 0.0,
+      "entity_f1": 0.8571,
+      "column_f1": 0.3158,
+      "relationship_f1": 0.8,
       "lint_delta": -2,
       "new_codes": [],
       "prompt_sha256": "24158d3e03dcbbaab7d52db7b67b02488487dc766cab8699266f215253090c4e",

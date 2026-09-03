@@ -185,6 +185,13 @@ async def main(argv: list[str] | None = None) -> int:
                     "gold_graph_id": graph_id,
                     "provider": provider,
                     "model_identifier": model_identifier,
+                    # Recorded here so a later re-score is self-contained. These
+                    # two are facts about the call, not about the metric, and
+                    # `rescore_conformance` cannot reconstruct either: the first
+                    # two candidate files omitted them, so re-scoring had to
+                    # read them back out of the very report it was replacing.
+                    "egress_class": egress_class,
+                    "model_version": model_identifier,
                     "prompt_sha256": hashlib.sha256(
                         prompt.encode("utf-8")
                     ).hexdigest(),

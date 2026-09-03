@@ -1,24 +1,30 @@
 {
   "threshold_version": "1.1",
   "run_started_at": "2026-09-03T02:45:16.715311+00:00",
+  "rescored": {
+    "at": "2026-09-03T03:38:27.663949+00:00",
+    "reason": "entity matcher: Jaccard ratio replaced by overlap coefficient (55afaaf); the old ratio scored identical entities at 0.200, below its own 0.50 match floor",
+    "from_candidates": "conformance-report.candidates.json",
+    "note": "No provider was contacted. These scores come from the candidate graphs captured during the run above, re-scored with the current metric."
+  },
   "providers": [
     {
       "provider": "anthropic_cloud",
       "egress_class": "cloud",
       "model_identifier": "claude-sonnet-4-5-20250929",
       "model_version": "claude-sonnet-4-5-20250929",
-      "entity_f1": 0.328,
-      "column_f1": 0.1079,
+      "entity_f1": 0.3613,
+      "column_f1": 0.119,
       "relationship_f1": 0.26,
       "lint_delta_per_graph": -0.833,
       "systematic_new_codes": [],
       "passed": false,
       "failures": [
-        "entity F1 0.328 < 0.8",
-        "column F1 0.108 < 0.7",
+        "entity F1 0.361 < 0.8",
+        "column F1 0.119 < 0.7",
         "relationship F1 0.260 < 0.6"
       ],
-      "remedy": "narrow the air-gap claim \u2014 degradation is spread across axes ({'entity': 0.472, 'column': 0.592, 'relationship': 0.34}), so no fix at the synthesis layer is indicated"
+      "remedy": "narrow the air-gap claim \u2014 degradation is spread across axes ({'entity': 0.439, 'column': 0.581, 'relationship': 0.34}), so no fix at the synthesis layer is indicated"
     }
   ],
   "materially_worse_than_cloud": [],
@@ -42,8 +48,8 @@
     {
       "gold_graph_id": "banking-datavault",
       "provider": "anthropic_cloud",
-      "entity_f1": 0.6,
-      "column_f1": 0.3333,
+      "entity_f1": 0.8,
+      "column_f1": 0.4,
       "relationship_f1": 0.5,
       "lint_delta": -5,
       "new_codes": [
