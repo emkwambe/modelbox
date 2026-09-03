@@ -116,6 +116,10 @@ async def main(argv: list[str] | None = None) -> int:
     from app.core.config import Settings
     from app.schemas.data_model import SynthesizedModel
     from app.services.llm_gateway import LLMGateway
+
+    # The product's own system prompt, imported rather than restated so it
+    # cannot drift from the one users actually get.
+    from app.services.synthesis_engine import _SYSTEM_PROMPT
     from scripts.conformance_scoring import score_graph, verdict
     from scripts.conformance_threshold import (
         MAX_F1_DROP_VS_CLOUD,
@@ -151,6 +155,29 @@ async def main(argv: list[str] | None = None) -> int:
                 task="unstructured_doc_parsing",
                 prompt=prompt,
                 response_model=SynthesizedModel,
+                # **The product's own system prompt, and its absence was a
+                # defect that produced a published number.**
+                #
+                # This argument was omitted, `structured_completion` defaults it
+                # to None, and the run therefore scored a bare model given a
+                # domain description — not this product. None of the modelling
+                # instructions reached the provider: not the Kimball rule that a
+                # Fact -> Dimension edge must be N:1, not the 3NF bridge-table
+                # rule, and not the omission guidance that exists precisely to
+                # stop a model inventing governance terms.
+                #
+                # The 2026-09-02 run shows what that costs. Relationship F1 came
+                # back at 0.013 with the cardinality rules unsent, and every
+                # entity in the ecommerce candidate carried an invented tier —
+                # the S5-2 defect, reproduced in full, because the paragraph
+                # forbidding it was never sent. `MISSING_SLA` then fired on four
+                # graphs and the report called it a systematic provider
+                # behaviour, which it was not: it was ours.
+                #
+                # A conformance harness that does not send the product's prompt
+                # measures the provider. That is a legitimate thing to measure
+                # and it is not what D10 asks for.
+                system_prompt=_SYSTEM_PROMPT,
                 llm_override=provider,
             )
             captured.append(

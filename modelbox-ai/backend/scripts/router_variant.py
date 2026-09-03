@@ -30,7 +30,7 @@ from pathlib import Path
 import yaml
 
 
-def patch(text: str, model: str, *, keep_headers: bool) -> str:
+def patch(text: str, model: str, *, keep_headers: bool, timeout: int | None = None) -> str:
     """Return `text` with the Anthropic model repinned, optionally dropping headers.
 
     `keep_headers=False` removes the `headers:` mapping entirely, which is what
@@ -56,6 +56,13 @@ def patch(text: str, model: str, *, keep_headers: bool) -> str:
             pad = line[: len(line) - len(line.lstrip())]
             out.append(f'{pad}default_model: "{model}"')
             continue
+        # A conformance run is a batch job, not somebody waiting at a canvas.
+        # The shipped 60s is right for the product and wrong here: the first run
+        # lost a whole half to a timeout, having already paid for the call.
+        if timeout and stripped.startswith("request_timeout_seconds:"):
+            pad = line[: len(line) - len(line.lstrip())]
+            out.append(f"{pad}request_timeout_seconds: {timeout}")
+            continue
         out.append(line)
 
     return "\n".join(out)
@@ -67,6 +74,12 @@ def main() -> int:
     parser.add_argument("--out", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        help="Override request_timeout_seconds (a batch run can afford to wait).",
+    )
+    parser.add_argument(
         "--drop-headers",
         action="store_true",
         help="Remove provider headers (for a key that is not identity-linked).",
@@ -74,7 +87,12 @@ def main() -> int:
     args = parser.parse_args()
 
     source = Path(args.source).read_text(encoding="utf-8")
-    result = patch(source, args.model, keep_headers=not args.drop_headers)
+    result = patch(
+        source,
+        args.model,
+        keep_headers=not args.drop_headers,
+        timeout=args.timeout,
+    )
 
     try:
         parsed = yaml.safe_load(result)
