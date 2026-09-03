@@ -336,6 +336,96 @@ async def test_the_repair_prompt_lists_only_repairable_codes() -> None:
     assert "do not supply a tier" in gateway.system_prompts[0].lower()
 
 
+@pytest.mark.asyncio
+async def test_a_repair_that_deletes_the_offending_column_is_discarded() -> None:
+    """Deleting the table is not repairing it.
+
+    Every repairable code is satisfiable by removing whatever carries it, and a
+    gate that counts findings cannot see the difference: drop the foreign key
+    and the `DANGLING_REF` goes with it, one repairable issue becomes zero, and
+    the count gate accepts a model that answered the question by discarding it.
+
+    This is not a claim that providers do this deliberately. It is that the gate
+    could not have told us if one did — and the same hole sits in the
+    conformance instrument, where a raw finding count rewards a model that
+    emits fewer tables (`GraphScore.lint_delta_per_entity`).
+    """
+    broken = _dangling()
+    gutted = _dangling()
+    gutted.entities[0].columns = [
+        c for c in gutted.entities[0].columns if c.name != "customer_id"
+    ]
+    gutted.relationships = []
+
+    # Precondition: without the surface check this trade *passes* the count
+    # gate. A test whose fixture cannot exercise the defect proves nothing.
+    assert len(_issues(gutted)) < len(_issues(broken)), (
+        "fixture must actually reduce the repairable count, or the gate under "
+        "test is never reached"
+    )
+
+    gateway = _ScriptedGateway(gutted)
+    model, _ = await _engine(gateway)._repair_once(
+        broken,
+        GraphEngine().validate(broken.entities, broken.relationships),
+        _request(),
+        user_id=None,
+    )
+    assert model is broken, "a repair that deletes a column must be discarded"
+
+
+@pytest.mark.asyncio
+async def test_a_repair_that_deletes_the_offending_entity_is_discarded() -> None:
+    """The same hole one level up, and the more expensive one.
+
+    Losing a column costs a field; losing an entity costs a table the user
+    described and will not be told is gone.
+    """
+    broken = _dangling_repaired()
+    for column in broken.entities[1].columns:
+        column.is_primary_key = False  # customer now carries MISSING_PK
+
+    gutted = _dangling_repaired()
+    gutted.entities = [e for e in gutted.entities if e.entity_name != "customer"]
+    gutted.entities[0].columns = [
+        c for c in gutted.entities[0].columns if c.name != "customer_id"
+    ]
+    gutted.relationships = []
+
+    assert len(_issues(gutted)) < len(_issues(broken)), "fixture must be a real trade"
+
+    gateway = _ScriptedGateway(gutted)
+    model, _ = await _engine(gateway)._repair_once(
+        broken,
+        GraphEngine().validate(broken.entities, broken.relationships),
+        _request(),
+        user_id=None,
+    )
+    assert model is broken, "a repair that deletes an entity must be discarded"
+
+
+@pytest.mark.asyncio
+async def test_a_repair_that_only_adds_is_still_accepted() -> None:
+    """The check refuses losses, not changes.
+
+    Stated as its own test because a subset check written as equality would
+    reject every genuine repair — `MISSING_PK` is fixed by *adding* a key
+    column, and `DANGLING_REF` by adding the missing table. If this goes red the
+    gate has stopped accepting repairs at all, which the count alone would not
+    reveal.
+    """
+    broken = _dangling()
+    gateway = _ScriptedGateway(_dangling_repaired())
+    model, _ = await _engine(gateway)._repair_once(
+        broken,
+        GraphEngine().validate(broken.entities, broken.relationships),
+        _request(),
+        user_id=None,
+    )
+    assert model is not broken, "an additive repair must still be accepted"
+    assert {e.entity_name for e in model.entities} == {"orders", "customer"}
+
+
 def _request() -> Any:
     from app.schemas.data_model import SynthesizeRequest
 

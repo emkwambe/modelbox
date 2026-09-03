@@ -525,6 +525,52 @@ make the model worse; the count is simply the wrong quantity to gate on. This
 costs zero provider calls to fix and is a **prerequisite** for §11.7 — without
 it a repair "win" and a deleted entity are indistinguishable in the results.
 
+### 11.6b Done, and what doing it found
+
+Items 1–3 of §11.7 are implemented.
+
+- **The lint instrument** now reports `lint_delta_per_entity` and
+  `candidate_entity_count` beside the raw delta. The **gate still uses the raw
+  count**, deliberately: `MAX_LINT_DELTA_PER_GRAPH` was fixed before the first
+  provider call, and switching it while looking at the score it would move — in
+  the flattering direction, since normalisation shrinks the AML penalty most —
+  would be a fourth metric change of exactly the kind §11.2 warns about. It
+  changes no verdict on the current candidates either way.
+- **The repair gate** now refuses a repaired graph that has *lost* any entity or
+  column. Additions are still accepted, since `MISSING_PK` is fixed by adding a
+  key. Three tests, two of which go red when the check is removed.
+- **The negative-control suite** is `tests/test_metric_negative_controls.py`:
+  26 tests over five mutations and two positive controls, all assertions
+  relational rather than absolute.
+
+**A severity-ordered repair gate was written and backed out.** Ordering on
+`(errors, warnings)` rather than a plain count would accept trading a
+`DANGLING_REF` for two `MISSING_PK`s — arguably right, since a dangling
+reference does not build and a missing key does. But it makes the gate *more
+permissive*, `test_a_repair_that_trades_one_defect_for_two_is_discarded` exists
+because someone decided the opposite deliberately, and loosening an acceptance
+test as a side effect of closing an unrelated hole in it is the move this
+document keeps arguing against. **Open decision.**
+
+**Two things the suite caught immediately.**
+
+First, a gap in the suite itself: a mutation reverting the matcher to name
+equality left it entirely green, because the positive control renamed only
+*columns*. A negative-control suite that cannot detect the defect the metric was
+built to fix is a test passing for the wrong reason. `rename_every_table` was
+added; it now catches that mutation on all four graphs, and the suite also
+catches a floor dropped to 0.0.
+
+Second, and open: **F1 is insensitive to deletion on large graphs.** Dropping 2
+of 12 entities from the AML model scores entity F1 **0.909**, clearing the 0.80
+gate — a model missing a sixth of itself passes. The same proportional loss on a
+three-entity graph scores 0.500 and fails. The gate's real strictness therefore
+depends on graph size, which nothing about the threshold says, and it is the
+exact counterpart of the lint instrument's raw-count problem: both grow more
+forgiving as the model grows. Pinned as a strict `xfail` rather than fixed,
+because changing `MIN_ENTITY_F1` or making it scale is a threshold change and
+this suite exists so the next one is argued rather than fitted.
+
 ### 11.7 Revised order of work
 
 Superseding §8's ranking. All three reviews converge on the same first

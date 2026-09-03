@@ -358,6 +358,30 @@ class SynthesisEngine:
     def _repairable(report: ValidationReport) -> list[ValidationIssue]:
         return [i for i in report.issues if i.code in _REPAIRABLE_CODES]
 
+    # **A severity-ordered gate was written here and backed out.** Counting
+    # repairable issues treats one error as interchangeable with one warning, so
+    # trading a `DANGLING_REF` for two `MISSING_PK`s scores as a regression.
+    # Ordering on `(errors, warnings)` instead would accept that trade — which
+    # is arguably right, since a dangling reference does not build and a missing
+    # primary key does.
+    #
+    # It is not, however, *hardening*: it makes the gate strictly more
+    # permissive, and `test_a_repair_that_trades_one_defect_for_two_is_discarded`
+    # exists because someone decided the opposite on purpose. Loosening an
+    # acceptance test as a side effect of closing an unrelated hole in it is the
+    # move this file's own history argues against. Left as a decision, recorded
+    # in `docs/BUILD_EVIDENCE_REVIEW.md`.
+
+    @staticmethod
+    def _surface(model: SynthesizedModel) -> tuple[set[str], set[tuple[str, str]]]:
+        """The entity and (entity, column) names a model declares.
+
+        Used to refuse a repair that deletes rather than repairs.
+        """
+        entities = {e.entity_name for e in model.entities}
+        columns = {(e.entity_name, c.name) for e in model.entities for c in e.columns}
+        return entities, columns
+
     async def _repair_once(
         self,
         synthesized: SynthesizedModel,
@@ -420,6 +444,33 @@ class SynthesisEngine:
         repaired_report = self._graph.validate(
             repaired.entities, repaired.relationships
         )
+        # **Deleting the table is not repairing it.**
+        #
+        # `ORPHAN_ENTITY`, `CYCLIC_FK` and `MISSING_PK` are all satisfiable by
+        # removing the entity that carries them, and the old gate — a count of
+        # repairable issues, strictly fewer than before — accepted that. It
+        # counted findings without looking at what the findings were attached
+        # to, so the cheapest way to pass it was to delete the evidence. Nothing
+        # here suggests a provider does that on purpose; the point is that the
+        # gate could not have told us if it did, and the conformance instrument
+        # has the same hole (`GraphScore.lint_delta_per_entity`).
+        #
+        # Additions are fine — a repair for `MISSING_PK` adds a key column. Only
+        # losses are refused, so this is a subset check, not equality.
+        before_entities, before_columns = self._surface(synthesized)
+        after_entities, after_columns = self._surface(repaired)
+        lost_entities = before_entities - after_entities
+        lost_columns = before_columns - after_columns
+        if lost_entities or lost_columns:
+            logger.info(
+                "Repair pass dropped %d entities and %d columns; keeping the "
+                "original. Lost entities: %s",
+                len(lost_entities),
+                len(lost_columns),
+                sorted(lost_entities) or "none",
+            )
+            return synthesized, report
+
         after = self._repairable(repaired_report)
 
         if len(after) >= len(before):

@@ -278,6 +278,11 @@ async def main(argv: list[str] | None = None) -> int:
                 "column_f1": _round(s.column_f1, 4),
                 "relationship_f1": _round(s.relationship_f1, 4),
                 "lint_delta": s.lint_delta,
+                # Reported beside the raw count because the raw count is not
+                # comparable across graphs of different sizes. The gate is still
+                # the raw one; see `GraphScore.lint_delta_per_entity`.
+                "lint_delta_per_entity": _round(s.lint_delta_per_entity, 3),
+                "candidate_entity_count": s.candidate_entity_count,
                 "new_codes": sorted(s.new_codes),
                 "prompt_sha256": s.prompt_sha256,
                 "model_identifier": s.model_identifier,

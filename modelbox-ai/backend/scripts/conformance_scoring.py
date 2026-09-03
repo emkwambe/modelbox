@@ -288,9 +288,45 @@ class GraphScore:
     gold_codes: list[str] = field(default_factory=list)
     candidate_codes: list[str] = field(default_factory=list)
 
+    candidate_entity_count: int = 0
+
     @property
     def lint_delta(self) -> int:
         return len(self.candidate_codes) - len(self.gold_codes)
+
+    @property
+    def lint_delta_per_entity(self) -> float | None:
+        """`lint_delta` divided by the candidate's entity count.
+
+        **The raw delta is not comparable across graphs and was read as though
+        it were.** A twelve-entity graph has four times the opportunity to
+        generate findings that a three-entity graph has, so
+        `aml-financial-crime` at +13 against a three-entity graph at −5 says
+        less than it appears to. Normalised, that is +1.18 against −1.25, and
+        two graphs swap order.
+
+        A raw count also **rewards omission**: a model that emits fewer tables
+        emits fewer findings, and scores better for it. That is the same hole as
+        the repair gate in `synthesis_engine._repair_once`, in the instrument
+        rather than the acceptance test.
+
+        **Reported, not gated, and that is deliberate.** `MAX_LINT_DELTA_PER_GRAPH`
+        was fixed before the first provider call and gates on the raw delta.
+        Switching the gate to this figure would be a fourth change to a metric
+        whose previous three all raised the score, made while looking at the
+        score it would move — and it would move this one in the flattering
+        direction, since normalisation shrinks the AML penalty most. So the
+        pre-registered gate stands until a `THRESHOLD_VERSION` bump argues for
+        the change on its own terms. It happens to change no verdict on the
+        current candidates, which is worth knowing and is not the reason.
+
+        `None` when the candidate declares no entities — a division that would
+        otherwise be an exception, and a graph with nothing in it is not a
+        graph whose lint density means anything.
+        """
+        if not self.candidate_entity_count:
+            return None
+        return self.lint_delta / self.candidate_entity_count
 
     @property
     def new_codes(self) -> set[str]:
@@ -336,6 +372,7 @@ def score_graph(
         relationship_f1=relationship,
         gold_codes=lint_codes(gold),
         candidate_codes=lint_codes(candidate),
+        candidate_entity_count=len(candidate.entities),
     )
 
 
