@@ -369,6 +369,183 @@ H1–H4 fail.
 
 ---
 
+## 11. What the research changed (2026-09-03)
+
+Three literature reviews were run against the open questions above. They
+corrected §8 in four places and produced one verified defect in shipping code.
+Sources are in the thread reports; the load-bearing ones are named inline.
+
+### 11.1 Our thresholds fail the published state of the art
+
+Chen et al., *Automated Domain Modeling with Large Language Models*, MODELS
+2023, evaluates GPT-4 against expert reference models on exactly our three-level
+decomposition: **classes F1 0.76, attributes 0.61, relationships 0.34.** Our
+gates are 0.80 / 0.70 / 0.60 — the best published numbers in the field would
+fail two of the three.
+
+`THRESHOLD_VERSION` was fixed before the first provider call, which is the right
+discipline and is not in question. What it was never checked against is whether
+any system has ever cleared it. Two further points: our result *ordering*
+reproduces theirs (relationships worst), which is weak evidence the metric
+detects something real; and their qualitative finding is that LLM models
+"rarely follow modeling best practices" — which is what our linter measures and
+our F1 axes cannot see.
+
+### 11.2 All three metric fixes were validated on false negatives only
+
+This is the finding that most changes how the next change should be made.
+
+Each of the three fixes in §6 was diagnosed from a **good model scoring low**.
+Not one was validated against a **known-bad model that must still score low**.
+A change set examined only where the score was too low raises the score by
+construction — regressional Goodhart in the sense of Manheim & Garrabrant. The
+monotonic rise across three fixes is therefore not evidence of three good fixes;
+it is the expected signature of that selection process, and there is no reason
+to expect a fourth to behave differently.
+
+The established guardrail is contrast sets (Gardner et al., Findings of EMNLP
+2020 — hand-authored minimal perturbations, model accuracy dropped up to 25
+points) and CheckList's invariance/directional tests (Ribeiro et al., ACL 2020
+best paper), which assert a *relation* rather than a gold answer and so cannot
+be satisfied by editing the reference. Note the boundary: author-written
+perturbations are sound; **model-in-the-loop adversarial filtering is not**
+(Bowman & Dahl, NAACL 2021).
+
+### 11.3 The structural-matching failure is a published, replicated result
+
+§6's rejected structural matcher was not an implementation error. Valentine
+(Koutras et al., ICDE 2021), benchmarking Cupid, COMA and Similarity Flooding,
+concludes that "in the absence of good attribute names, the rest of the schema
+information … do not actually give any useful insights." Rahm & Bernstein said
+it in 2001; SemStruct (2026) finds structural nodes act as "topological conduits
+rather than semantic entities."
+
+The sharper diagnosis: **we built Similarity Flooding's propagation without its
+seed.** Every established system applies structure on top of leaf-level
+*linguistic* scores; we removed the linguistic layer and measured the remainder.
+
+And the failure was **half greedy-argmax, not all structure** — a correction to
+§6, which attributed it entirely to structure. Under global assignment,
+`dim_plan`↔`dim_tier` is an overwhelming pair (`plan_name`↔`tier_name`,
+`list_price`↔`base_price`), so `dim_tier` is claimed by a better bidder and
+`dim_customer` is forced onto `dim_organisation`. The recommended path needs no
+embeddings: identifier normalisation with an abbreviation dictionary (`mrr` →
+monthly recurring revenue, which no general embedding model will get — see the
+identifier-splitting literature, TRIS, WCRE 2012), **IDF weighting** so that
+`is_current` / `effective_from` / `_key` contribute ~0, then Hungarian
+assignment at column and table level, gated by `entity_type`.
+
+Two hazards recorded for whoever builds it: `scipy.linear_sum_assignment` breaks
+ties arbitrarily and the resolution can change between versions, which is a
+determinism problem for us specifically; and embeddings, if added later, score
+*relatedness* rather than *equivalence*, which directly attacks the "must be
+able to say NO" property.
+
+### 11.4 H3 is probably wrong — it is domain, not size
+
+The size cliff in the adjacent literature sits at 1,000+ columns, not 12
+entities; at BIRD scale irrelevant columns are nearly free (Maamari et al.,
+*The Death of Schema Linking?*). Meanwhile the domain effect is large and
+measured with size held roughly constant — Spider-DK (EMNLP 2021) costs
+**20.2 to 32.4 points**, and the *strongest* model drops the most, because
+pretrained models lean hardest on surface lexical cues that AML jargon denies.
+
+The error shape corroborates it. BizBench (ACL 2024): of GPT-4's 44 errors,
+**zero were extraction or syntax errors; 37 came from limits in business and
+financial knowledge.** FinanceBench: closed-book 9% → oracle context 85%.
+LegalBench: rule *recall* 59.2% vs rule *application* 82.2% — a ~31-point spread
+saying the deficit is stored knowledge, not reasoning. BEAVER scores enterprise
+schemas at 10.8%, and **30.1% even with oracle schema hints**: two-thirds of the
+error survives free schema linking.
+
+So H3 should be re-stated: the AML result is most likely **domain
+specialisation**, and the experiment that separates it is a 2×2 — a 12-entity
+commodity domain and a 4-entity AML domain. If the small AML model is already
+dirty, size is exonerated.
+
+One caveat that cuts the other way: association-layer decomposition is reported
+to lift association F1 **0.119 → 0.219** (arXiv 2410.09854), and if the damage
+is concentrated in the relationship layer regardless of domain, then AML is
+merely large enough for that layer to fail visibly. The two predictions are
+separable in the same run if it is instrumented by layer.
+
+### 11.5 LLM-as-judge is disqualified, not merely risky
+
+On JudgeBench (ICLR 2025), where one answer is objectively correct, prompted
+GPT-4o scores **50.86 against a 50% random baseline**; one commercial evaluator
+scored below chance. In software engineering, judges systematically misclassify
+correct implementations as non-compliant and **get worse with more detailed
+rubrics**. Even at temperature 0, 1–2% of borderline cases are non-reproducible,
+which alone fails our determinism requirement. Multi-reference sets also do not
+help (Freitag et al., EMNLP 2020): k references in one house style share one
+vocabulary, which is precisely our failure mode.
+
+### 11.6 A verified defect: the repair gate can be won by deleting an entity
+
+`_repair_once` accepts a repaired graph when `len(after) < len(before)`, a raw
+count of repairable issues (`synthesis_engine.py:425`). Nothing asserts the
+entity or column set survived. **Dropping an entity that carries a repairable
+issue reduces the count and wins the gate.**
+
+The gate's docstring is right that an ungated repair pass is a second chance to
+make the model worse; the count is simply the wrong quantity to gate on. This
+costs zero provider calls to fix and is a **prerequisite** for §11.7 — without
+it a repair "win" and a deleted entity are indistinguishable in the results.
+
+### 11.7 Revised order of work
+
+Superseding §8's ranking. All three reviews converge on the same first
+experiment, and it is H1.
+
+1. **Harden the monotonic gate** (0 calls). Lexicographic on severity, plus a
+   non-regression check on the entity and column sets. Prerequisite for 3.
+2. **Negative-control mutant suite** (0 calls, ~1 day). Programmatically damage
+   our own reference models — drop the fact grain column, introduce a cyclic FK,
+   merge two dimensions, denormalise a fact, strip PII markings — plus the
+   `_sk`→`_key` rename as the *positive* control that must score high. It
+   retroactively tests all three prior fixes. **No further metric change ships
+   before this exists**, including the matcher fix, which will also raise the
+   score.
+3. **Run the pipeline into the measured path**, as a 2×2 over size and domain,
+   instrumented by layer (~40 calls). This is H1 plus the §11.4 experiment in
+   one run, and it produces numbers nobody currently has.
+4. **Deterministic cycle and orphan repair** (0 calls). Models cannot perceive
+   the property: cycle detection on hard graphs runs at 53.25%, near chance.
+   This belongs in an algorithm, not a prompt. Restrict to unambiguous cases —
+   minimum feedback arc set is NP-hard.
+5. **The matcher fix** of §11.3, guarded by 2.
+6. **Promote the linter to a scored, reference-free conformance gate**, and
+   demote single-reference F1 to a version-over-version regression tracker —
+   which is the only thing gold-standard comparison is valid for (it evaluates
+   the *learner*, not the artefact).
+
+Domain knowledge for AML is a live option but conditional: KaggleDBQA ablates it
+directly and finds column descriptions **alone** gave 17.55% against a 17.96%
+baseline — inert unless it changes how the model is *asked to use* them. A
+glossary pasted into a prompt is not the intervention. Fine-tuning is out of
+scope: FinMA-30B beats GPT-4 on financial sentiment but collapses on FinQA
+(0.06 vs 0.63).
+
+### 11.8 What the research could not tell us
+
+- **No benchmark exists** for dimensional, Data Vault or OBT model generation.
+  A 2026 review of 64 studies names standardised benchmarks as its primary
+  recommendation. We are not missing one; it does not exist.
+- **No AML data-modelling evidence of any kind.** The LLM+AML literature is
+  entirely transaction detection, alert triage and SAR drafting.
+- **No validated result** on whether grounding in a financial reference ontology
+  (FIBO, BIAN) improves a generated model.
+- **No accuracy-versus-entity-count curve** anywhere; the size axis is always
+  confounded with dirtiness, dialect and domain. Item 3 above would produce one.
+- Both threads that searched hit their WebSearch budget and worked by direct
+  fetch, so non-arXiv venues — and OAEI specifically — are thinner than ideal.
+
+**H2 remains unvalidated and load-bearing.** Nothing above tests whether the
+`saas-subscription` candidate is actually a good model; that still rests on one
+engineer's reading, and the negative-control suite does not check it either.
+
+---
+
 ## Appendix — provenance
 
 Both reports in `docs/marketing/` are **re-scored offline** from candidates
