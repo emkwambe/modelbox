@@ -426,6 +426,94 @@ async def test_a_repair_that_only_adds_is_still_accepted() -> None:
     assert {e.entity_name for e in model.entities} == {"orders", "customer"}
 
 
+@pytest.mark.asyncio
+async def test_telemetry_records_an_accepted_repair_that_strips_descriptions() -> None:
+    """The measurement that the size x domain run needed and did not have.
+
+    One AML draw came back with 17 findings against a typical 3, and 79 of 158
+    columns carrying no description. Nothing recorded whether the repair pass
+    had done that or the draw was simply a bad sample, and because bare and
+    pipeline are independent samples the comparison could not settle it.
+
+    **The trade this asserts is one the gate permits by construction.** The
+    acceptance test counts `_REPAIRABLE_CODES` only, and `MISSING_DESCRIPTION`
+    is deliberately not one of them — feeding it back invites the model to
+    invent prose. So a repair may remove a dangling reference, strip every
+    description in the model, and pass: repairable count fell, and the gate has
+    no opinion about anything else. The surface check refuses *lost* columns; it
+    says nothing about what a surviving column still carries.
+
+    This test does not argue the gate is wrong. It makes the trade visible in
+    the record, so the next run can say whether it actually happens.
+    """
+    # The pre-repair model has to *carry* descriptions, or "stripped" has
+    # nothing to measure and the assertion below reads 0 < 0. The first draft
+    # of this fixture missed that and the test failed for the wrong reason.
+    broken = _dangling()
+    for entity in broken.entities:
+        for column in entity.columns:
+            column.description = f"what {column.name} holds"
+
+    repaired = _dangling_repaired()
+    for entity in repaired.entities:
+        for column in entity.columns:
+            column.description = None
+
+    # Two models, in order: `build_graph` calls the gateway once to synthesise
+    # and once to repair. Queueing only the repaired one would make the first
+    # call return it, leaving nothing broken and the repair never firing —
+    # which is what the first draft of this test did.
+    engine = _engine(_ScriptedGateway(broken, repaired))
+    telemetry: dict[str, Any] = {}
+    model, _ = await engine.build_graph(_request(), telemetry=telemetry)
+
+    assert telemetry["repair_fired"] is True
+    assert telemetry["repair_accepted"] is True, (
+        "fixture must exercise an accepted repair, or the telemetry under test "
+        "is never populated"
+    )
+    assert model is not broken
+    # The trade itself: fewer repairable issues, fewer descriptions.
+    assert telemetry["repairable_after"] < telemetry["repairable_before"]
+    assert telemetry["described_columns_after"] < telemetry["described_columns_before"]
+    # And no column was lost, which is why the surface check did not fire.
+    assert telemetry["columns_after"] >= telemetry["columns_before"]
+
+
+@pytest.mark.asyncio
+async def test_telemetry_records_a_rejected_repair() -> None:
+    """`repair_accepted` must distinguish the two outcomes.
+
+    A flag that is always true would have made the run above look explained
+    while explaining nothing.
+    """
+    worse = _dangling_repaired()
+    for entity in worse.entities:
+        for column in entity.columns:
+            column.is_primary_key = False
+
+    engine = _engine(_ScriptedGateway(_dangling(), worse))
+    telemetry: dict[str, Any] = {}
+    model, _ = await engine.build_graph(_request(), telemetry=telemetry)
+
+    assert telemetry["repair_fired"] is True
+    assert telemetry["repair_accepted"] is False
+    assert telemetry["findings_after"] == telemetry["findings_before"]
+    assert model.entities[0].entity_name == "orders"
+
+
+@pytest.mark.asyncio
+async def test_telemetry_records_a_repair_that_never_fired() -> None:
+    """A clean model must read as "did not fire", not as "rejected"."""
+    engine = _engine(_ScriptedGateway(_clean()))
+    telemetry: dict[str, Any] = {}
+    await engine.build_graph(_request(), telemetry=telemetry)
+
+    assert telemetry["repair_fired"] is False
+    assert telemetry["repair_accepted"] is False
+    assert telemetry["repairable_before"] == 0
+
+
 def _request() -> Any:
     from app.schemas.data_model import SynthesizeRequest
 

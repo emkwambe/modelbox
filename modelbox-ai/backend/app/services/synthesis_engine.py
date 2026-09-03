@@ -182,11 +182,16 @@ class SynthesisEngine:
         self._gateway = gateway
         self._graph = graph_engine or GraphEngine()
 
+    @staticmethod
+    def _described_columns(model: SynthesizedModel) -> int:
+        return sum(1 for e in model.entities for c in e.columns if c.description)
+
     async def build_graph(
         self,
         request: SynthesizeRequest,
         *,
         user_id: uuid.UUID | None = None,
+        telemetry: dict[str, object] | None = None,
     ) -> tuple[SynthesizedModel, ValidationReport]:
         """Everything that produces the graph, and nothing that stores it.
 
@@ -238,7 +243,54 @@ class SynthesisEngine:
         # is *external* deterministic feedback, and that is the only kind of
         # feedback self-correction is documented to benefit from. A model asked
         # to critique itself gets worse.
-        return await self._repair_once(synthesized, report, request, user_id=user_id)
+        before_model, before_report = synthesized, report
+        synthesized, report = await self._repair_once(
+            synthesized, report, request, user_id=user_id
+        )
+
+        if telemetry is not None:
+            # **Derived here rather than returned by `_repair_once`**, so its
+            # signature and its twelve tests are untouched. Everything below is
+            # already in scope: the pre-repair pair, and the post-repair pair
+            # that is *identically* the pre-repair pair when the gate rejected —
+            # which is what `repair_accepted` reads, the same identity the
+            # existing tests assert on.
+            #
+            # This exists because the first run of the size x domain experiment
+            # could not answer the question it was built for. One AML draw came
+            # back with 17 findings against a typical 3 and 79 of 158 columns
+            # missing descriptions, and there was no way to tell whether the
+            # repair pass had done it or the draw was simply bad. Bare and
+            # pipeline are independent samples, so the comparison cannot settle
+            # it and no amount of re-reading the output would have.
+            #
+            # `described_columns` is here for that specific hypothesis. The gate
+            # counts *repairable* codes only, and `MISSING_DESCRIPTION` is not
+            # one — so a repair can strip half the descriptions in the model,
+            # reduce a repairable code by one, and be accepted. The surface
+            # check added alongside refuses lost entities and columns; it says
+            # nothing about what those columns still carry.
+            repairable_before = self._repairable(before_report)
+            telemetry.update(
+                {
+                    "repair_fired": bool(repairable_before),
+                    "repair_accepted": synthesized is not before_model,
+                    "repairable_before": len(repairable_before),
+                    "repairable_after": len(self._repairable(report)),
+                    "findings_before": len(before_report.issues),
+                    "findings_after": len(report.issues),
+                    "codes_before": sorted(i.code for i in before_report.issues),
+                    "codes_after": sorted(i.code for i in report.issues),
+                    "entities_before": len(before_model.entities),
+                    "entities_after": len(synthesized.entities),
+                    "columns_before": sum(len(e.columns) for e in before_model.entities),
+                    "columns_after": sum(len(e.columns) for e in synthesized.entities),
+                    "described_columns_before": self._described_columns(before_model),
+                    "described_columns_after": self._described_columns(synthesized),
+                }
+            )
+
+        return synthesized, report
 
     async def synthesize(
         self,

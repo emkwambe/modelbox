@@ -58,6 +58,7 @@ import json
 import os
 import statistics
 import sys
+import time
 from pathlib import Path
 
 #: Codes describing the graph's shape rather than one table's contents. The
@@ -138,8 +139,22 @@ async def main(argv: list[str] | None = None) -> int:
     model_identifier = gateway.providers[args.provider]["default_model"]
     draws: list[dict[str, object]] = []
 
+    clock = time.monotonic()
+
+    def elapsed() -> float:
+        return time.monotonic() - clock
+
+    total = len(cells) * len(conditions) * args.repeats
+    print(
+        f"{total} draws: {len(cells)} cells x {len(conditions)} conditions x "
+        f"{args.repeats} repeats. Up to {total + len(cells) * args.repeats} "
+        f"provider calls once repairs are counted.",
+        flush=True,
+    )
+
     for cell_id in cells:
         paradigm, description, size, domain, target = CELLS[cell_id]
+        print(f"\n=== {cell_id} ({size}, {domain}) ===", flush=True)
         request = SynthesizeRequest(
             source_type="natural_language",  # type: ignore[arg-type]
             content=description,
@@ -149,9 +164,12 @@ async def main(argv: list[str] | None = None) -> int:
         )
         for condition in conditions:
             for draw in range(args.repeats):
+                telemetry: dict[str, object] = {}
                 try:
                     if condition == "pipeline":
-                        candidate, report = await engine.build_graph(request)
+                        candidate, report = await engine.build_graph(
+                            request, telemetry=telemetry
+                        )
                         codes = [i.code for i in report.issues]
                     else:
                         candidate = await gateway.structured_completion(
@@ -181,7 +199,7 @@ async def main(argv: list[str] | None = None) -> int:
                             "error": f"{type(exc).__name__}: {exc}",
                         }
                     )
-                    print(f"  {cell_id}/{condition}/{draw}: FAILED {exc}")
+                    print(f"  [{elapsed():>5.0f}s] {cell_id}/{condition}/{draw}: FAILED {exc}", flush=True)
                     continue
 
                 entities = len(candidate.entities)
@@ -202,12 +220,37 @@ async def main(argv: list[str] | None = None) -> int:
                         "structural_per_entity": (structural / entities) if entities else None,
                         "tabular_findings": tabular,
                         "codes": sorted(set(codes)),
+                        # Empty on the `bare` condition, which runs no repair.
+                        # Its absence there is the honest record, not a gap.
+                        "repair": telemetry,
                         "candidate": candidate.model_dump(mode="json"),
                     }
                 )
+                # `flush` on every progress line, not as a nicety.
+                #
+                # Python block-buffers stdout when it is a pipe, and the launcher
+                # pipes through Select-String to drop LiteLLM's banner. So the
+                # only thing reaching the terminal during a 40-call run was the
+                # logger's stderr, which is unbuffered — pages of
+                # `agg_time_column` warnings and not one result line. A run that
+                # costs money and takes minutes has to show progress, and
+                # "looks hung" is indistinguishable from "is hung" precisely
+                # when you most want to know which.
+                note = ""
+                if telemetry.get("repair_accepted"):
+                    note = (
+                        f"  REPAIR ACCEPTED {telemetry['findings_before']}"
+                        f"->{telemetry['findings_after']} findings, "
+                        f"{telemetry['described_columns_before']}"
+                        f"->{telemetry['described_columns_after']} described cols"
+                    )
+                elif telemetry.get("repair_fired"):
+                    note = "  repair rejected"
                 print(
-                    f"  {cell_id}/{condition}/{draw}: {entities} entities, "
-                    f"{len(codes)} findings ({structural} structural)"
+                    f"  [{elapsed():>5.0f}s] {cell_id}/{condition}/{draw}: "
+                    f"{entities} entities, {len(codes)} findings "
+                    f"({structural} structural){note}",
+                    flush=True,
                 )
 
     def _summary(rows: list[dict]) -> dict[str, object]:
@@ -228,6 +271,28 @@ async def main(argv: list[str] | None = None) -> int:
             "mean_structural_per_entity": statistics.fmean(structural) if structural else None,
             "mean_entity_count": (
                 statistics.fmean([r["entity_count"] for r in ok]) if ok else None
+            ),
+            # The repair pass's own record. `repairs_accepted` counts draws the
+            # gate let through; `repairs_that_cost_findings` counts the ones it
+            # let through that ended with *more* total findings than they
+            # started with — which the gate permits by construction, since it
+            # weighs repairable codes only.
+            "repairs_fired": sum(1 for r in ok if r.get("repair", {}).get("repair_fired")),
+            "repairs_accepted": sum(
+                1 for r in ok if r.get("repair", {}).get("repair_accepted")
+            ),
+            "repairs_that_cost_findings": sum(
+                1
+                for r in ok
+                if r.get("repair", {}).get("repair_accepted")
+                and r["repair"]["findings_after"] > r["repair"]["findings_before"]
+            ),
+            "repairs_that_cost_descriptions": sum(
+                1
+                for r in ok
+                if r.get("repair", {}).get("repair_accepted")
+                and r["repair"]["described_columns_after"]
+                < r["repair"]["described_columns_before"]
             ),
         }
 
