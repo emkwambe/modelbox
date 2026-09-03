@@ -136,6 +136,23 @@ def match_entities(gold: SynthesizedModel, candidate: SynthesizedModel) -> dict[
     tie-breaking matters more than optimality here: the same two graphs must
     always produce the same number.
     """
+    # One table on each side is an assignment, not a judgement. There is exactly
+    # one way to pair them, so the floor has nothing to protect against and
+    # refusing the pair scores the model as having produced no table at all —
+    # when it produced one, of the right type, for the right domain.
+    #
+    # `marketing-attribution` is that case, and it scored 0.000 on both halves
+    # of the 2026-09-03 run for it. The pairing does not by itself credit the
+    # candidate: the entity axis is excluded here (see `entity_scores`), so what
+    # it buys is a gold namespace for the *column* axis, which is where the
+    # difference between a good One Big Table and a bad one actually lives.
+    #
+    # Deliberately not generalised to "fewest possible assignments". Two-by-two
+    # has two assignments and choosing between them is a judgement; one-by-one
+    # has one and does not.
+    if len(gold.entities) == 1 and len(candidate.entities) == 1:
+        return {canon(gold.entities[0].entity_name): canon(candidate.entities[0].entity_name)}
+
     pairs = [
         (entity_similarity(g, c), canon(g.entity_name), canon(c.entity_name))
         for g in gold.entities
@@ -219,8 +236,25 @@ def entity_scores(
         for a, b, cardinality in relationship_set(candidate)
     }
 
+    # An axis with nothing to discriminate is excluded, not scored — the rule
+    # `marketing-attribution`'s relationship axis already follows, applied to its
+    # entity axis. One table against one table cannot separate a good answer
+    # from a bad one: any candidate with a single entity scores 1.0 once the
+    # pair is made, so the number would be awarded rather than earned. The
+    # superseded 1.0 report names a free 1.000 on an unjudged axis, averaged in
+    # beside axes that were judged, as one of the reasons it is not citable.
+    #
+    # The condition is *both* sides having one entity. A candidate answering a
+    # one-table gold with five tables is discriminated perfectly well, and is
+    # still scored.
+    entity_axis: float | None
+    if len(gold.entities) == 1 and len(candidate.entities) == 1:
+        entity_axis = None
+    else:
+        entity_axis = f1(gold_entities, candidate_entities)
+
     return (
-        f1(gold_entities, candidate_entities),
+        entity_axis,
         f1(gold_columns, candidate_columns),
         f1(gold_relationships, candidate_relationships),
     )

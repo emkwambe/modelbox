@@ -2,8 +2,8 @@
   "threshold_version": "1.1",
   "run_started_at": "2026-09-03T02:49:37.510275+00:00",
   "rescored": {
-    "at": "2026-09-03T03:38:34.185046+00:00",
-    "reason": "entity matcher: Jaccard ratio replaced by overlap coefficient (55afaaf); the old ratio scored identical entities at 0.200, below its own 0.50 match floor",
+    "at": "2026-09-03T03:58:27.946506+00:00",
+    "reason": "forced 1:1 assignment when each side has one entity; entity axis excluded when it cannot discriminate (cccc96c follow-up)",
     "from_candidates": "conformance-report-sonnet-5.candidates.json",
     "note": "No provider was contacted. These scores come from the candidate graphs captured during the run above, re-scored with the current metric."
   },
@@ -13,18 +13,18 @@
       "egress_class": "cloud",
       "model_identifier": "claude-sonnet-5",
       "model_version": "claude-sonnet-5",
-      "entity_f1": 0.3171,
+      "entity_f1": 0.3805,
       "column_f1": 0.1228,
       "relationship_f1": 0.24,
       "lint_delta_per_graph": 1.5,
       "systematic_new_codes": [],
       "passed": false,
       "failures": [
-        "entity F1 0.317 < 0.8",
+        "entity F1 0.381 < 0.8",
         "column F1 0.123 < 0.7",
         "relationship F1 0.240 < 0.6"
       ],
-      "remedy": "narrow the air-gap claim \u2014 degradation is spread across axes ({'entity': 0.483, 'column': 0.577, 'relationship': 0.36}), so no fix at the synthesis layer is indicated"
+      "remedy": "narrow the air-gap claim \u2014 degradation is spread across axes ({'entity': 0.419, 'column': 0.577, 'relationship': 0.36}), so no fix at the synthesis layer is indicated"
     }
   ],
   "materially_worse_than_cloud": [],
@@ -85,7 +85,7 @@
     {
       "gold_graph_id": "marketing-attribution",
       "provider": "anthropic_cloud",
-      "entity_f1": 0.0,
+      "entity_f1": null,
       "column_f1": 0.0,
       "relationship_f1": null,
       "lint_delta": -2,
