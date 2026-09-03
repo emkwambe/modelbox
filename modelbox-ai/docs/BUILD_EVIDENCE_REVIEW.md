@@ -625,6 +625,112 @@ engineer's reading, and the negative-control suite does not check it either.
 
 ---
 
+## 12. The size × domain run (2026-09-03) — what it settled
+
+Two runs, 48 draws, 48 scored, `claude-sonnet-4-5-20250929`. Forty draws across
+the 2×2 (`size-domain-experiment.json`) and eight more on the AML pipeline cell
+with repair telemetry (`aml-repair-telemetry.json`). Every candidate graph
+preserved. Reference-free throughout: the instrument is the product's own
+linter, and no F1 is computed, so **none of this closes D10**.
+
+### 12.1 Size drives the volume — the registered prediction held
+
+| | commodity | specialised |
+|---|---|---|
+| **small** | 0.000 | 0.000–0.050 |
+| **large** | **1.000** | 0.222 |
+
+Findings per entity. `aml-small` is as clean as `ecommerce-orders`, so
+specialisation contributes essentially nothing to the *volume* of findings. The
+finance and legal benchmarks predicted a small AML model would already be dirty
+(§11.4); **that prediction is falsified for this task.** §8's H3 is answered:
+size, not domain — for volume.
+
+### 12.2 …but the instrument is severity-blind, and that inverts it
+
+`retail-supply`'s 1.000 per entity is **entirely `MISSING_DESCRIPTION`**.
+Underneath the volume:
+
+- **`PII_EXPOSURE` fires in 10 of 10 AML draws** and 0 of 10 in both commodity
+  cells; 18 of 48 draws overall.
+- **Structural findings occur only in AML** (0.119/entity). Every other cell is
+  exactly 0.000.
+- **No error-severity code in any of the 48 draws.** The D10 run's `CYCLIC_FK`
+  did not reproduce, and was probably a rare sample rather than a
+  characteristic failure.
+
+So volume scales with size and is dominated by trivia, while the substantive
+failures — unmarked PII, orphans, fan-out — are specific to the specialised
+domain. **Both readings are true and they answer different questions.**
+
+The measure normalises for size and not for severity, which is the raw-count
+defect of §11.6 one level up, in an instrument built after that defect was
+found and written up. Counting a missing description as equal to unmarked PII
+in an AML schema is not a rounding error.
+
+### 12.3 H1 is answered, and the answer is that Task 7 is inert
+
+The AML pipeline cell first showed 0.222 → 0.440 with the spread jumping
+0.043 → 0.433: one draw of 17 findings against a typical 3, with 79 of 158
+columns carrying no description. That looked like the repair pass stripping
+descriptions — a trade the gate permits by construction, since it counts
+repairable codes only and `MISSING_DESCRIPTION` is not one.
+
+**It was not.** Eight further draws with telemetry: `repairs_fired = 0`,
+`repairable_before = 0` on every draw, and the egress ledger recording exactly
+8 calls where 16 were budgeted. The mean over 8 draws is **0.201** against the
+bare condition's 0.222 — indistinguishable. The 0.440 was one outlier in five
+samples, the description hypothesis is dead, and the reading recorded here
+before the evidence arrived was wrong.
+
+The reason the repair never fires is the finding:
+
+| code observed | draws (of 48) | in `_REPAIRABLE_CODES`? |
+|---|---|---|
+| `PII_EXPOSURE` | 18 | no — excluded, classification is the user's call |
+| `FAN_OUT_RISK` | 15 | no |
+| `ORPHAN_ENTITY` | 13 | no — "frequently correct" |
+| `MISSING_DESCRIPTION` | 10 | no |
+| `NAMING_CONVENTION` | 4 | no — the S5-2 guard |
+| `MISSING_GRAIN` | 1 | no |
+
+The pass targets `CYCLIC_FK`, `DANGLING_REF`, `MISSING_PK`, `INVALID_RANGE`,
+`INVALID_REGEX` and `PATTERN_EXCEEDS_LENGTH`. **Across 48 draws — 28 of them
+through the pipeline — not one has occurred.**
+
+Task 7 is not broken. Its gate works, its twelve tests pass, and the partition
+it rests on is still sound: *a code is repairable when a correct answer is
+objectively checkable from the graph alone.* But that partition was drawn from
+first principles before any evidence about which codes actually occur, and it
+turns out to be **empty in practice**. The sprint plan called it "the best
+supported intervention available"; it addresses failures this model does not
+make.
+
+The sharpest form: the one substantive, repeatable failure — `PII_EXPOSURE`,
+10 of 10 AML draws — is *deliberately* excluded, because "asking a model to
+classify what is personal data is a governance decision a user should make."
+That reasoning is defensible and probably still right. It also means the
+failure that matters most gets no automated help at all. **A flagging pass that
+surfaces suspected PII for a human to confirm is a different intervention from a
+repair pass, and it is not ruled out by that argument.**
+
+### 12.4 A product defect the run surfaced incidentally
+
+The model sets `agg_time_column` to an INTEGER surrogate date key
+(`sale_date_key`, `transaction_date_key`) on nearly every fact table. That is
+ordinary Kimball — the fact carries a key into the date dimension — and the
+schema requires a real date or time type, so **every one is discarded**. The
+system prompt states the rule explicitly and the model overrides it, in both
+domains at both sizes.
+
+It does not affect anything measured here (the linter never reads that field)
+but it means `agg_time_column` is silently dropped on nearly every fact the
+product generates, and the semantic-layer export loses its time dimension. The
+validator is correct *for MetricFlow*; the likely fix is to resolve the time
+dimension through the date foreign key rather than demand it on the fact.
+
+---
+
 ## Appendix — provenance
 
 Both reports in `docs/marketing/` are **re-scored offline** from candidates

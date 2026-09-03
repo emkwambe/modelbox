@@ -66,6 +66,10 @@ an answer.
 | **Our thresholds were never calibrated.** 0.80 / 0.70 / 0.60 against a published state of the art of 0.76 / 0.61 / 0.34 (Chen et al., MODELS 2023). Fixing the threshold before the first call was right; checking whether anything has ever cleared it was never done. | A gate nothing can pass reports failure regardless of quality. |
 | **`aml-financial-crime` produces substantive errors.** +1.1 findings per entity on both models — the only graph positive on both — including `CYCLIC_FK` and unmarked `PII_EXPOSURE` on one, `ORPHAN_ENTITY` on the other. | The strongest negative result in the run, and it depends on no contested metric. Unmarked PII in an AML schema is the most expensive thing this product can get wrong. |
 | **Three pre-existing lint errors** in `backend/scripts/refresh_dbt_packages.py` (RUF100, unused `noqa` directives). Untouched by this sprint's work. | Small, but they are the only lint errors in the tree. |
+| **The repair pass never fires.** Across 48 draws, 28 through the pipeline, **zero** of its six target codes occurred. What the model actually produces — `PII_EXPOSURE` (18), `FAN_OUT_RISK` (15), `ORPHAN_ENTITY` (13), `MISSING_DESCRIPTION` (10) — is excluded from repair, each for a stated reason. | Task 7 shipped as "the best supported intervention available" and addresses failures this model does not make. Its gate and tests are sound; the target set is empty in practice. |
+| **`PII_EXPOSURE` is unaddressed and recurring.** 10 of 10 AML draws, 18 of 48 overall. Deliberately excluded from repair because classifying personal data is the user's decision. | The most serious repeatable failure gets no automated help. A **flagging** pass — surface suspected PII for a human to confirm — is a different intervention and is not ruled out by that argument. |
+| **`agg_time_column` is discarded on nearly every fact table.** The model points it at an INTEGER surrogate date key (ordinary Kimball); the schema requires a real date/time type. Happens in both domains at both sizes, and the system prompt states the rule explicitly. | The semantic-layer export loses its time dimension. The validator is right *for MetricFlow*; the fix is probably to resolve the time dimension through the date FK rather than demand it on the fact. |
+| **The reference-free instrument is severity-blind.** `findings_per_entity` weights a missing description equal to unmarked PII in an AML schema, which inverts the ranking between cells. | The same defect as the raw-count problem in §2, one level up — and built *after* that one was found and written up. |
 
 ---
 
@@ -73,11 +77,16 @@ an answer.
 
 - **The local half of D10.** No accuracy evidence of any kind for local
   inference, which is a large part of the air-gapped positioning.
-- **The repair pass against a real provider.** Built this sprint, gated, tested
-  in isolation, never exercised on provider output.
-- **A size-versus-domain experiment.** The AML failure is confounded: it is both
-  the largest graph and the most specialised domain, and nothing run so far
-  separates those.
+- **Relationship normalisation, measured.** The size × domain run was
+  reference-free, so it says nothing about the axis normalisation targets.
+  Whether it moves relationship F1 is still unknown.
+
+Two entries were struck on 2026-09-03, recorded rather than deleted:
+
+- ~~The repair pass against a real provider.~~ Run — 28 pipeline draws, and it
+  never fired. That is an answer, not a pass; see §4.
+- ~~A size-versus-domain experiment.~~ Run — 48 draws. Size drives finding
+  *volume*, the domain drives *severity*. `BUILD_EVIDENCE_REVIEW.md` §12.
 
 ---
 
@@ -98,21 +107,38 @@ an answer.
 
 ## 7. What to do next, and why in this order
 
-1. **Run the pipeline into the measured path**, as a 2×2 over size and domain,
-   instrumented by layer (~40 provider calls). It fixes §4's first entry, gives
-   the repair pass its first evidence, and separates the two live explanations
-   for AML in the same run — the domain-modelling literature predicts damage
-   concentrated in the relationship layer regardless of domain; the
-   finance/legal benchmarks predict a small AML model is *already* dirty. They
-   disagree, and they point at different sprints.
-2. **Deterministic cycle and orphan repair** (0 calls). Models cannot perceive
-   the property — cycle detection on hard graphs runs near chance — so it
-   belongs in an algorithm. Restrict to unambiguous cases; minimum feedback arc
-   set is NP-hard.
-3. **The matcher fix** (identifier normalisation, IDF weighting, Hungarian
-   assignment), now that §2's negative controls exist to guard it.
-4. **The local half of D10**, without which the criterion cannot close.
+**Revised 2026-09-03, after the size × domain run.** ~~Item 1 was "run the
+pipeline into the measured path".~~ Done — and it removed two items below as
+well as itself.
 
-Zero-call items already done this sprint: the repair gate's deletion hole, the
-lint instrument's per-entity normalisation, and the negative-control suite
-itself.
+1. **Weight the reference-free instrument by severity** (0 calls). Until this
+   exists, every number the linter produces ranks a missing description equal
+   to unmarked PII, and the cell ordering in `BUILD_EVIDENCE_REVIEW.md` §12
+   flips depending on which reading you take. Cheapest fix, and it invalidates
+   nothing already measured — the per-draw codes are all preserved, so the
+   existing 48 draws can be re-scored offline exactly as the D10 candidates
+   were.
+2. **Decide what to do about `PII_EXPOSURE`** — the only substantive failure
+   that recurs (18 of 48 draws, 10 of 10 on AML) and the one deliberately shut
+   out of repair. A *flagging* pass that surfaces suspected PII for a human to
+   confirm is a different intervention from a repair pass and is not excluded
+   by the argument that classification is the user's decision. **Decision, not
+   a task.**
+3. **Retarget or retire Task 7's repair pass.** Its six codes have never
+   occurred in 48 draws. Options: widen it to codes that do occur (weighing the
+   S5-2 invention risk each was excluded for), replace it with deterministic
+   repair for `ORPHAN_ENTITY` and `FAN_OUT_RISK`, or keep it as a guard against
+   defects a weaker local model might produce — which the local half of D10
+   would be the evidence for. Do not simply delete it before that run.
+4. **The matcher fix** (identifier normalisation, IDF weighting, Hungarian
+   assignment), guarded by the negative controls in §2.
+5. **The local half of D10**, without which the criterion cannot close — and
+   which is now also the evidence base for item 3.
+
+~~Deterministic cycle and orphan repair.~~ Deprioritised: no `CYCLIC_FK`
+occurred in 48 draws, so the cycle half addresses nothing observed. The orphan
+half survives — `ORPHAN_ENTITY` appears in 13 draws — and belongs in item 3.
+
+Zero-call items already done: the repair gate's deletion hole, the lint
+instrument's per-entity normalisation, the negative-control suite, the repair
+telemetry, and `build_graph` extracted so a harness can measure the product.
