@@ -154,10 +154,39 @@ actually names.**
    disagreements. A cyclic foreign key is wrong on any reading, and unmarked PII
    in an AML schema is the most expensive kind of wrong this product can produce.
 2. **Every other graph lints cleaner than the hand-built gold**, mostly by a
-   wide margin. Nine of the twelve runs have a negative lint delta.
-3. **The failure correlates with size.** The two largest graphs (aml at 12
-   entities, banking at 4 hubs/links/sats) carry all the positive lint deltas;
-   the three-entity graphs are clean.
+   wide margin. **Eight** of the twelve runs have a negative lint delta —
+   five of six for `claude-sonnet-4-5-20250929`, but only three of six for
+   `claude-sonnet-5`, which is an even split rather than a clean win.
+3. **The apparent correlation with size is partly an artefact of the
+   instrument, and the raw counts overstate it.** `lint_delta` is a *raw count
+   difference*, so a 12-entity graph has four times the opportunity to generate
+   findings that a 3-entity graph has. Normalised per candidate entity the
+   picture is weaker and the ranking moves:
+
+   | graph | cand. entities | sonnet-4-5 Δ/entity | sonnet-5 Δ/entity |
+   |---|---|---|---|
+   | `aml-financial-crime` | 11 / 12 | **+1.18** | **+1.08** |
+   | `banking-datavault` | 6 / 7 | −0.83 | **+0.57** |
+   | `ecommerce-orders` | 4 / 4 | −1.00 | −0.50 |
+   | `healthcare-ehr` | 4 / 4 | −0.50 | −1.25 |
+   | `marketing-attribution` | 1 / 1 | −2.00 | −2.00 |
+   | `saas-subscription` | 4 / 5 | −1.25 | **+0.20** |
+
+   What survives: **AML is the only graph positive on both models**, at ~+1.1
+   findings per entity against a range of −0.5 to −2.0 everywhere else. That is
+   still the strongest negative result in the run.
+
+   What does not survive: the "+13 versus everything else" framing, which is
+   inflated by size; the claim that the two largest graphs carry all the
+   positive deltas, since `banking-datavault` is negative for one model and
+   positive for the other; and any clean monotone relation with entity count,
+   which six graphs with one dominant outlier cannot support. Note also that
+   `healthcare-ehr` and `banking-datavault` swap order under normalisation.
+
+   **This is a defect in the instrument, not only in the reading.** A raw
+   finding count also rewards omission — a model that emits fewer entities emits
+   fewer findings — which is the same hole found in the repair gate at §11.6.
+   Both should be normalised per entity before either number is used again.
 4. **`saas-subscription` scores 0.000 across the board while containing a good
    model** — see §6.
 
@@ -165,10 +194,14 @@ actually names.**
 
 ## 5. What this evidence does and does not support
 
-**Supported.** The models produce *well-formed, governance-clean* schemas for
-small-to-medium domains. Nine of twelve runs beat a hand-built reference on the
-product's own thirteen-rule linter. That is a real, automated, passing quality
-signal, and it is the instrument D10's register row names.
+**Supported, with the caveat in §4.3.** The models produce *well-formed,
+governance-clean* schemas for small-to-medium domains. Eight of twelve runs beat
+a hand-built reference on the product's own thirteen-rule linter, and the mean
+lint delta clears its threshold for both models — a real, automated, passing
+signal, and the instrument D10's register row names. Two qualifications belong
+with it: the split is five of six for one model and three of six for the other,
+which is a weaker result than a pooled count suggests; and the underlying count
+is not normalised per entity, so it rewards a model that emits fewer tables.
 
 **Supported.** Quality degrades with graph size, and degrades into *substantive*
 errors rather than stylistic ones. The AML result is the strongest negative
