@@ -182,24 +182,30 @@ class SynthesisEngine:
         self._gateway = gateway
         self._graph = graph_engine or GraphEngine()
 
-    async def synthesize(
+    async def build_graph(
         self,
         request: SynthesizeRequest,
         *,
         user_id: uuid.UUID | None = None,
-    ) -> SynthesizeResponse:
-        """Run synthesis end-to-end and persist the result.
+    ) -> tuple[SynthesizedModel, ValidationReport]:
+        """Everything that produces the graph, and nothing that stores it.
 
-        ``user_id`` is threaded to the egress ledger (D4). The ledger has
-        recorded *what* left and *when* since Task 1; without an actor it
-        cannot answer *who*, which is half of the question the criterion asks
-        an operator to answer from the UI.
+        **Extracted so a harness can measure the product rather than a piece of
+        it.** `run_provider_conformance` called `structured_completion` directly
+        and therefore scored step one of four: no cardinality normalisation, no
+        linter, no repair pass. Two shipped mechanisms aimed squarely at the
+        axes that failed had never been evaluated on provider output, and the
+        published numbers described a bare model with a good prompt.
 
-        No ``model_id`` is passed, and that is not an omission: synthesis is
-        the call that brings the model into existence, so at the moment the
-        request leaves there is nothing to name. Recording the id assigned
-        afterwards would date the row to a model that did not exist when the
-        prompt was sent.
+        The reason it was bypassed is visible in `synthesize`'s signature: the
+        rest of that method resolves a workspace and persists, so calling it
+        needs a database, and a batch experiment does not want one. Splitting
+        the graph-producing half out removes the excuse — these four steps need
+        no session, and they are the product.
+
+        Persistence is deliberately *not* here. It assigns ids and writes rows;
+        it does not change the graph, so a measurement that stops at this
+        boundary is measuring everything that could affect a score.
         """
         prompt = self._build_prompt(request)
         synthesized = await self._gateway.structured_completion(
@@ -232,9 +238,28 @@ class SynthesisEngine:
         # is *external* deterministic feedback, and that is the only kind of
         # feedback self-correction is documented to benefit from. A model asked
         # to critique itself gets worse.
-        synthesized, report = await self._repair_once(
-            synthesized, report, request, user_id=user_id
-        )
+        return await self._repair_once(synthesized, report, request, user_id=user_id)
+
+    async def synthesize(
+        self,
+        request: SynthesizeRequest,
+        *,
+        user_id: uuid.UUID | None = None,
+    ) -> SynthesizeResponse:
+        """Run synthesis end-to-end and persist the result.
+
+        ``user_id`` is threaded to the egress ledger (D4). The ledger has
+        recorded *what* left and *when* since Task 1; without an actor it
+        cannot answer *who*, which is half of the question the criterion asks
+        an operator to answer from the UI.
+
+        No ``model_id`` is passed, and that is not an omission: synthesis is
+        the call that brings the model into existence, so at the moment the
+        request leaves there is nothing to name. Recording the id assigned
+        afterwards would date the row to a model that did not exist when the
+        prompt was sent.
+        """
+        synthesized, report = await self.build_graph(request, user_id=user_id)
 
         if not report.is_valid:
             logger.warning(
