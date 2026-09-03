@@ -117,6 +117,16 @@ class Settings(BaseSettings):
         default="HS256",
         description="JWT algorithm: HS256 (local/test) or RS256 (OIDC).",
     )
+    # JWKS endpoint for RS256/OIDC verification (G8). Preferred over the static
+    # PEM below: identity providers rotate signing keys, and a pinned PEM turns
+    # a routine rotation into a total authentication outage that looks like a
+    # signature attack and is fixed by editing configuration. When set, this
+    # wins — and if it is configured and unreachable, verification refuses
+    # rather than falling back, which is the D2 posture.
+    jwt_jwks_url: str | None = Field(
+        default=None,
+        description="IdP JWKS URL. Takes precedence over jwt_public_key.",
+    )
     # PEM public key for RS256/OIDC verification (enterprise identity).
     jwt_public_key: str | None = None
     # Audience and issuer pinning (D9). A signature proves only that the token
