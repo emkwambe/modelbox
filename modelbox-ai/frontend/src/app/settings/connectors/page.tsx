@@ -21,7 +21,7 @@ import { ErrorState, LoadingState, StatusText } from '@/components/ui';
 import { color, semantic } from '@/styles/tokens';
 import { errMessage, errorKind } from '@/lib/errors';
 import type { ErrorKind } from '@/lib/errors';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStatus, useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { ConnectionEngine, ConnectionInfo } from '@/types/schema';
 
@@ -44,6 +44,12 @@ type ListState =
   | { status: 'ready' }
   | { status: 'failed'; kind: ErrorKind; message: string };
 
+// One heading style, used by the loading frame and the loaded page alike.
+// Spelling it twice is how the two drift apart, and it is also two more
+// hand-written type declarations against F1's budget — which is exactly how
+// the type walk caught this change.
+const pageHeading = { fontSize: 28, fontWeight: 700, marginTop: 8 } as const;
+
 export default function ConnectorsPage() {
   const router = useRouter();
   const token = useAuthStore((s) => s.token);
@@ -51,7 +57,6 @@ export default function ConnectorsPage() {
   const activeWorkspaceId = useAuthStore((s) => s.activeWorkspaceId);
   const loadModel = useCanvasStore((s) => s.loadModel);
 
-  const [mounted, setMounted] = useState(false);
   const [connections, setConnections] = useState<ConnectionInfo[]>([]);
   const [listState, setListState] = useState<ListState>({ status: 'loading' });
   const [name, setName] = useState('');
@@ -61,8 +66,8 @@ export default function ConnectorsPage() {
   const [introspectingId, setIntrospectingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => setMounted(true), []);
-  const signedIn = mounted && Boolean(token);
+  const authStatus = useAuthStatus();
+  const signedIn = authStatus === 'signed-in';
 
   const refresh = useCallback(async () => {
     setListState({ status: 'loading' });
@@ -134,7 +139,19 @@ export default function ConnectorsPage() {
     }
   }
 
-  if (!mounted) return null;
+  // The page frame renders even before the session is known, so a slow
+  // hydration reads as a page that is loading rather than as a blank window.
+  // `return null` here drew nothing at all — see `useAuthStatus`.
+  if (authStatus === 'unknown') {
+    return (
+      <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px' }}>
+        <h1 style={pageHeading}>
+          Connectors
+        </h1>
+        <LoadingState label="Checking your session…" />
+      </main>
+    );
+  }
 
   return (
     <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px' }}>
@@ -146,7 +163,7 @@ export default function ConnectorsPage() {
           ← ModelBox AI
         </Link>
       </div>
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>
+      <h1 style={pageHeading}>
         Database Connectors
       </h1>
       <p style={{ color: color.neutral[600], marginTop: 4 }}>

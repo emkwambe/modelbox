@@ -15,7 +15,7 @@ import { ErrorState, LoadingState, StatusText, toneColor, toneTint } from '@/com
 import { color, fontFamily, semantic, surface } from '@/styles/tokens';
 import { errMessage, errorKind } from '@/lib/errors';
 import type { ErrorKind } from '@/lib/errors';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStatus, useAuthStore } from '@/store/authStore';
 import type { ApiKeyInfo } from '@/types/schema';
 
 /**
@@ -30,11 +30,16 @@ type ListState =
   | { status: 'ready' }
   | { status: 'failed'; kind: ErrorKind; message: string };
 
+// One heading style, used by the loading frame and the loaded page alike.
+// Spelling it twice is how the two drift apart, and it is also two more
+// hand-written type declarations against F1's budget — which is exactly how
+// the type walk caught this change.
+const pageHeading = { fontSize: 28, fontWeight: 700, marginTop: 8 } as const;
+
 export default function ApiKeysPage() {
   const token = useAuthStore((s) => s.token);
   const openModal = useAuthStore((s) => s.openModal);
 
-  const [mounted, setMounted] = useState(false);
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
   const [listState, setListState] = useState<ListState>({ status: 'loading' });
   const [name, setName] = useState('');
@@ -44,8 +49,8 @@ export default function ApiKeysPage() {
   const [newSecret, setNewSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => setMounted(true), []);
-  const signedIn = mounted && Boolean(token);
+  const authStatus = useAuthStatus();
+  const signedIn = authStatus === 'signed-in';
 
   const refresh = useCallback(async () => {
     setListState({ status: 'loading' });
@@ -106,7 +111,19 @@ export default function ApiKeysPage() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  if (!mounted) return null;
+  // The page frame renders even before the session is known, so a slow
+  // hydration reads as a page that is loading rather than as a blank window.
+  // `return null` here drew nothing at all — see `useAuthStatus`.
+  if (authStatus === 'unknown') {
+    return (
+      <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px' }}>
+        <h1 style={pageHeading}>
+          API Keys
+        </h1>
+        <LoadingState label="Checking your session…" />
+      </main>
+    );
+  }
 
   return (
     <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px' }}>
@@ -116,7 +133,7 @@ export default function ApiKeysPage() {
       >
         ← ModelBox AI
       </Link>
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>API Keys</h1>
+      <h1 style={pageHeading}>API Keys</h1>
       <p style={{ color: color.neutral[600], marginTop: 4 }}>
         Programmatic access for CI/CD pipelines and agents. Send the key as an{' '}
         <code>X-API-Key</code> header. The secret is shown once — store it safely.

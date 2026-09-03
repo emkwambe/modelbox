@@ -24,7 +24,7 @@ import {
   validateGraph,
 } from '@/lib/api';
 import type { Template } from '@/lib/templates';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStatus, useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
 import { toneColor, toneTint } from '@/components/ui';
 import { color, semantic } from '@/styles/tokens';
@@ -47,7 +47,7 @@ export default function TrainerPage() {
   const getGraphPayload = useCanvasStore((s) => s.getGraphPayload);
   const applyLayout = useCanvasStore((s) => s.applyLayout);
 
-  const [mounted, setMounted] = useState(false);
+  const authStatus = useAuthStatus();
   const [showLabModal, setShowLabModal] = useState(false);
   const [activeLab, setActiveLab] = useState<Lab | null>(null);
   const [labGrade, setLabGrade] = useState<LabGrade | null>(null);
@@ -94,7 +94,6 @@ export default function TrainerPage() {
     setShowLibrary(false);
   }
 
-  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!token) return;
@@ -169,9 +168,12 @@ export default function TrainerPage() {
     }
   }
 
-  const signedIn = mounted && Boolean(token);
+  const signedIn = authStatus === 'signed-in';
 
-  if (mounted && !signedIn) {
+  // Not `mounted && !signedIn`: while `mounted` was false the signed-out
+  // branch was skipped and the trainer rendered to a visitor who was not
+  // signed in.
+  if (!signedIn) {
     return (
       <main style={{ maxWidth: 640, margin: '0 auto', padding: '64px 24px' }}>
         <h1 style={{ fontSize: 26, fontWeight: 700 }}>ModelBox Trainer</h1>

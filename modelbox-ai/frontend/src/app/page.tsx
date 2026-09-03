@@ -13,7 +13,7 @@ import { AUTH_BADGE_RESERVE } from '@/components/auth/AuthBadge';
 import TemplateLibraryModal from '@/components/TemplateLibraryModal';
 import { enqueueSynthesis, getJob, getModel } from '@/lib/api';
 import type { Template } from '@/lib/templates';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStatus, useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { Paradigm, SynthesizeResponse } from '@/types/schema';
 import { color, semantic } from '@/styles/tokens';
@@ -88,7 +88,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const authStatus = useAuthStatus();
   const [showLibrary, setShowLibrary] = useState(false);
 
   function handleUsePrompt(t: Template) {
@@ -107,7 +107,6 @@ export default function HomePage() {
 
   // Auth state is only known client-side (persisted). Gate auth-dependent UI
   // behind mount to avoid an SSR/CSR hydration mismatch.
-  useEffect(() => setMounted(true), []);
 
   // Coming back from the canvas's "Synthesize this model": start from the
   // template's own prompt. Never overwrite something already typed.
@@ -117,7 +116,7 @@ export default function HomePage() {
     if (sourceParadigm) setParadigm(sourceParadigm);
   }, [sourcePrompt, sourceParadigm]);
 
-  const signedIn = mounted && Boolean(token);
+  const signedIn = authStatus === 'signed-in';
 
   /** Poll a job to completion and return the finished model. */
   async function pollJob(jobId: string): Promise<SynthesizeResponse> {
@@ -325,7 +324,7 @@ export default function HomePage() {
               ? 'Synthesize model'
               : 'Sign in to synthesize'}
         </button>
-        {mounted && !signedIn && (
+        {authStatus === 'signed-out' && (
           <button
             type="button"
             onClick={openModal}
@@ -344,7 +343,7 @@ export default function HomePage() {
         )}
       </div>
 
-      {mounted && signedIn && (
+      {signedIn && (
         <p style={{ color: semantic.validated.onLight, marginTop: 8, fontSize: 13 }}>
           ✓ Signed in — ready to synthesize.
         </p>

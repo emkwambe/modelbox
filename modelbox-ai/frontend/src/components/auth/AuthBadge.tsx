@@ -12,7 +12,7 @@ import { Badge, toneColor, toneTint } from '@/components/ui';
 import { color, semantic } from '@/styles/tokens';
 import { listWorkspaces } from '@/lib/api';
 import { errMessage } from '@/lib/errors';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStatus, useAuthStore } from '@/store/authStore';
 
 /**
  * Hard bound on the badge's rendered width.
@@ -55,10 +55,9 @@ export default function AuthBadge() {
   const activeWorkspaceId = useAuthStore((s) => s.activeWorkspaceId);
   const setWorkspaces = useAuthStore((s) => s.setWorkspaces);
   const setActiveWorkspace = useAuthStore((s) => s.setActiveWorkspace);
-  const [mounted, setMounted] = useState(false);
+  const authStatus = useAuthStatus();
   const [workspacesError, setWorkspacesError] = useState<string | null>(null);
 
-  useEffect(() => setMounted(true), []);
 
   // Load the caller's workspaces whenever authenticated.
   useEffect(() => {
@@ -91,7 +90,12 @@ export default function AuthBadge() {
     };
   }, [token, setWorkspaces, setActiveWorkspace]);
 
-  if (!mounted) return null;
+  // Renders nothing while the session is unknown, and unlike the pages that is
+  // the right answer: a floating pill has no content to hold space for, and a
+  // skeleton badge would be noise in the corner of every screen. What matters
+  // is that it is now `unknown` rather than "not yet mounted" — the badge used
+  // to be able to show "Sign in" to a signed-in user for one frame.
+  if (authStatus === 'unknown') return null;
 
   const pill: React.CSSProperties = {
     position: 'fixed',

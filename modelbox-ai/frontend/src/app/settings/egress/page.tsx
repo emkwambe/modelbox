@@ -21,7 +21,7 @@ import Link from 'next/link';
 
 import { Banner, StatusText } from '@/components/ui';
 import { listEgressEvents } from '@/lib/api';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStatus, useAuthStore } from '@/store/authStore';
 import { color, semantic } from '@/styles/tokens';
 import type { EgressEvent, EgressLedgerPage } from '@/types/schema';
 
@@ -68,9 +68,8 @@ export default function EgressLedgerPageView() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [eventFilter, setEventFilter] = useState('');
-  const [mounted, setMounted] = useState(false);
+  const authStatus = useAuthStatus();
 
-  useEffect(() => setMounted(true), []);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -89,7 +88,12 @@ export default function EgressLedgerPageView() {
     void load();
   }, [load]);
 
-  if (mounted && !token) {
+  // `unknown` renders the signed-out frame rather than the ledger. Gating on
+  // `mounted && !token` meant that while `mounted` was false this branch was
+  // skipped and the **ledger itself** rendered to a visitor who was not signed
+  // in — a flash of authenticated UI, which is worse than a blank page because
+  // it shows something rather than nothing.
+  if (authStatus !== 'signed-in') {
     return (
       <main style={{ maxWidth: 760, margin: '64px auto', padding: '0 24px' }}>
         <h1 style={{ fontSize: 26, fontWeight: 800 }}>Egress ledger</h1>
