@@ -68,24 +68,49 @@ def _entity_columns(entity) -> set[str]:
 def entity_similarity(gold_entity, candidate_entity) -> float:
     """How much two entities look like the same table, ignoring their names.
 
-    Jaccard over canonicalised column names. Column vocabulary is the stable
-    part of a schema: two modellers asked for the same warehouse will disagree
-    about whether the table is `orders` or `fact_order_line` far more often than
-    they will disagree that it carries an order id, a customer reference, a date
-    and an amount.
+    **Overlap, not Jaccard, and the reason is a measured defect rather than a
+    preference.** Jaccard divides by the union, so a candidate that produces the
+    right table and adds columns is penalised for the additions. Measured on the
+    gold graphs, `dim_customer` against a candidate's own `dim_customer` — the
+    same table, the same name, unarguably the same thing — scored **0.200**,
+    below the 0.50 floor. A similarity function that scores an identical table
+    at 0.2 is miscalibrated on its own terms, whatever any provider run says,
+    and that is the ground for changing it.
 
-    Entity *type* is deliberately not part of the score. FACT/DIMENSION is a
-    label the paradigm assigns, and a provider that builds the right table and
-    labels it wrong should lose points for the label — which it does, through
-    the linter codes — rather than have the table itself go unrecognised.
+    Overlap asks the question the matcher actually has — *is this the same
+    table* — rather than *are these the same size*. The elaboration a modeller
+    adds is not evidence against identity. Measured effect on the 2026-09-02
+    candidates: `fact_order_line` against a candidate's `fact_sales`, the same
+    fact under another name, moves from 0.231 to 0.500 and is recognised.
+
+    **A foreign-key-structure signal was written and removed.** The idea is
+    sound — two facts joining to the same dimensions are the same fact — and on
+    all twelve captured candidate graphs it changed **no score at all**, because
+    a model that renames a fact renames the dimensions with it, so the targets
+    disagree exactly when the vocabulary does. Keeping it would have been
+    unexercised complexity that reads as rigour. It belongs here the day a
+    fixture demonstrates it deciding something.
+
+    Entity *type* remains deliberately excluded. FACT/DIMENSION is a label the
+    paradigm assigns, and a provider that builds the right table and labels it
+    wrong should lose points for the label — which it does, through the linter
+    codes — rather than have the table itself go unrecognised.
+
+    **The honest limit.** Every signal here is derived from names one level
+    down, so a candidate that renames entities *and* columns consistently cannot
+    be recognised at all. `saas-subscription` is exactly that case: the
+    candidate's `fact_subscription_snapshot` / `dim_organisation` / `dim_tier`
+    share zero column names with gold's `fact_subscription_monthly` /
+    `dim_customer` / `dim_plan`, and score 0.000 while being a defensible model
+    of the same warehouse. Closing that needs embedding similarity with optimal
+    assignment, which is a dependency and a decision, not a tweak.
     """
     gold_columns = _entity_columns(gold_entity)
     candidate_columns = _entity_columns(candidate_entity)
     if not gold_columns or not candidate_columns:
         return 0.0
-    intersection = len(gold_columns & candidate_columns)
-    union = len(gold_columns | candidate_columns)
-    return intersection / union
+    shared = len(gold_columns & candidate_columns)
+    return shared / min(len(gold_columns), len(candidate_columns))
 
 
 def match_entities(gold: SynthesizedModel, candidate: SynthesizedModel) -> dict[str, str]:
