@@ -22,6 +22,7 @@ from app.api.v1.dependencies import (
     require_listed_workspaces,
     require_resource_role,
 )
+from app.core.config import Settings, get_settings
 from app.core.security import (
     create_access_token,
     generate_api_key,
@@ -82,14 +83,32 @@ async def login_for_access_token(
     return Token(access_token=create_access_token(str(user.user_id)))
 
 
+def registration_allowed(config: Settings) -> bool:
+    """Open self-registration: everywhere but production, or when enabled there."""
+    return config.environment != "production" or config.allow_registration
+
+
 @router.post(
     "/register",
     response_model=Token,
     status_code=status.HTTP_201_CREATED,
     summary="Register a local account and personal workspace",
 )
-async def register(payload: RegisterRequest, session: SessionDep) -> Token:
-    """Create a user + personal workspace (as OWNER) and return a token."""
+async def register(
+    payload: RegisterRequest,
+    session: SessionDep,
+    config: Annotated[Settings, Depends(get_settings)],
+) -> Token:
+    """Create a user + personal workspace (as OWNER) and return a token.
+
+    403 in production unless MODELBOX_ALLOW_REGISTRATION=true. The appliance's
+    first owner is created with `python -m app.cli create-owner`.
+    """
+    if not registration_allowed(config):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Self-registration is disabled on this appliance. Ask an owner for access.",
+        )
     existing = (
         await session.execute(
             select(User).where(User.email == payload.email)

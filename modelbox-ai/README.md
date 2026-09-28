@@ -52,9 +52,19 @@ modelbox-ai/
 pwsh scripts/init-env.ps1     # Windows (PowerShell 7)
 sh scripts/init-env.sh        # Linux / macOS
 
-# 2. Fill in provider API keys in .env, then start
-docker compose --env-file .env -f docker/docker-compose.appliance.yml up --build
+# 2. Fill in provider API keys in .env, start, and create the first owner
+docker compose --env-file .env -f docker/docker-compose.appliance.yml up --build -d
+docker compose --env-file .env -f docker/docker-compose.appliance.yml exec modelbox-backend python -m app.cli create-owner --email you@example.com
 ```
+
+**Step 2 is how anyone first signs in.** The appliance creates no account of
+its own and runs with self-registration off, so `create-owner` makes the first
+one: it prompts twice for the password (12 characters or more), never takes it
+as an argument, and makes you OWNER of a new workspace. It refuses once any
+owner exists; from then on an owner adds people. For scripted installs,
+`--password-stdin` reads the password from standard input instead of the
+prompt. Set `MODELBOX_ALLOW_REGISTRATION=true` in `.env` only if you want open
+self-registration on this appliance.
 
 **Step 1 comes first.** The init script writes `.env` from `.env.example`
 with a generated 64-character hex value for `JWT_SECRET`, `ENCRYPTION_KEY` and

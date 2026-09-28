@@ -64,6 +64,15 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MODELBOX_SEED_DEV_USER", "seed_dev_user"),
         description="Create dev@modelbox.ai at startup. Development only.",
     )
+    # Open self-registration (POST /auth/register). Under single-organisation
+    # tenancy a production appliance adds people through an owner, SCIM or
+    # OIDC, so there it is off unless explicitly turned on (owner decision H3,
+    # Sprint 7). The first owner comes from `python -m app.cli create-owner`.
+    allow_registration: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MODELBOX_ALLOW_REGISTRATION", "allow_registration"),
+        description="Permit POST /auth/register when ENVIRONMENT=production.",
+    )
 
     # --- Datastores -----------------------------------------------------------
     # Async SQLAlchemy engine URL, e.g.

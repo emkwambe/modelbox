@@ -39,6 +39,18 @@ used to ship in this repository. Run `scripts/init-env.ps1` or
 your `.env` still holds a shipped default, the backend will now refuse it. Plan
 the rotation before upgrading.
 
+### Self-registration is off in production; create-owner makes the first account
+
+`POST /api/v1/auth/register` returns 403 when `ENVIRONMENT=production` (as the
+appliance runs) unless `MODELBOX_ALLOW_REGISTRATION=true`. The first account is
+created after start-up with:
+
+```bash
+docker compose --env-file .env -f docker/docker-compose.appliance.yml exec modelbox-backend python -m app.cli create-owner --email you@example.com
+```
+
+It prompts for the password, and refuses once any owner exists.
+
 ### No development account or one-click development login
 
 The appliance no longer creates `dev@modelbox.ai`, and the sign-in dialog no
