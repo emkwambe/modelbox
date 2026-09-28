@@ -8,10 +8,11 @@ hosts the authentication + workspace-authorization dependencies (Slice 3A).
 from __future__ import annotations
 
 import datetime
+import functools
 import uuid
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import (
     APIKeyHeader,
     HTTPAuthorizationCredentials,
@@ -200,25 +201,6 @@ async def resolve_user_workspace(
     return workspace.workspace_id
 
 
-async def get_authorized_model(
-    model_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
-) -> DataModel:
-    """Load a model and assert the caller is a member of its workspace.
-
-    Raises 404 if the model is absent, 403 if the caller lacks access.
-    """
-    model = await session.get(DataModel, model_id)
-    if model is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Model {model_id} not found.",
-        )
-    await require_membership(session, user.user_id, model.workspace_id)
-    return model
-
-
-AuthorizedModelDep = Annotated[DataModel, Depends(get_authorized_model)]
-
 # Role hierarchy for RBAC: OWNER > ADMIN > MEMBER (Slice B2).
 #: The role ladder, lowest to highest (G10).
 #:
@@ -259,22 +241,233 @@ async def require_workspace_role(
     return member
 
 
-def require_model_role(min_role: str):
-    """Dependency factory: authorize a model route by minimum workspace role.
+# ---------------------------------------------------------------------------
+# Route authorization (Sprint 7, Step 2)
+# ---------------------------------------------------------------------------
+# Every route declares its minimum role through exactly one of the dependencies
+# below, and each carries that role as `policy_role`. `route_policy.py` holds
+# the table; `test_route_policy.py` walks every route and fails on any whose
+# dependency chain does not carry the role the table declares.
+#
+# Enforcement lives in dependencies rather than in handler bodies because only
+# a dependency is visible to that walk. A check inside a handler cannot be told
+# apart from a missing one without reading the code, which is how
+# `transform-paradigm` shipped checking membership alone.
+#
+# The factories are cached per role, so `require_model_role("MEMBER")` is one
+# object everywhere: a test can override exactly the dependency a route uses.
 
-    Builds on :func:`get_authorized_model` (404/membership) and additionally
-    enforces the caller's role meets ``min_role`` (403 otherwise).
+AUTHENTICATED = "AUTHENTICATED"
+
+
+def _declares(role: str, scope: str):
+    """Attach the role a dependency enforces, for the route-policy walk."""
+
+    def mark(fn):
+        fn.policy_role = role
+        fn.policy_scope = scope
+        return fn
+
+    return mark
+
+
+def _bad_request(detail: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
+
+
+def _as_uuid(value: object, name: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError) as exc:
+        raise _bad_request(f"{name} must be a UUID.") from exc
+
+
+async def _json_body(request: Request) -> dict:
+    """The request's JSON object, read once and cached by Starlette.
+
+    Read here so a dependency can authorize against a workspace named in the
+    body without the route changing its request shape. FastAPI still parses
+    and validates the body for the handler as before.
+    """
+    try:
+        data = await request.json()
+    except ValueError as exc:
+        raise _bad_request("Request body must be JSON.") from exc
+    if not isinstance(data, dict):
+        raise _bad_request("Request body must be a JSON object.")
+    return data
+
+
+async def _load_model(session: AsyncSession, model_id: uuid.UUID) -> DataModel:
+    model = await session.get(DataModel, model_id)
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model {model_id} not found.",
+        )
+    return model
+
+
+@_declares(AUTHENTICATED, "authenticated")
+async def require_authenticated(user: CurrentUserDep) -> User:
+    """Any signed-in caller. For routes that touch no workspace's data."""
+    return user
+
+
+@functools.cache
+def require_model_role(min_role: str):
+    """The model named by the ``model_id`` path parameter, at ``min_role``+.
+
+    404 if the model is absent, 403 if the caller is not a member of its
+    workspace or holds a lower role.
     """
 
+    @_declares(min_role, "model")
     async def _checker(
-        model: AuthorizedModelDep, session: SessionDep, user: CurrentUserDep
+        model_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
     ) -> DataModel:
-        member = await require_membership(session, user.user_id, model.workspace_id)
-        if _ROLE_LEVEL.get(member.role, 0) < _ROLE_LEVEL.get(min_role, 0):
+        model = await _load_model(session, model_id)
+        await require_workspace_role(session, user.user_id, model.workspace_id, min_role)
+        return model
+
+    _checker.__qualname__ = f"require_model_role({min_role!r})"
+    return _checker
+
+
+@functools.cache
+def require_query_workspace_role(min_role: str):
+    """The workspace named by the required ``workspace_id`` query parameter."""
+
+    @_declares(min_role, "query")
+    async def _checker(
+        workspace_id: Annotated[uuid.UUID, Query()],
+        session: SessionDep,
+        user: CurrentUserDep,
+    ) -> uuid.UUID:
+        await require_workspace_role(session, user.user_id, workspace_id, min_role)
+        return workspace_id
+
+    _checker.__qualname__ = f"require_query_workspace_role({min_role!r})"
+    return _checker
+
+
+@functools.cache
+def require_body_workspace_role(min_role: str):
+    """The workspace named by the body's optional ``workspace_id``.
+
+    Omitted means the caller's first workspace, or a new personal one where
+    they are OWNER (:func:`resolve_user_workspace`). The role is checked on
+    whichever workspace results, so the default cannot bypass it.
+    """
+
+    @_declares(min_role, "body")
+    async def _checker(
+        request: Request, session: SessionDep, user: CurrentUserDep
+    ) -> uuid.UUID:
+        raw = (await _json_body(request)).get("workspace_id")
+        requested = None if raw is None else _as_uuid(raw, "workspace_id")
+        workspace_id = await resolve_user_workspace(session, user, requested)
+        await require_workspace_role(session, user.user_id, workspace_id, min_role)
+        return workspace_id
+
+    _checker.__qualname__ = f"require_body_workspace_role({min_role!r})"
+    return _checker
+
+
+@functools.cache
+def require_resource_role(min_role: str, model_cls: type, param: str, source: str):
+    """A row that carries ``workspace_id``, named by a path or body field.
+
+    ``source`` is ``"path"`` or ``"body"``; ``param`` is the field. The row is
+    loaded, 404 if absent, and the role checked on its workspace.
+    """
+
+    @_declares(min_role, f"{source}-resource")
+    async def _checker(
+        request: Request, session: SessionDep, user: CurrentUserDep
+    ):
+        if source == "path":
+            raw = request.path_params.get(param)
+        else:
+            raw = (await _json_body(request)).get(param)
+        if raw is None:
+            raise _bad_request(f"{param} is required.")
+        resource_id = _as_uuid(raw, param)
+        row = await session.get(model_cls, resource_id)
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"{model_cls.__name__} {resource_id} not found.",
+            )
+        await require_workspace_role(session, user.user_id, row.workspace_id, min_role)
+        return row
+
+    _checker.__qualname__ = (
+        f"require_resource_role({min_role!r}, {model_cls.__name__}, {param!r})"
+    )
+    return _checker
+
+
+@functools.cache
+def require_body_models_role(min_role: str, fields: tuple[str, ...]):
+    """Every model named by the body fields in ``fields``, each at ``min_role``+."""
+
+    @_declares(min_role, "body-models")
+    async def _checker(
+        request: Request, session: SessionDep, user: CurrentUserDep
+    ) -> list[DataModel]:
+        body = await _json_body(request)
+        models: list[DataModel] = []
+        for field in fields:
+            model = await _load_model(session, _as_uuid(body.get(field), field))
+            await require_workspace_role(
+                session, user.user_id, model.workspace_id, min_role
+            )
+            models.append(model)
+        return models
+
+    _checker.__qualname__ = f"require_body_models_role({min_role!r}, {fields!r})"
+    return _checker
+
+
+@functools.cache
+def require_listed_workspaces(min_role: str):
+    """The workspaces a listing may read: those where the caller is ``min_role``+.
+
+    An optional ``workspace_id`` query parameter narrows it to one, and names a
+    workspace the caller holds no such role in is a 403 rather than an empty
+    list, so a refusal is not mistaken for an empty workspace.
+    """
+
+    @_declares(min_role, "listing")
+    async def _checker(
+        session: SessionDep,
+        user: CurrentUserDep,
+        workspace_id: Annotated[uuid.UUID | None, Query()] = None,
+    ) -> list[uuid.UUID]:
+        rows = (
+            await session.execute(
+                select(WorkspaceMember).where(WorkspaceMember.user_id == user.user_id)
+            )
+        ).scalars().all()
+        allowed = [
+            row.workspace_id
+            for row in rows
+            if _ROLE_LEVEL.get(row.role, 0) >= _ROLE_LEVEL[min_role]
+        ]
+        if workspace_id is None:
+            return allowed
+        if workspace_id not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Action requires minimum role of {min_role}.",
             )
-        return model
+        return [workspace_id]
 
+    _checker.__qualname__ = f"require_listed_workspaces({min_role!r})"
     return _checker
+
+
+AuthenticatedDep = Annotated[User, Depends(require_authenticated)]
+ModelViewerDep = Annotated[DataModel, Depends(require_model_role("VIEWER"))]
+ModelMemberDep = Annotated[DataModel, Depends(require_model_role("MEMBER"))]

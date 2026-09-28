@@ -15,10 +15,12 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 
 from app.api.v1.dependencies import (
+    AuthenticatedDep,
     CurrentUserDep,
     SessionDep,
-    require_workspace_role,
-    resolve_user_workspace,
+    require_body_workspace_role,
+    require_listed_workspaces,
+    require_resource_role,
 )
 from app.core.security import (
     create_access_token,
@@ -123,7 +125,7 @@ async def register(payload: RegisterRequest, session: SessionDep) -> Token:
 
 
 @router.get("/me", response_model=UserOut, summary="Current authenticated user")
-async def read_me(user: CurrentUserDep) -> UserOut:
+async def read_me(user: AuthenticatedDep) -> UserOut:
     """Return the profile of the authenticated caller."""
     return UserOut.model_validate(user)
 
@@ -138,14 +140,12 @@ async def read_me(user: CurrentUserDep) -> UserOut:
     summary="Create an API key (ADMIN+); returns the secret ONCE",
 )
 async def create_api_key(
-    payload: ApiKeyCreateRequest, session: SessionDep, user: CurrentUserDep
+    payload: ApiKeyCreateRequest,
+    session: SessionDep,
+    user: CurrentUserDep,
+    workspace_id: Annotated[uuid.UUID, Depends(require_body_workspace_role("ADMIN"))],
 ) -> ApiKeyCreatedResponse:
-    """Mint a workspace API key. The plaintext secret is shown once here."""
-    workspace_id = await resolve_user_workspace(
-        session, user, payload.workspace_id
-    )
-    await require_workspace_role(session, user.user_id, workspace_id, "ADMIN")
-
+    """Mint a workspace API key (ADMIN+). The plaintext secret is shown once here."""
     plaintext, prefix, key_hash = generate_api_key()
     record = ApiKey(
         workspace_id=workspace_id,
@@ -170,17 +170,16 @@ async def create_api_key(
     summary="List API keys in the caller's workspaces (no secrets)",
 )
 async def list_api_keys(
-    session: SessionDep, user: CurrentUserDep
+    session: SessionDep,
+    ws_ids: Annotated[list[uuid.UUID], Depends(require_listed_workspaces("ADMIN"))],
 ) -> list[ApiKeyInfo]:
-    """List key metadata for the caller's workspaces (never the secret/hash)."""
+    """List key metadata where the caller is ADMIN+ (never the secret/hash)."""
+    if not ws_ids:
+        return []
     rows = (
         await session.execute(
             select(ApiKey)
-            .join(
-                WorkspaceMember,
-                WorkspaceMember.workspace_id == ApiKey.workspace_id,
-            )
-            .where(WorkspaceMember.user_id == user.user_id)
+            .where(ApiKey.workspace_id.in_(ws_ids))
             .order_by(ApiKey.created_at.desc())
         )
     ).scalars().all()
@@ -193,18 +192,13 @@ async def list_api_keys(
     summary="Revoke an API key (ADMIN+)",
 )
 async def revoke_api_key(
-    key_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
+    key_id: uuid.UUID,
+    session: SessionDep,
+    record: Annotated[
+        ApiKey, Depends(require_resource_role("ADMIN", ApiKey, "key_id", "path"))
+    ],
 ) -> Response:
     """Revoke (delete) an API key. Requires ADMIN+ in its workspace."""
-    record = await session.get(ApiKey, key_id)
-    if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"API key {key_id} not found.",
-        )
-    await require_workspace_role(
-        session, user.user_id, record.workspace_id, "ADMIN"
-    )
     await session.delete(record)
     await session.flush()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

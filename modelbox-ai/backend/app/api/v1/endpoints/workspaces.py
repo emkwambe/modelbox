@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from sqlalchemy import select
 
-from app.api.v1.dependencies import CurrentUserDep, SessionDep
+from app.api.v1.dependencies import AuthenticatedDep, SessionDep
 from app.models.metadata_store import Workspace, WorkspaceMember
 from app.schemas.data_model import WorkspaceInfo
 
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
     summary="List the caller's workspaces and their role in each",
 )
 async def list_workspaces(
-    user: CurrentUserDep, session: SessionDep
+    user: AuthenticatedDep, session: SessionDep
 ) -> list[WorkspaceInfo]:
     """Return every workspace the current user is a member of."""
     rows = (

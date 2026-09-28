@@ -13,7 +13,8 @@ silently stops at page one is worse than no export.
 **Admin-scoped, and workspace-scoped within that.** An audit trail readable by
 everyone it records is not much of a control. Membership alone is not enough —
 `require_workspace_role(..., "ADMIN")` — because the events include other
-people's authentication and role changes.
+people's authentication and role changes. Enforced by the route's dependency,
+`require_query_workspace_role("ADMIN")`, which `route_policy.py` declares.
 
 Read-only by construction: there is no route here that writes. The rows are the
 record, and a view that could edit them would undo the point of having them.
@@ -25,15 +26,13 @@ import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
-from app.api.v1.dependencies import (
-    CurrentUserDep,
-    SessionDep,
-    require_workspace_role,
-)
+from app.api.v1.dependencies import SessionDep, require_query_workspace_role
+
+AdminWorkspace = Annotated[uuid.UUID, Depends(require_query_workspace_role("ADMIN"))]
 from app.models.metadata_store import AuditEvent
 from app.schemas.data_model import AuditEventOut, AuditEventPage
 
@@ -56,8 +55,7 @@ def _filtered(workspace_id: uuid.UUID, action: str | None, outcome: str | None):
 )
 async def list_audit_events(
     session: SessionDep,
-    user: CurrentUserDep,
-    workspace_id: Annotated[uuid.UUID, Query()],
+    workspace_id: AdminWorkspace,
     action: Annotated[str | None, Query()] = None,
     outcome: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
@@ -72,8 +70,6 @@ async def list_audit_events(
     admin *of that workspace*, and a cross-workspace default would quietly
     widen who can read whose events.
     """
-    await require_workspace_role(session, user.user_id, workspace_id, "ADMIN")
-
     total = (
         await session.execute(
             select(func.count()).select_from(
@@ -106,8 +102,7 @@ async def list_audit_events(
 )
 async def export_audit_events(
     session: SessionDep,
-    user: CurrentUserDep,
-    workspace_id: Annotated[uuid.UUID, Query()],
+    workspace_id: AdminWorkspace,
 ) -> StreamingResponse:
     """Stream every audit row for a workspace as newline-delimited JSON.
 
@@ -125,7 +120,6 @@ async def export_audit_events(
     shipping, and an export that silently stops at a page boundary produces a
     SIEM that is confidently missing events.
     """
-    await require_workspace_role(session, user.user_id, workspace_id, "ADMIN")
 
     async def _lines():
         result = await session.stream(

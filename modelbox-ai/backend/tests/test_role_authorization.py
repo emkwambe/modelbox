@@ -267,46 +267,6 @@ async def test_a_refused_approval_is_not_recorded_as_one(session, world) -> None
     assert rows == []
 
 
-def test_every_mutating_model_route_declares_a_role() -> None:
-    """The gap this criterion closes, asserted structurally.
-
-    Before Sprint 6.5, mutating model routes went through `AuthorizedModelDep`,
-    which proves *membership* and says nothing about role — so the lowest role
-    in the workspace could edit and export every model in it. A per-route test
-    catches the routes that exist today; this catches the one somebody adds
-    next week, which is the failure that actually happens.
-    """
-    import inspect
-
-    from app.api.v1.endpoints import models as models_module
-
-    source = inspect.getsource(models_module)
-    unguarded: list[str] = []
-    for chunk in source.split("@router.")[1:]:
-        verb = chunk.split("(", 1)[0].strip()
-        if verb not in {"post", "put", "patch", "delete"}:
-            continue
-        header, _, _rest = chunk.partition("\n) -> ")
-        name = header.split("async def ", 1)[-1].split("(", 1)[0]
-        if "require_model_role" not in header and "require_workspace_role" not in chunk:
-            unguarded.append(f"{verb.upper()} {name}")
-
-    # Exempt individually, each for a stated reason, so adding a sixth is a
-    # deliberate act rather than a silent widening.
-    #
-    #   synthesize_model / diff_models / validate_graph — take no model_id.
-    #       They create or compute rather than mutate an existing model, and are
-    #       membership-scoped at the workspace.
-    #   validate_model / export_synthetic_data — POST, but neither writes. They
-    #       run the linter and generate rows from a model already loaded, and a
-    #       VIEWER auditing a workspace should be able to do both. Requiring
-    #       MEMBER here would mean read-only access could not read the thing it
-    #       exists to review.
-    allowed = {
-        "POST synthesize_model",
-        "POST diff_models",
-        "POST validate_graph",
-        "POST validate_model",
-        "POST export_synthetic_data",
-    }
-    assert set(unguarded) <= allowed, f"mutating routes with no role: {unguarded}"
+# The structural guard that scanned `models.py` alone was replaced in Sprint 7 by
+# `test_route_policy.py`, which walks every route in every router against one
+# policy table.

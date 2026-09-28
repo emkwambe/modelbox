@@ -167,6 +167,19 @@ graphs; the assertion needed a mutated copy to mean anything (correction C7).
 - Documentation is updated in the same PR as the behaviour it describes. If the
   code does not do it, the doc does not say it.
 
+## Authorization
+
+**Every route declares its minimum role in `backend/app/api/v1/route_policy.py`,
+and enforces it with a dependency from `app.api.v1.dependencies`**, never with
+a check inside the handler body. `tests/test_route_policy.py` walks every route
+through every included router and reads the role off the dependency chain; a
+handler-body check is invisible to it. A new route fails that test until it has an entry,
+and public routes must also be in `PUBLIC_ALLOWLIST`.
+
+Authorization tests authenticate with real credentials (`tests/_real_auth.py`).
+A test that overrides `get_current_user` skips the code that decides who the
+caller is, and is not evidence for an authorization claim.
+
 ## Gold graphs
 
 The six reference models are **extracted** from `frontend/src/lib/templates.ts`

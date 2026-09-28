@@ -14,11 +14,11 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 
-from app.api.v1.dependencies import CurrentUserDep, SessionDep
-from app.models.metadata_store import EgressAudit, WorkspaceMember
+from app.api.v1.dependencies import SessionDep, require_listed_workspaces
+from app.models.metadata_store import EgressAudit
 from app.schemas.data_model import EgressEventOut, EgressLedgerPage
 
 router = APIRouter(prefix="/egress", tags=["egress"])
@@ -31,12 +31,13 @@ router = APIRouter(prefix="/egress", tags=["egress"])
 )
 async def list_egress_events(
     session: SessionDep,
-    user: CurrentUserDep,
+    # VIEWER+ workspaces; the optional `workspace_id` query parameter narrows
+    # to one and is handled by the dependency.
+    ws_ids: Annotated[list[uuid.UUID], Depends(require_listed_workspaces("VIEWER"))],
     # `Annotated[...]` rather than `= Query(...)`: the older form calls a
     # function in a default argument, which flake8-bugbear flags (B008). It is
     # a false positive for FastAPI and the existing endpoints carry it, but new
     # code need not add to that count when the supported spelling avoids it.
-    workspace_id: Annotated[uuid.UUID | None, Query()] = None,
     provider: Annotated[str | None, Query()] = None,
     event: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
@@ -54,28 +55,6 @@ async def list_egress_events(
     when the truth is "this is what left that we can place" — and the gap is
     invisible precisely where it matters most.
     """
-    member_ws = (
-        (
-            await session.execute(
-                select(WorkspaceMember.workspace_id).where(
-                    WorkspaceMember.user_id == user.user_id
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-
-    if workspace_id is not None:
-        if workspace_id not in member_ws:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have access to this workspace.",
-            )
-        ws_ids: list[uuid.UUID] = [workspace_id]
-    else:
-        ws_ids = list(member_ws)
-
     # Mutation, 2026-08-29: hard-coding this to 0 — the natural way to write
     # the view if the gap is not front of mind — fails
     # `test_rows_scoping_cannot_show_are_counted_not_dropped` and the

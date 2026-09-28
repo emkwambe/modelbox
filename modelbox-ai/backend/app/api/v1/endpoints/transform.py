@@ -5,8 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.v1.dependencies import (
-    AuthorizedModelDep,
     CurrentUserDep,
+    ModelMemberDep,
     ParadigmTranslatorDep,
 )
 from app.schemas.data_model import (
@@ -25,10 +25,13 @@ router = APIRouter(prefix="/model", tags=["transform"])
 async def transform_paradigm(
     payload: TransformParadigmRequest,
     translator: ParadigmTranslatorDep,
-    model: AuthorizedModelDep,
+    model: ModelMemberDep,
     user: CurrentUserDep,
 ) -> TransformParadigmResponse:
-    """Transform an existing model graph into a new paradigm (FR-3, TRD §2.4)."""
+    """Transform an existing model graph into a new paradigm (FR-3, TRD §2.4).
+
+    MEMBER+: it replaces the model's graph and calls a model provider.
+    """
     result = await translator.transform(
         model.model_id,
         payload,

@@ -6,13 +6,13 @@ import uuid
 from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from app.api.v1.dependencies import (
     CurrentUserDep,
     SessionDep,
-    require_membership,
-    resolve_user_workspace,
+    require_body_workspace_role,
+    require_resource_role,
 )
 from app.models.metadata_store import SynthesisJob
 from app.schemas.data_model import (
@@ -53,11 +53,9 @@ async def enqueue_synthesis(
     session: SessionDep,
     user: CurrentUserDep,
     enqueue: EnqueuerDep,
+    workspace_id: Annotated[uuid.UUID, Depends(require_body_workspace_role("MEMBER"))],
 ) -> JobCreatedResponse:
-    """Create a PENDING job for the caller's workspace and dispatch it."""
-    workspace_id = await resolve_user_workspace(
-        session, user, payload.workspace_id
-    )
+    """Create a PENDING job for the caller's workspace and dispatch it (MEMBER+)."""
     job = await JobService(session).create_job(user, payload, workspace_id)
     # Ensure the row is committed before the worker (separate session) reads it.
     await session.commit()
@@ -75,16 +73,13 @@ async def enqueue_synthesis(
     summary="Poll an async synthesis job",
 )
 async def get_job(
-    job_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
+    job_id: uuid.UUID,
+    job: Annotated[
+        SynthesisJob,
+        Depends(require_resource_role("VIEWER", SynthesisJob, "job_id", "path")),
+    ],
 ) -> JobStatusResponse:
-    """Return job status (workspace-scoped)."""
-    job = await session.get(SynthesisJob, job_id)
-    if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found.",
-        )
-    await require_membership(session, user.user_id, job.workspace_id)
+    """Return job status (VIEWER+ in the job's workspace)."""
     return JobStatusResponse(
         job_id=job.job_id,
         status=job.status,

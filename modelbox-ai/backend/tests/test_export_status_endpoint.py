@@ -13,7 +13,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.artifact_status import (
     ARTIFACT_STATUS,
@@ -21,16 +22,22 @@ from app.services.artifact_status import (
     certified_dialects,
     preview_dialects,
 )
+from tests._real_auth import bearer, make_user, real_client, sqlite_session
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncIterator[AsyncClient]:
-    from app.main import create_app
+async def session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession]:
+    async for s in sqlite_session(monkeypatch):
+        yield s
 
-    app = create_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+
+@pytest_asyncio.fixture
+async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """Signed in with a real token: the route requires sign-in (Sprint 7)."""
+    user = await make_user(session, "reader@example.com")
+    await session.commit()
+    async with real_client(session) as c:
+        c.headers.update(bearer(user))
         yield c
 
 
@@ -60,14 +67,13 @@ async def test_every_row_carries_a_reason(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_it_needs_no_session(client: AsyncClient) -> None:
-    """Deliberately unauthenticated — it describes the build, not any data.
+async def test_it_requires_sign_in(session: AsyncSession) -> None:
+    """Default deny (Sprint 7): it describes the build, but nothing needs it anonymously.
 
-    Asserted rather than assumed: added to an authenticated router by reflex,
-    this would silently become unreachable from a signed-out export panel and
-    the badges would quietly stop appearing.
+    Its only caller is the export panel, which works only for a signed-in user.
     """
-    assert (await client.get("/api/v1/export/status")).status_code == 200
+    async with real_client(session) as anonymous:
+        assert (await anonymous.get("/api/v1/export/status")).status_code == 401
 
 
 def test_the_dialect_helpers_agree_with_the_manifest() -> None:

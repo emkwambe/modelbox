@@ -45,6 +45,23 @@ The appliance no longer creates `dev@modelbox.ai`, and the sign-in dialog no
 longer offers a development login. The account is created only in development,
 on request (`MODELBOX_SEED_DEV_USER=true`).
 
+### Every route has a declared minimum role
+
+Each API route now declares the workspace role it requires, in one table
+(`backend/app/api/v1/route_policy.py`), and a test fails if any route lacks an
+entry or enforces something else. Callers below a route's role now get 403:
+
+| Role | Can |
+| :-- | :-- |
+| `VIEWER` | read models, jobs, connections (masked), assignments and the egress ledger; validate; export |
+| `MEMBER` | also synthesize, edit or transform a graph, introspect a connection, and work on Trainer assignments |
+| `APPROVER` | also record sign-off on a model |
+| `ADMIN` | also create or delete connectors, manage API keys, read the audit trail, delete models |
+
+Listings (models, connections, assignments, API keys, egress) return only the
+workspaces where the caller holds the listed role; naming another workspace is
+a 403. `GET /api/v1/export/status` now requires sign-in.
+
 ### The LiteLLM proxy service is removed
 
 `litellm-proxy` (port 4000), `config/litellm_config.yaml` and `LLM_GATEWAY_URL`
