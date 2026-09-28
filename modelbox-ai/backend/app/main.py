@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.__version__ import __version__
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.database import dispose_engine
 from app.core.logging_config import configure_logging
 from app.services.llm_gateway import get_llm_gateway
@@ -29,12 +29,26 @@ settings = get_settings()
 configure_logging(settings)
 
 
-async def _seed_dev_user() -> None:
+def dev_seed_allowed(config: Settings) -> bool:
+    """True only in development, and only when the seed was asked for.
+
+    The account's password is published in this repository, so it is a
+    credential everyone has. Both conditions are required: development alone
+    would seed every developer's database without being asked, and the flag
+    alone would let one stray variable put a known OWNER on a production box.
+    """
+    return config.environment == "development" and config.seed_dev_user
+
+
+async def _seed_dev_user(config: Settings) -> None:
     """Create the default dev account + workspace if it does not exist.
 
-    Best-effort: logged and swallowed on failure (e.g. auth tables not yet
-    migrated) so startup never blocks on seeding.
+    Refused unless :func:`dev_seed_allowed`. Otherwise best-effort: logged and
+    swallowed on failure (e.g. auth tables not yet migrated) so startup never
+    blocks on seeding.
     """
+    if not dev_seed_allowed(config):
+        return
     from sqlalchemy import select
 
     from app.core.database import get_sessionmaker
@@ -79,7 +93,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Starting %s (airgapped=%s)", settings.app_name, settings.is_airgapped)
     # Eagerly construct the LLM gateway so router-config errors surface at boot.
     get_llm_gateway()
-    await _seed_dev_user()
+    await _seed_dev_user(settings)
     try:
         yield
     finally:

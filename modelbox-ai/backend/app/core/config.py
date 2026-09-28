@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     environment: Literal["development", "staging", "production"] = "development"
     debug: bool = False
+    # The dev account's password is in this repository, so creating it is an
+    # explicit request, and only honoured in development (see app.main).
+    seed_dev_user: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MODELBOX_SEED_DEV_USER", "seed_dev_user"),
+        description="Create dev@modelbox.ai at startup. Development only.",
+    )
 
     # --- Datastores -----------------------------------------------------------
     # Async SQLAlchemy engine URL, e.g.

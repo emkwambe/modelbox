@@ -96,6 +96,11 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
+The development account (`dev@modelbox.ai`, an OWNER of "Dev Workspace") is
+created at startup only when `ENVIRONMENT=development` **and**
+`MODELBOX_SEED_DEV_USER=true`. Its password is in this repository, so no other
+environment creates it, whatever the flag says.
+
 **Frontend**
 
 ```bash
