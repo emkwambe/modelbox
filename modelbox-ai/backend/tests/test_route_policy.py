@@ -31,6 +31,7 @@ from fastapi.routing import APIRoute
 from app.api.v1.dependencies import _ROLE_LEVEL, require_model_role
 from app.api.v1.endpoints.scim import require_scim_token
 from app.api.v1.route_policy import (
+    APPLIANCE_OWNER,
     AUTHENTICATED,
     PUBLIC,
     PUBLIC_ALLOWLIST,
@@ -39,7 +40,7 @@ from app.api.v1.route_policy import (
 )
 from app.main import create_app
 
-LEVEL = {AUTHENTICATED: 0, **_ROLE_LEVEL}
+LEVEL = {AUTHENTICATED: 0, **_ROLE_LEVEL, APPLIANCE_OWNER: max(_ROLE_LEVEL.values()) + 1}
 
 
 def _flatten(routes: list[Any], prefix: str = "") -> Iterator[tuple[str, APIRoute]]:
@@ -106,9 +107,9 @@ def _check_policy(app: FastAPI, table: dict[tuple[str, str], str]) -> None:
 
 
 def test_the_walk_finds_every_route() -> None:
-    """Precondition: 45 routes, reached through included routers."""
+    """Precondition: 47 routes, reached through included routers."""
     served = _served(create_app())
-    assert len(served) == len(ROUTE_POLICY) == 45
+    assert len(served) == len(ROUTE_POLICY) == 47
     assert ("POST", "/api/v1/model/{model_id}/transform-paradigm") in served
 
 

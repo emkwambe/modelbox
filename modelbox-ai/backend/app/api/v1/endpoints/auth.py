@@ -142,6 +142,15 @@ async def register(
         )
     )
     await session.flush()
+    await audit_log.record(
+        action="MEMBER_ADDED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=workspace.workspace_id,
+        resource_type="user",
+        resource_id=str(user.user_id),
+        detail={"role": "OWNER", "via": "register"},
+    )
 
     return Token(access_token=create_access_token(str(user.user_id)))
 
@@ -194,6 +203,15 @@ async def create_api_key(
     session.add(record)
     await session.flush()
     await session.refresh(record)  # populate server-side created_at
+    await audit_log.record(
+        action="API_KEY_CREATED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=workspace_id,
+        resource_type="api_key",
+        resource_id=str(record.api_key_id),
+        detail={"name": record.name, "role_cap": record.role_cap, "prefix": record.key_prefix},
+    )
 
     return ApiKeyCreatedResponse(
         api_key=plaintext, **ApiKeyInfo.model_validate(record).model_dump()
@@ -230,11 +248,23 @@ async def list_api_keys(
 async def revoke_api_key(
     key_id: uuid.UUID,
     session: SessionDep,
+    user: CurrentUserDep,
     record: Annotated[
         ApiKey, Depends(require_resource_role("ADMIN", ApiKey, "key_id", "path"))
     ],
 ) -> Response:
     """Revoke (delete) an API key. Requires ADMIN+ in its workspace."""
+    details = {"name": record.name, "prefix": record.key_prefix}
+    workspace_id = record.workspace_id
     await session.delete(record)
     await session.flush()
+    await audit_log.record(
+        action="API_KEY_REVOKED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=workspace_id,
+        resource_type="api_key",
+        resource_id=str(key_id),
+        detail=details,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

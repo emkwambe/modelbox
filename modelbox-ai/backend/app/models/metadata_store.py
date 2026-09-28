@@ -76,6 +76,13 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(
         default=True, server_default=text("true")
     )
+    # The appliance's owner: set only by `python -m app.cli create-owner`. It
+    # grants reading appliance-scope audit events (logins, SCIM). Holding the
+    # OWNER role in a workspace does not imply it, since every personal
+    # workspace makes its creator OWNER (owner decision, Sprint 7 Step 3).
+    is_appliance_owner: Mapped[bool] = mapped_column(
+        default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.current_timestamp(),
@@ -682,15 +689,17 @@ class EgressAudit(Base):
 
 #: Audit actions. Vocabulary rather than free text, so an export can be
 #: filtered and a reviewer can be told what the complete set is.
+#:
+#: Every member is emitted by a code path, and `test_audit_actions.py` drives
+#: each one. An action with no path is removed, not left declared: a declared
+#: action nothing emits tells a reviewer to look for events that cannot exist
+#: (Sprint 7 Step 3 removed AUTH_LOGOUT, MEMBER_ROLE_CHANGED and MEMBER_REMOVED).
 AUDIT_ACTIONS: tuple[str, ...] = (
     "AUTH_LOGIN",
     "AUTH_LOGIN_FAILED",
-    "AUTH_LOGOUT",
     "API_KEY_CREATED",
     "API_KEY_REVOKED",
     "MEMBER_ADDED",
-    "MEMBER_ROLE_CHANGED",
-    "MEMBER_REMOVED",
     "MODEL_CREATED",
     "MODEL_UPDATED",
     "MODEL_DELETED",
@@ -704,6 +713,11 @@ AUDIT_ACTIONS: tuple[str, ...] = (
 #: authorisation and a crashed handler are different events to a reviewer, and
 #: collapsing them hides the one they came to look for.
 AUDIT_OUTCOMES: tuple[str, ...] = ("SUCCESS", "DENIED", "FAILURE")
+
+#: Where an event belongs. A workspace event names its workspace; an appliance
+#: event (a login, a SCIM change) has none, and says so rather than leaving a
+#: NULL to be read as "unknown".
+AUDIT_SCOPES: tuple[str, ...] = ("workspace", "appliance")
 
 
 class AuditEvent(Base):
@@ -734,6 +748,11 @@ class AuditEvent(Base):
             "outcome IN (" + ", ".join(f"'{o}'" for o in AUDIT_OUTCOMES) + ")",
             name="ck_audit_event_outcome",
         ),
+        CheckConstraint(
+            "(scope = 'workspace' AND workspace_id IS NOT NULL) OR "
+            "(scope = 'appliance' AND workspace_id IS NULL)",
+            name="ck_audit_event_scope",
+        ),
         Index("ix_audit_event_workspace", "workspace_id"),
         Index("ix_audit_event_actor", "actor_user_id"),
         Index("ix_audit_event_occurred", "occurred_at"),
@@ -743,6 +762,9 @@ class AuditEvent(Base):
 
     action: Mapped[str] = mapped_column(String(32), nullable=False)
     outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Derived by `audit_log.record` from `workspace_id`; the CHECK above keeps
+    # the two consistent for any writer.
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
 
     # Nullable: an unauthenticated failed login has no user, and recording
     # "unknown" honestly beats attributing it to somebody.

@@ -331,6 +331,9 @@ class SynthesisEngine:
             dialect=request.dialect,
             synthesized=synthesized,
         )
+        # Here rather than in the route: the Celery worker persists through
+        # this same call, and a model it creates is created all the same.
+        await self._record_created(model, user_id)
 
         return SynthesizeResponse(
             model_id=model.model_id,
@@ -339,6 +342,21 @@ class SynthesisEngine:
             relationships=synthesized.relationships,
             suggested_metrics=synthesized.suggested_metrics,
             validation=report,
+        )
+
+    async def _record_created(self, model: DataModel, user_id: uuid.UUID | None) -> None:
+        from app.models.metadata_store import User
+        from app.services import audit_log
+
+        user = await self._session.get(User, user_id) if user_id else None
+        await audit_log.record(
+            action="MODEL_CREATED",
+            actor_user_id=user_id,
+            actor_email=user.email if user else None,
+            workspace_id=model.workspace_id,
+            resource_type="model",
+            resource_id=str(model.model_id),
+            detail={"title": model.title, "via": "synthesis"},
         )
 
     async def get_model(self, model_id: uuid.UUID) -> SynthesizeResponse | None:

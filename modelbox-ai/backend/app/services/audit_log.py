@@ -61,6 +61,10 @@ async def record(
     the event — a caller believing it had recorded something that was never
     stored. Validating here turns that into a loud programming error in
     development while still never breaking the caller's request in production.
+
+    ``scope`` is derived, not passed: an event with a workspace is a workspace
+    event, and one without is an appliance event (a login, a SCIM change). A
+    caller cannot record a workspace event that forgot its workspace.
     """
     if action not in AUDIT_ACTIONS:
         logger.error("Refusing to record unknown audit action %r", action)
@@ -81,6 +85,7 @@ async def record(
                 AuditEvent(
                     action=action,
                     outcome=outcome,
+                    scope="appliance" if workspace_id is None else "workspace",
                     actor_user_id=actor_user_id,
                     actor_email=actor_email,
                     workspace_id=workspace_id,

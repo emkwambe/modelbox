@@ -23,7 +23,7 @@ from app.api.v1.dependencies import (
     require_listed_workspaces,
     require_model_role,
 )
-from app.models.metadata_store import DataModel
+from app.models.metadata_store import DataModel, User
 from app.schemas.data_model import (
     ContractExportResponse,
     ContractFormat,
@@ -52,6 +52,19 @@ from app.services.graph_engine import GraphEngine
 from app.services.graph_repository import GraphRepository
 
 router = APIRouter(prefix="/model", tags=["models"])
+
+
+async def _audit(action: str, user: User, model: DataModel, **detail: object) -> None:
+    """Record a model-level event in the model's workspace."""
+    await audit_log.record(
+        action=action,
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=model.workspace_id,
+        resource_type="model",
+        resource_id=str(model.model_id),
+        detail={"title": model.title, **detail},
+    )
 
 
 def _to_synthesized(model: SynthesizeResponse) -> SynthesizedModel:
@@ -185,13 +198,16 @@ async def update_model(
     payload: ModelUpdateRequest,
     session: SessionDep,
     model: ModelMemberDep,
+    user: CurrentUserDep,
 ) -> ModelInfo:
     """Patch model metadata. Requires MEMBER or higher (FR-6, Slice B2)."""
+    changed = [f for f in ("title", "target_dialect") if getattr(payload, f) is not None]
     if payload.title is not None:
         model.title = payload.title
     if payload.target_dialect is not None:
         model.target_dialect = payload.target_dialect
     await session.flush()
+    await _audit("MODEL_UPDATED", user, model, fields=changed)
     return ModelInfo.model_validate(model)
 
 
@@ -202,9 +218,11 @@ async def update_model(
 )
 async def delete_model(
     session: SessionDep,
+    user: CurrentUserDep,
     model: Annotated[DataModel, Depends(require_model_role("ADMIN"))],
 ) -> Response:
     """Delete a model and its graph (cascade). Requires ADMIN or higher."""
+    await _audit("MODEL_DELETED", user, model, version=model.version_number)
     await session.delete(model)
     await session.flush()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -255,6 +273,7 @@ async def replace_model_graph(
     payload: GraphUpdateRequest,
     session: SessionDep,
     model: ModelMemberDep,
+    user: CurrentUserDep,
 ) -> ValidationReport:
     """Replace a model's graph with the canvas's current state (FR-1.2).
 
@@ -265,6 +284,7 @@ async def replace_model_graph(
     )
     model.version_number += 1
     await session.flush()
+    await _audit("MODEL_UPDATED", user, model, fields=["graph"], version=model.version_number)
     return GraphEngine().validate(payload.entities, payload.relationships)
 
 
@@ -294,6 +314,7 @@ async def export_model(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
     model: ModelViewerDep,
+    user: CurrentUserDep,
     export_format: ExportFormat = Query(ExportFormat.DDL, alias="format"),
     dialect: str = "snowflake",
 ) -> ExportResponse:
@@ -306,6 +327,7 @@ async def export_model(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    await _audit("ARTIFACT_GENERATED", user, model, artifact=export_format.value, dialect=dialect)
 
     return ExportResponse(
         model_id=model.model_id,
@@ -325,6 +347,7 @@ async def export_synthetic_data(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
     model: ModelViewerDep,
+    user: CurrentUserDep,
 ) -> SyntheticSeedResponse:
     """Emit FK-safe mock rows as SQL INSERTs or a CSV bundle (FR-2.4)."""
     result = await engine.get_model(model.model_id)
@@ -336,6 +359,7 @@ async def export_synthetic_data(
         seed_format=payload.format,
         dialect=payload.dialect,
     )
+    await _audit("ARTIFACT_GENERATED", user, model, artifact="synthetic-data", format=payload.format)
     return SyntheticSeedResponse(
         model_id=model.model_id,
         format=payload.format,  # type: ignore[arg-type]
@@ -355,6 +379,7 @@ async def export_contract(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
     model: ModelViewerDep,
+    user: CurrentUserDep,
     contract_format: ContractFormat = Query(ContractFormat.OPENDATACONTRACT, alias="format"),
 ) -> ContractExportResponse:
     """Generate a data contract from a persisted model (FR-2.3, Phase 3)."""
@@ -368,6 +393,7 @@ async def export_contract(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    await _audit("ARTIFACT_GENERATED", user, model, artifact="contract", format=contract_format.value)
     return ContractExportResponse(
         model_id=model.model_id, format=contract_format, files=files
     )
@@ -382,6 +408,7 @@ async def export_semantic(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
     model: ModelViewerDep,
+    user: CurrentUserDep,
     semantic_engine: SemanticEngine = Query(SemanticEngine.CUBE, alias="engine"),
 ) -> SemanticExportResponse:
     """Generate a BI semantic-layer definition from a model (FR-2.3, Phase 3)."""
@@ -395,6 +422,7 @@ async def export_semantic(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    await _audit("ARTIFACT_GENERATED", user, model, artifact="semantic", engine=semantic_engine.value)
     return SemanticExportResponse(
         model_id=model.model_id, engine=semantic_engine, files=files
     )
@@ -409,6 +437,7 @@ async def export_dictionary(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
     model: ModelViewerDep,
+    user: CurrentUserDep,
     dictionary_format: DictionaryFormat = Query(
         DictionaryFormat.MARKDOWN, alias="format"
     ),
@@ -424,6 +453,9 @@ async def export_dictionary(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    await _audit(
+        "ARTIFACT_GENERATED", user, model, artifact="dictionary", format=dictionary_format.value
+    )
     return DictionaryExportResponse(
         model_id=model.model_id, format=dictionary_format, files=files
     )
@@ -438,6 +470,7 @@ async def export_model_zip(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
     model: ModelViewerDep,
+    user: CurrentUserDep,
     export_format: ExportFormat = Query(ExportFormat.DBT, alias="format"),
     dialect: str = "snowflake",
 ) -> Response:
@@ -450,6 +483,9 @@ async def export_model_zip(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    await _audit(
+        "ARTIFACT_GENERATED", user, model, artifact=f"{export_format.value}.zip", dialect=dialect
+    )
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:

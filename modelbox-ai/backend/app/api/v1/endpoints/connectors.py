@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 
 from app.api.v1.dependencies import (
+    CurrentUserDep,
     SessionDep,
     require_body_workspace_role,
     require_listed_workspaces,
@@ -26,6 +27,7 @@ from app.schemas.data_model import (
     IntrospectRequest,
     SynthesizeResponse,
 )
+from app.services import audit_log
 from app.services.graph_engine import GraphEngine
 from app.services.graph_repository import GraphRepository
 from app.services.introspection import (
@@ -126,6 +128,7 @@ async def delete_connection(
 async def introspect_connection(
     payload: IntrospectRequest,
     session: SessionDep,
+    user: CurrentUserDep,
     connection: Annotated[
         DatabaseConnection,
         Depends(
@@ -184,6 +187,15 @@ async def introspect_connection(
     await session.flush()
     await GraphRepository(session).replace_graph(
         model.model_id, graph.entities, graph.relationships
+    )
+    await audit_log.record(
+        action="MODEL_CREATED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=model.workspace_id,
+        resource_type="model",
+        resource_id=str(model.model_id),
+        detail={"title": model.title, "via": "introspection", "engine": engine},
     )
 
     return SynthesizeResponse(

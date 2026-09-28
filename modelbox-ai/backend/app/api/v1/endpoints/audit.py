@@ -30,17 +30,27 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
-from app.api.v1.dependencies import SessionDep, require_query_workspace_role
+from app.api.v1.dependencies import (
+    SessionDep,
+    require_appliance_owner,
+    require_query_workspace_role,
+)
+from app.models.metadata_store import User
 
 AdminWorkspace = Annotated[uuid.UUID, Depends(require_query_workspace_role("ADMIN"))]
+ApplianceOwner = Annotated[User, Depends(require_appliance_owner)]
 from app.models.metadata_store import AuditEvent
 from app.schemas.data_model import AuditEventOut, AuditEventPage
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
 
-def _filtered(workspace_id: uuid.UUID, action: str | None, outcome: str | None):
-    stmt = select(AuditEvent).where(AuditEvent.workspace_id == workspace_id)
+def _filtered(workspace_id: uuid.UUID | None, action: str | None, outcome: str | None):
+    """Rows for one workspace, or appliance-scope rows when ``workspace_id`` is None."""
+    if workspace_id is None:
+        stmt = select(AuditEvent).where(AuditEvent.scope == "appliance")
+    else:
+        stmt = select(AuditEvent).where(AuditEvent.workspace_id == workspace_id)
     if action:
         stmt = stmt.where(AuditEvent.action == action)
     if outcome:
@@ -70,6 +80,17 @@ async def list_audit_events(
     admin *of that workspace*, and a cross-workspace default would quietly
     widen who can read whose events.
     """
+    return await _page(session, workspace_id, action, outcome, limit, offset)
+
+
+async def _page(
+    session: SessionDep,
+    workspace_id: uuid.UUID | None,
+    action: str | None,
+    outcome: str | None,
+    limit: int,
+    offset: int,
+) -> AuditEventPage:
     total = (
         await session.execute(
             select(func.count()).select_from(
@@ -93,6 +114,23 @@ async def list_audit_events(
 
     return AuditEventPage(
         events=[AuditEventOut.model_validate(r) for r in rows], total=total
+    )
+
+
+def _jsonl(session: SessionDep, workspace_id: uuid.UUID | None, filename: str) -> StreamingResponse:
+    async def _lines():
+        result = await session.stream(
+            _filtered(workspace_id, None, None).order_by(AuditEvent.occurred_at.asc())
+        )
+        async for row in result.scalars():
+            yield json.dumps(
+                AuditEventOut.model_validate(row).model_dump(mode="json")
+            ) + "\n"
+
+    return StreamingResponse(
+        _lines(),
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -120,24 +158,39 @@ async def export_audit_events(
     shipping, and an export that silently stops at a page boundary produces a
     SIEM that is confidently missing events.
     """
+    return _jsonl(session, workspace_id, f"audit-{workspace_id}.jsonl")
 
-    async def _lines():
-        result = await session.stream(
-            select(AuditEvent)
-            .where(AuditEvent.workspace_id == workspace_id)
-            .order_by(AuditEvent.occurred_at.asc())
-        )
-        async for row in result.scalars():
-            yield json.dumps(
-                AuditEventOut.model_validate(row).model_dump(mode="json")
-            ) + "\n"
 
-    return StreamingResponse(
-        _lines(),
-        media_type="application/x-ndjson",
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="audit-{workspace_id}.jsonl"'
-            )
-        },
-    )
+# ---------------------------------------------------------------------------
+# Appliance scope: events that belong to no workspace
+# ---------------------------------------------------------------------------
+@router.get(
+    "/appliance-events",
+    response_model=AuditEventPage,
+    summary="Appliance-wide events: sign-ins, failed sign-ins, SCIM",
+)
+async def list_appliance_events(
+    session: SessionDep,
+    _owner: ApplianceOwner,
+    action: Annotated[str | None, Query()] = None,
+    outcome: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AuditEventPage:
+    """Return appliance-scope rows, newest first. The appliance owner only.
+
+    These events name no workspace, so no workspace admin can read them
+    through `/events`; the appliance owner (`create-owner`) can, here.
+    """
+    return await _page(session, None, action, outcome, limit, offset)
+
+
+@router.get(
+    "/appliance-export",
+    summary="Export appliance-wide events as JSONL for a SIEM",
+)
+async def export_appliance_events(
+    session: SessionDep, _owner: ApplianceOwner
+) -> StreamingResponse:
+    """Stream every appliance-scope row as newline-delimited JSON, unpaginated."""
+    return _jsonl(session, None, "audit-appliance.jsonl")

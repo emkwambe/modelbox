@@ -73,6 +73,7 @@ def _event(
     return AuditEvent(
         action=action,
         outcome=outcome,
+        scope="appliance" if workspace_id is None else "workspace",
         actor_user_id=actor_user_id,
         actor_email=actor_email,
         workspace_id=workspace_id,
@@ -129,7 +130,7 @@ async def world(session: AsyncSession):
             _event(workspace_id=wa.workspace_id, minutes=1),
             _event(
                 workspace_id=wa.workspace_id,
-                action="MEMBER_ROLE_CHANGED",
+                action="MEMBER_ADDED",
                 minutes=2,
             ),
             _event(
@@ -208,7 +209,7 @@ async def test_an_admin_reads_their_own_workspace(session, world) -> None:
     assert body["total"] == 3
     assert {e["action"] for e in body["events"]} == {
         "MODEL_UPDATED",
-        "MEMBER_ROLE_CHANGED",
+        "MEMBER_ADDED",
         "AUTH_LOGIN_FAILED",
     }
 

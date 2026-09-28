@@ -97,6 +97,22 @@ A column's `data_type` must parse as exactly one SQL type and its
 refuse the model (400) rather than emit it. Introspection refuses a schema,
 dataset or BigQuery project name that is not a plain identifier (422).
 
+### The audit trail records every declared action, and says where each belongs
+
+Every action in the audit vocabulary is now written by the code path it names:
+API-key creation and revocation, model creation (synthesis and introspection),
+edits, transforms and deletion, artifact exports, and membership grants,
+including the personal workspace created for a new user. `AUTH_LOGOUT`,
+`MEMBER_ROLE_CHANGED` and `MEMBER_REMOVED`, which nothing emitted, are removed
+from the vocabulary (migration `0021`; it refuses to run if any stored row uses
+one).
+
+Each event carries a `scope`: `workspace` with its workspace, or `appliance`
+with none (sign-ins, failed sign-ins, SCIM). Appliance events are read by the
+appliance owner, the account `create-owner` makes, at
+`GET /api/v1/audit/appliance-events` and `GET /api/v1/audit/appliance-export`
+(JSONL). A workspace OWNER does not have this access.
+
 ### Paradigm transformation refuses two cases
 
 `POST /api/v1/model/{id}/transform-paradigm` now returns **409** when the

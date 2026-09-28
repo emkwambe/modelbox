@@ -200,6 +200,7 @@ class AuditEventOut(BaseModel):
     audit_id: uuid.UUID
     action: str
     outcome: str
+    scope: str
     actor_user_id: uuid.UUID | None = None
     actor_email: str | None = None
     workspace_id: uuid.UUID | None = None

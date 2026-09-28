@@ -26,6 +26,9 @@ from __future__ import annotations
 PUBLIC = "PUBLIC"
 SCIM = "SCIM"
 AUTHENTICATED = "AUTHENTICATED"
+# The appliance owner flag (`create-owner`), above every workspace role: it
+# reads events that belong to no workspace.
+APPLIANCE_OWNER = "APPLIANCE_OWNER"
 
 #: The only routes that may be reached without authenticating.
 PUBLIC_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
@@ -84,6 +87,8 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     # --- audit and egress --------------------------------------------------
     ("GET", f"{_V1}/audit/events"): "ADMIN",
     ("GET", f"{_V1}/audit/export"): "ADMIN",
+    ("GET", f"{_V1}/audit/appliance-events"): APPLIANCE_OWNER,
+    ("GET", f"{_V1}/audit/appliance-export"): APPLIANCE_OWNER,
     ("GET", f"{_V1}/egress/events"): "VIEWER",
     # --- SCIM --------------------------------------------------------------
     ("GET", f"{_V1}/scim/v2/Users"): SCIM,

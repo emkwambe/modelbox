@@ -231,6 +231,18 @@ async def resolve_user_workspace(
         )
     )
     await session.flush()
+    # A membership grant, even an implicit one, is recorded (owner decision).
+    from app.services import audit_log
+
+    await audit_log.record(
+        action="MEMBER_ADDED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=workspace.workspace_id,
+        resource_type="user",
+        resource_id=str(user.user_id),
+        detail={"role": "OWNER", "via": "personal-workspace"},
+    )
     return workspace.workspace_id
 
 
@@ -394,6 +406,30 @@ async def _load_model(session: AsyncSession, model_id: uuid.UUID) -> DataModel:
 @_declares(AUTHENTICATED, "authenticated")
 async def require_authenticated(user: CurrentUserDep) -> User:
     """Any signed-in caller. For routes that touch no workspace's data."""
+    return user
+
+
+APPLIANCE_OWNER = "APPLIANCE_OWNER"
+
+
+def holds_appliance_ownership(user: User) -> bool:
+    """The explicit flag `create-owner` sets; a workspace OWNER role is not it."""
+    return bool(user.is_appliance_owner)
+
+
+@_declares(APPLIANCE_OWNER, "appliance")
+async def require_appliance_owner(request: Request, user: CurrentUserDep) -> User:
+    """The appliance owner, signed in as themselves (not through an API key).
+
+    Appliance-scope events (logins, failed logins, SCIM) belong to no
+    workspace, so no workspace role can grant them. Every personal workspace
+    makes its creator an OWNER, which is why the flag and not the role decides.
+    """
+    principal = principal_of(request)
+    if principal is not None and principal.is_api_key:
+        raise _forbidden("API keys cannot read appliance events.")
+    if not holds_appliance_ownership(user):
+        raise _forbidden("Only the appliance owner can read appliance events.")
     return user
 
 

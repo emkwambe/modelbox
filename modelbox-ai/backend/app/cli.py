@@ -14,6 +14,8 @@ could ever sign in (owner decision H3, Sprint 7).
   in the same way as `docker login --password-stdin`.
 * It **refuses if any owner already exists** on the appliance. It bootstraps;
   it is not a way to mint a second owner around the product's own controls.
+* The user it creates is the **appliance owner** (`is_appliance_owner`), the
+  one account that reads appliance-scope audit events such as logins.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.models.metadata_store import User, Workspace, WorkspaceMember
+from app.services import audit_log
 
 MIN_PASSWORD_LENGTH = 12
 
@@ -63,7 +66,7 @@ async def create_owner(
     if existing is not None:
         raise CreateOwnerRefused(f"{email} already has an account.")
 
-    user = User(email=email, hashed_password=hash_password(password))
+    user = User(email=email, hashed_password=hash_password(password), is_appliance_owner=True)
     session.add(user)
     await session.flush()
     workspace = Workspace(name=workspace_name)
@@ -73,6 +76,15 @@ async def create_owner(
         WorkspaceMember(workspace_id=workspace.workspace_id, user_id=user.user_id, role="OWNER")
     )
     await session.commit()
+    await audit_log.record(
+        action="MEMBER_ADDED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=workspace.workspace_id,
+        resource_type="user",
+        resource_id=str(user.user_id),
+        detail={"role": "OWNER", "via": "create-owner", "appliance_owner": True},
+    )
     return user
 
 

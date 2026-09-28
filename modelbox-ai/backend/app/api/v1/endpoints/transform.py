@@ -13,6 +13,7 @@ from app.schemas.data_model import (
     TransformParadigmRequest,
     TransformParadigmResponse,
 )
+from app.services import audit_log
 from app.services.paradigm_translator import ModelApprovedError, TransformLintError
 
 router = APIRouter(prefix="/model", tags=["transform"])
@@ -57,4 +58,18 @@ async def transform_paradigm(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Model not found."
         )
+    await audit_log.record(
+        action="MODEL_UPDATED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=model.workspace_id,
+        resource_type="model",
+        resource_id=str(model.model_id),
+        detail={
+            "title": model.title,
+            "fields": ["graph", "paradigm"],
+            "paradigm": str(result.new_paradigm),
+            "version": model.version_number,
+        },
+    )
     return result

@@ -156,6 +156,8 @@ async def test_the_approval_function_matches_only_the_current_version(session, w
             AuditEvent(
                 action="MODEL_APPROVED",
                 outcome=outcome,
+                scope="workspace",
+                workspace_id=model.workspace_id,
                 resource_type="model",
                 resource_id=str(model.model_id),
                 detail={"version": version},
@@ -167,6 +169,8 @@ async def test_the_approval_function_matches_only_the_current_version(session, w
         AuditEvent(
             action="MODEL_APPROVED",
             outcome="SUCCESS",
+            scope="workspace",
+            workspace_id=model.workspace_id,
             resource_type="model",
             resource_id=str(model.model_id),
             detail={"version": model.version_number},
