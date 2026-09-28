@@ -27,11 +27,6 @@ const CAPABILITIES: { icon: string; title: string; desc: string }[] = [
     desc: 'Natural language, PRDs, or DDL → validated models across 3NF, Kimball, Data Vault & OBT.',
   },
   {
-    icon: '🔌',
-    title: 'Brownfield Introspection',
-    desc: 'Reverse-engineer live PostgreSQL, Snowflake, BigQuery & MySQL schemas onto the canvas.',
-  },
-  {
     icon: '🔀',
     title: 'Schema Diff & Migration',
     desc: 'Compare model versions into dialect-specific ALTER DDL with breaking-change warnings.',
@@ -49,7 +44,7 @@ const CAPABILITIES: { icon: string; title: string; desc: string }[] = [
   {
     icon: '📊',
     title: 'Semantic Layers',
-    desc: 'dbt projects (with tests), Cube.js, LookML & dbt MetricFlow exports.',
+    desc: 'dbt projects (with tests), Cube.js & dbt MetricFlow exports.',
   },
   {
     icon: '📚',
@@ -230,9 +225,9 @@ export default function HomePage() {
         &amp; governance mesh
       </h1>
       <p style={{ color: color.neutral[600], marginTop: 12, fontSize: 16, maxWidth: 640 }}>
-        Synthesize validated models from plain language, reverse-engineer live
-        warehouses, diff &amp; migrate schemas, and ship dbt, data contracts, and
-        semantic layers — with governance built in.
+        Synthesize validated models from plain language, diff &amp; migrate
+        schemas, and ship dbt, data contracts, and semantic layers — with
+        governance built in.
       </p>
 
       <button
