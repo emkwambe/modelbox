@@ -257,7 +257,9 @@ jobs:
           # Full history is needed: the "before" side is a worktree at the last tag.
           # test_ledger_roles_postgres.py proves the append-only ledgers and the
           # least-privilege role by raw SQL against a real Postgres (Step 3.2).
-          pytest tests/test_migration_0013_populated.py tests/test_ledger_roles_postgres.py -v --no-header
+          # test_migration_0015_to_head_populated.py: 0015 → head on a populated
+          # database, and ORM-vs-migration drift on Postgres (Step 3.3).
+          pytest tests/test_migration_0013_populated.py tests/test_ledger_roles_postgres.py tests/test_migration_0015_to_head_populated.py -v --no-header
 
   versions:
     name: Version Consistency
