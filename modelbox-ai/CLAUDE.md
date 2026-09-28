@@ -123,6 +123,16 @@ Two lessons, and the second is the general one:
 `next build`.** Generated route type stubs survive a checkout, so `tsc` fails
 on routes that exist only on the previous branch.
 
+## Migrations
+
+**Once a migration has run on any database that is kept, it is never edited
+again; a change goes in a new migration.** Alembic records only the revision
+id, so a database that ran the old text reports itself at head while its
+schema differs from one that ran the new text, and nothing will ever tell them
+apart. "Kept" means anything beyond a disposable test container: a developer's
+database, a demo, a customer appliance, any released version. Before that point
+a migration may still be corrected in place, and the commit says so and why.
+
 ## The fidelity harness
 
 `backend/tests/test_artifact_fidelity.py` asserts artifacts against the tools

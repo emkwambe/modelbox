@@ -16,10 +16,11 @@ backend and worker, with the owner's ``DATABASE_URL`` and
 
 **The password never appears in output or logs.** Postgres quotes it: the
 statement is built server-side with ``format('... %L', $1)`` and the password
-travels as a bind parameter, so this code never assembles SQL around it. The
-session sets ``log_min_error_statement = panic`` first, so a failing statement
-is not written to the server log with the password in it. Errors are reported
-by type, never by message, since a driver's message may echo its input.
+travels as a bind parameter, so this code never assembles SQL around it. That
+alone does not keep it out of the server log, because the statement Postgres
+then executes holds the password as a literal; the session turns statement
+logging off first (:data:`LOG_SUPPRESSION`). Errors are reported by type,
+never by message, since a driver's message may echo its input.
 """
 
 from __future__ import annotations
@@ -60,9 +61,23 @@ async def ensure_app_role(connection: Any) -> None:
         await connection.execute(statement)
 
 
+#: Session settings applied before the password is set. Quoting keeps the
+#: password out of SQL this code assembles, but the statement Postgres executes
+#: still holds it as a literal, and a server running `log_statement = ddl` (or
+#: `all`) would write that statement to its log. Turning statement logging off
+#: for this session closes that; `log_min_error_statement` does the same if the
+#: statement fails. Both need the owner to be a superuser, as the appliance's
+#: is; if they cannot be set, the bootstrap fails rather than risk the log.
+LOG_SUPPRESSION: tuple[str, ...] = (
+    "SET log_statement = 'none'",
+    "SET log_min_error_statement = 'panic'",
+)
+
+
 async def set_app_password(connection: Any, password: str) -> None:
     """Make the application role LOGIN with ``password``, quoted by Postgres."""
-    await connection.execute("SET log_min_error_statement = 'panic'")
+    for setting in LOG_SUPPRESSION:
+        await connection.execute(setting)
     statement = await connection.fetchval(
         f"SELECT format('ALTER ROLE {APP_ROLE} WITH LOGIN PASSWORD %L', $1::text)", password
     )

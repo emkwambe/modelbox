@@ -22,6 +22,8 @@ table created with the default privileges revoked fails it too.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import os
 import subprocess
 import sys
@@ -46,6 +48,7 @@ LEDGERS = ("audit_event", "egress_audit")
 FULL = ("SELECT", "INSERT", "UPDATE", "DELETE")
 FIRST_PASSWORD = "a1" * 32
 SECOND_PASSWORD = "b2" * 32
+THIRD_PASSWORD = "c3" * 32  # used only by the negative control that leaks it
 
 
 def _fragments(secret: str) -> list[str]:
@@ -92,6 +95,7 @@ def database() -> Iterator[dict[str, str]]:
         owner = f"postgresql+asyncpg://verify:verify@localhost:{port}/verify"
         result = _bootstrap(owner, FIRST_PASSWORD)
         yield {
+            "container": name,
             "owner": owner.replace("+asyncpg", ""),
             "app": f"postgresql://{APP_ROLE}:{FIRST_PASSWORD}@localhost:{port}/verify",
             "app_template": f"postgresql://{APP_ROLE}:{{password}}@localhost:{port}/verify",
@@ -244,11 +248,60 @@ async def test_a_table_created_later_is_covered_by_default_privileges(database) 
         await owner.close()
 
 
-async def test_rotating_the_password_takes_effect(database) -> None:
-    result = _bootstrap(database["owner_async"], SECOND_PASSWORD)
+def _docker_logs(container: str) -> str:
+    result = subprocess.run(
+        [DOCKER, "logs", container], capture_output=True, text=True, check=False
+    )
+    return result.stdout + result.stderr
+
+
+def _check_server_log_clean(container: str, password: str) -> None:
+    """The check, shared by the test and its negative control."""
+    logs = _docker_logs(container)
+    leaked = [f for f in _fragments(password) if f in logs]
+    assert not leaked, "the postgres server log holds password material"
+
+
+@contextlib.asynccontextmanager
+async def _ddl_logging(owner_dsn: str, container: str):
+    """Turn on `log_statement = ddl` server-wide, prove it logs, and restore it."""
+    owner = await asyncpg.connect(owner_dsn)
     try:
-        assert result.returncode == 0, result.stderr[-500:]
-        assert not [f for f in _fragments(SECOND_PASSWORD) if f in result.stdout + result.stderr]
+        await owner.execute("ALTER SYSTEM SET log_statement = 'ddl'")
+        await owner.execute("SELECT pg_reload_conf()")
+        probe = f"log_probe_{uuid.uuid4().hex[:8]}"
+        fresh = await asyncpg.connect(owner_dsn)
+        try:
+            assert await fresh.fetchval("SHOW log_statement") == "ddl"
+            await fresh.execute(f"CREATE TABLE {probe} (id int)")
+            await fresh.execute(f"DROP TABLE {probe}")
+        finally:
+            await fresh.close()
+        await asyncio.sleep(1)
+        assert probe in _docker_logs(container), "precondition: DDL logging is not on"
+        yield
+    finally:
+        await owner.execute("ALTER SYSTEM RESET log_statement")
+        await owner.execute("SELECT pg_reload_conf()")
+        await owner.close()
+
+
+async def test_rotating_the_password_takes_effect_and_logs_nothing(database) -> None:
+    """Rotation works, and with DDL logging on the server log still holds no password.
+
+    Quoting alone would not be enough here: the statement Postgres executes
+    holds the password as a literal, so `log_statement = ddl` would log it.
+    The migrate service turns statement logging off for its own session
+    (`db_bootstrap.LOG_SUPPRESSION`), and this runs the real service with DDL
+    logging switched on to show it.
+    """
+    try:
+        async with _ddl_logging(database["owner"], database["container"]):
+            result = _bootstrap(database["owner_async"], SECOND_PASSWORD)
+            assert result.returncode == 0, result.stderr[-500:]
+            assert not [f for f in _fragments(SECOND_PASSWORD) if f in result.stdout + result.stderr]
+            await asyncio.sleep(1)
+            _check_server_log_clean(database["container"], SECOND_PASSWORD)
         new = await asyncpg.connect(database["app_template"].format(password=SECOND_PASSWORD))
         await new.close()
         with pytest.raises(asyncpg.exceptions.InvalidPasswordError):
@@ -256,6 +309,7 @@ async def test_rotating_the_password_takes_effect(database) -> None:
     finally:
         restored = _bootstrap(database["owner_async"], FIRST_PASSWORD)
         assert restored.returncode == 0
+    _check_server_log_clean(database["container"], FIRST_PASSWORD)
 
 
 async def test_the_migrate_service_recreates_a_missing_role(database) -> None:
@@ -283,6 +337,28 @@ async def test_the_migrate_service_recreates_a_missing_role(database) -> None:
 
 
 # --- Negative controls -------------------------------------------------------
+
+
+async def test_negative_control_without_log_suppression_ddl_logging_leaks(
+    database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the session suppression removed in-process, the server log gets the password."""
+    from app import db_bootstrap
+
+    monkeypatch.setattr(db_bootstrap, "LOG_SUPPRESSION", ())
+    try:
+        async with _ddl_logging(database["owner"], database["container"]):
+            owner = await asyncpg.connect(database["owner"])
+            try:
+                await db_bootstrap.set_app_password(owner, THIRD_PASSWORD)
+            finally:
+                await owner.close()
+            await asyncio.sleep(1)
+            with pytest.raises(AssertionError, match="server log holds password material"):
+                _check_server_log_clean(database["container"], THIRD_PASSWORD)
+    finally:
+        restored = _bootstrap(database["owner_async"], FIRST_PASSWORD)
+        assert restored.returncode == 0
 
 
 async def test_negative_control_an_extra_ledger_grant_fails_the_check(database) -> None:

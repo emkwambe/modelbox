@@ -55,7 +55,10 @@ def _assert_no_password(output: str) -> None:
 async def test_the_password_is_a_bind_parameter_and_logging_is_off_first() -> None:
     connection = _FakeConnection()
     await db_bootstrap.set_app_password(connection, PASSWORD)
-    assert connection.executed[0] == "SET log_min_error_statement = 'panic'"
+    assert connection.executed[:2] == [
+        "SET log_statement = 'none'",
+        "SET log_min_error_statement = 'panic'",
+    ]
     (sql, args), = connection.fetched
     assert PASSWORD not in sql, "the password was assembled into SQL here"
     assert args == (PASSWORD,)
