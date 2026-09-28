@@ -129,6 +129,7 @@ def postgres_dsn() -> str:
             ready = subprocess.run(
                 [DOCKER, "exec", name, "pg_isready", "-U", "verify", "-d", "verify"],
                 capture_output=True, text=True,
+                check=False,  # a non-zero exit means "not yet"; the loop retries
             )
             if ready.returncode == 0:
                 break
@@ -139,7 +140,8 @@ def postgres_dsn() -> str:
         wait_for_queries(port)
         yield f"postgresql+asyncpg://verify:verify@localhost:{port}/verify"
     finally:
-        subprocess.run([DOCKER, "rm", "-f", name], capture_output=True)
+        # Cleanup: raising here would replace the test's own failure.
+        subprocess.run([DOCKER, "rm", "-f", name], capture_output=True, check=False)
 
 
 @pytest.fixture(scope="module")
@@ -151,8 +153,9 @@ def baseline_worktree(tmp_path_factory: pytest.TempPathFactory) -> Path:
     try:
         yield target / "modelbox-ai" / "backend"
     finally:
+        # Cleanup: raising here would replace the test's own failure.
         subprocess.run(["git", "worktree", "remove", "--force", str(target)],
-                       cwd=REPO, capture_output=True)
+                       cwd=REPO, capture_output=True, check=False)
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +166,9 @@ def _alembic(backend: Path, dsn: str, *args: str) -> subprocess.CompletedProcess
     return subprocess.run(
         [sys.executable, "-m", "alembic", *args],
         cwd=backend, env=env, capture_output=True, text=True,
+        # Callers assert on the result, and some expect a refusal (0021's
+        # precondition): the exit code is data here, not an error.
+        check=False,
     )
 
 
@@ -209,6 +215,7 @@ def _run_helper(backend: Path, dsn: str, mode: str) -> dict:
         [sys.executable, str(Path(__file__).with_name("_migration_helper.py")),
          mode, str(GOLD_DIR)],
         cwd=backend, env=env, capture_output=True, text=True,
+        check=False,  # asserted below with the helper's output in the message
     )
     assert proc.returncode == 0, (
         f"helper '{mode}' failed in {backend}:\n{proc.stdout[-2000:]}\n{proc.stderr[-3000:]}"

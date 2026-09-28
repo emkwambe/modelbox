@@ -8,6 +8,7 @@ transformation. The metadata->graph mapping is a pure function
 
 from __future__ import annotations
 
+import logging
 import re
 import urllib.parse
 from typing import Any
@@ -18,6 +19,8 @@ from app.schemas.data_model import (
     RelationshipSchema,
     SynthesizedModel,
 )
+
+logger = logging.getLogger(__name__)
 
 # Identifiers that reach introspection SQL (Sprint 7, Step 2.4). BigQuery and
 # Snowflake interpolate them into the statement; Postgres and MySQL bind them.
@@ -561,8 +564,14 @@ class IntrospectionService:
                                 "to_column": lr["pk_column_name"],
                             }
                         )
-                except Exception:  # noqa: BLE001 - keys are best-effort
-                    pass
+                except Exception as exc:  # noqa: BLE001 - keys are best-effort
+                    # Best-effort, but not silent: a model introspected without
+                    # its keys looks complete. The class name only; a driver's
+                    # message can carry account or host names.
+                    logger.warning(
+                        "Snowflake key discovery failed (%s); returning tables "
+                        "without keys", type(exc).__name__,
+                    )
 
                 return (
                     tables,
@@ -671,8 +680,12 @@ class IntrospectionService:
                     "WHERE tc.constraint_type = 'PRIMARY KEY'"
                 ).result():
                     primary_keys.add((row["table_name"], row["column_name"]))
-            except Exception:  # noqa: BLE001 - keys are best-effort
-                pass
+            except Exception as exc:  # noqa: BLE001 - keys are best-effort
+                # As above: best-effort, logged by exception class only.
+                logger.warning(
+                    "BigQuery key discovery failed (%s); returning tables "
+                    "without keys", type(exc).__name__,
+                )
             return tables, columns, primary_keys, foreign_keys
 
         tables, columns, primary_keys, foreign_keys = await asyncio.to_thread(_run)

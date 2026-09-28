@@ -399,6 +399,9 @@ def _run_dbt_parse(project: Path) -> DbtResult:
     proc = subprocess.run(
         [sys.executable, "-c", _DBT_SUBPROCESS, str(project)],
         capture_output=True, text=True, env=env, cwd=str(project),
+        # A failed parse is a result to assert on, reported in the payload;
+        # only a missing payload is a harness failure (below).
+        check=False,
     )
     _, marker, payload = proc.stdout.partition("@@FIDELITY@@")
     if not marker:
@@ -511,6 +514,8 @@ def _run_dbt_build(project: Path) -> DbtResult:
     proc = subprocess.run(
         [sys.executable, "-c", _DBT_BUILD_SUBPROCESS, str(project)],
         capture_output=True, text=True, env=env, cwd=str(project),
+        # As for parse: a failed build is data; a missing payload is not.
+        check=False,
     )
     _, marker, payload = proc.stdout.partition("@@FIDELITY@@")
     if not marker:
@@ -578,6 +583,9 @@ def test_gold_mirror_matches_templates_ts(tmp_path: Path) -> None:
     proc = subprocess.run(
         [str(NODE), "--experimental-strip-types", str(_EXTRACTOR), str(staging)],
         capture_output=True, text=True,
+        # stderr is inspected first: an old Node is a missing prerequisite,
+        # reported through `_need`, not an extractor failure.
+        check=False,
     )
     if "bad option: --experimental-strip-types" in proc.stderr:
         # Node < 22.6 cannot import a TypeScript module. Fail rather than skip
@@ -1342,6 +1350,7 @@ def _inspect_cubes(fixture: Fixture, tmp_path: Path) -> list[dict[str, Any]]:
     proc = subprocess.run(
         [str(NODE), str(_CUBE_INSPECT), *sorted(written)],
         capture_output=True, text=True,
+        check=False,  # asserted below with the inspector's stderr in the message
     )
     assert proc.returncode == 0, f"cube inspector failed: {proc.stderr[-1500:]}"
     return json.loads(proc.stdout)
@@ -1616,12 +1625,11 @@ def test_odcs_carries_the_meaning_of_each_declared_constraint() -> None:
                         f"{where}: declares min {column.min_value}, contract "
                         f"says {options.get('minimum')!r}"
                     )
-            if column.max_value is not None:
-                if options.get("maximum") != column.max_value:
-                    missing.append(
-                        f"{where}: declares max {column.max_value}, contract "
-                        f"says {options.get('maximum')!r}"
-                    )
+            if column.max_value is not None and options.get("maximum") != column.max_value:
+                missing.append(
+                    f"{where}: declares max {column.max_value}, contract "
+                    f"says {options.get('maximum')!r}"
+                )
             if column.regex_pattern:
                 checked["regex"] += 1
                 if options.get("pattern") != column.regex_pattern:
@@ -1719,7 +1727,7 @@ def test_avro_parses(gid: str) -> None:
         GOLD[gid].model, "avro", GOLD[gid].dataset_name
     )
     assert len(files) == len(GOLD[gid].model.entities)
-    for name, content in files.items():
+    for content in files.values():
         fastavro.parse_schema(json.loads(content))
 
 
@@ -1757,6 +1765,7 @@ def test_protobuf_compiles(gid: str, tmp_path: Path) -> None:
             [str(PROTOC), f"--proto_path={tmp_path}",
              f"--descriptor_set_out={tmp_path / 'out.desc'}", name],
             capture_output=True, text=True, cwd=tmp_path,
+            check=False,  # asserted below with protoc's stderr as the message
         )
         assert proc.returncode == 0, proc.stderr[-1500:]
 
@@ -1990,7 +1999,7 @@ def test_seed_respects_declared_precision_and_scale() -> None:
             precision, scale = int(match.group(1)), int(match.group(2))
             for row in rows.get(entity.entity_name, []):
                 digits = row[column.name].lstrip("-").replace(".", "")
-                whole, _, frac = row[column.name].lstrip("-").partition(".")
+                _whole, _, frac = row[column.name].lstrip("-").partition(".")
                 if len(digits) > precision or len(frac) > scale:
                     violations.append(
                         f"{column.name}={row[column.name]} against "

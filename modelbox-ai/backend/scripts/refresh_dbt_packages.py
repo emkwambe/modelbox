@@ -96,6 +96,9 @@ def main() -> int:
             capture_output=True,
             text=True,
             cwd=root,
+            # Checked below, after dbt's output is printed: check=True would
+            # raise first and discard the deprecations this step exists to show.
+            check=False,
         )
         output = proc.stdout + proc.stderr
         print(output)

@@ -139,10 +139,10 @@ class SyntheticSeedGenerator:
         t = col.data_type.upper()
         if "UUID" in t:
             r = self._rng(entity.entity_name, col.name, i)
-            return "%08x-%04x-4%03x-%04x-%012x" % (
-                r.getrandbits(32), r.getrandbits(16), r.getrandbits(12),
-                r.getrandbits(16), r.getrandbits(48),
-            )
+            # Drawn in the same order as before, so seeded values are unchanged.
+            a, b, c = r.getrandbits(32), r.getrandbits(16), r.getrandbits(12)
+            d, e = r.getrandbits(16), r.getrandbits(48)
+            return f"{a:08x}-{b:04x}-4{c:03x}-{d:04x}-{e:012x}"
         if self._is_int(t):
             return i + 1
         return f"{entity.entity_name}_{i + 1}"

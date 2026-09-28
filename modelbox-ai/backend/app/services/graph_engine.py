@@ -204,7 +204,7 @@ class GraphEngine:
         # 3. Relationships pointing at unknown entities.
         for rel in relationships:
             from_entity, from_col = self._split_ref(rel.from_ref)
-            to_entity, to_col = self._split_ref(rel.to_ref)
+            to_entity, _to_col = self._split_ref(rel.to_ref)
 
             # A foreign key on an existing entity pointing at a missing target.
             if to_entity not in entity_names:
