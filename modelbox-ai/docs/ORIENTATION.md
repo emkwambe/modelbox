@@ -195,7 +195,9 @@ Reading these in the wrong order is the main way to get a wrong picture here.
 | `marketing/PROOF_LOG.md` | Public claims. `PL-001`…`PL-008`, each naming a passing test and an expiry | Anything without a `PL-` id |
 | `sprint-N-progress.md` | Handoff state, and the mutation results that prove a test can fail | Sprints 2 and 3 are stale — see §7 |
 | `PRD_TRD_v2.md` | Forward planning; supersedes the root v1 spec | — |
-| `research/` | Quarantined. Explicitly **not** specification | — |
+
+Research documents, sprint prompts and sprint plans moved out of this repository
+on 2026-09-28. None of them was specification.
 
 Two conventions from `CLAUDE.md` that will bite before anything else does:
 
@@ -278,7 +280,8 @@ nothing claims the walkthrough evidence.
 
 **Three documents understate what shipped.** `sprint-3-progress.md:24` still
 lists Tasks 1–7 as "in progress"/"not started" although Sprint 4 closed at 0
-non-preview xfail and tagged `v1.9.0`. `Unified_Sprint_Plan.md:16` marks
+non-preview xfail and tagged `v1.9.0`. `Unified_Sprint_Plan.md:16` (since moved
+out of this repository) marks
 Governance and Quality as "Pending" although `freshness_sla`
 (`schemas/data_model.py:557`), `min_value`/`regex_pattern` (`:471`, `:477`), the
 `MISSING_SLA` lint (`graph_engine.py:462`), Modules 2–5 and labs `m2_`–`m5_` all

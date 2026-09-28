@@ -4,12 +4,12 @@
 product. `frontend/src/styles/tokens.ts` is its machine-readable twin, and
 `tokens.spec.test.ts` fails if the two disagree.
 
-It exists because criteria F1 and F6 previously cited
-`docs/research/ModelBox_AI_Brand_Design_System.md`, and **criterion E5
-quarantines `docs/research/` as "cannot be read as specification."** The
-register pointed at a document the register forbids citing. That research
-document keeps its quarantine and its history; this file is the specification
-extracted from it, corrected.
+It exists because criteria F1 and F6 previously cited the research document
+`ModelBox_AI_Brand_Design_System.md`, and **criterion E5 quarantines research
+as "cannot be read as specification."** The register pointed at a document the
+register forbids citing. That research document keeps its quarantine and its
+history, and has since moved out of this repository; this file is the
+specification extracted from it, corrected.
 
 ---
 

@@ -1,7 +1,8 @@
 # AML expansion — IR gap analysis and assessment
 
 *Written 2026-08-27 against `sprint/5-governance` at `0c6daf8`. Inputs:
-`ModelBox_AML_Analytics_Expansion_Considerations.docx` (§4.1–§4.8),
+`ModelBox_AML_Analytics_Expansion_Considerations.docx` (§4.1–§4.8; since moved
+out of this repository),
 `02 After the AML expansion.md`, and `backend/app/schemas/data_model.py`.*
 
 Two questions, answered separately because they fail differently: **can the IR

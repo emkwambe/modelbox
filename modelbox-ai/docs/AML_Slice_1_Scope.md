@@ -1,7 +1,7 @@
 # AML slice 1 — scope
 
 *Written 2026-08-29 from `ModelBox_AML_Analytics_Expansion_Considerations.docx`
-and `02 After the AML expansion.md`, against the findings in
+(since moved out of this repository) and `02 After the AML expansion.md`, against the findings in
 `AML_IR_Gap_Analysis.md`.*
 
 **This is a scope, not a decision.** Nothing here is approved and no AML code

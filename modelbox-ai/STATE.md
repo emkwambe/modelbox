@@ -23,6 +23,11 @@ for it, not a copy from another document.*
 
 Not for deployment on a shared network before v1.11.0 (README, Status).
 
+## Repository contents
+
+Sprint prompts, sprint plans and research documents moved out of this
+repository on 2026-09-28. Git history is unchanged.
+
 ## In progress
 
 Hardening, and a black-box acceptance suite that runs against the containers.

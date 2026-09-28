@@ -4,7 +4,8 @@
 **Date:** 10 August 2026
 **Purpose:** Convert "dependable, valuable, sellable" from judgement into a list of
 binary, falsifiable conditions with named evidence.
-**Companion to:** `ModelBox_AI_Enhancement_Blueprint.md`, `ModelBox_AI_Sprint_Plan.md`
+**Companion to:** `ModelBox_AI_Enhancement_Blueprint.md`. The sprint plan it was
+also written with has since moved out of this repository.
 
 ---
 
@@ -126,7 +127,7 @@ fails on the pair that matters.
 | E2 ◆ | No public surface states a capability without a Proof Log ID behind it | Proof Log cross-reference | 7 |
 | E3 ◆ | Every Proof Log entry names a passing test and an expiry condition | `PROOF_LOG.md` review | ongoing |
 | E4 | Release notes enumerate known open defects with test IDs rather than omitting them | Release notes for the Sprint 1 tag | 1 |
-| E5 | Research documents are quarantined and cannot be read as specification | `docs/research/` with status headers | 1 |
+| E5 | Research documents are quarantined and cannot be read as specification | Research documents are kept out of this repository (moved 2026-09-28; previously `docs/research/` with status headers) | 1 |
 | E6 | The PRD carries no unqualified commitment the code does not keep | PRD reconciliation | 1 |
 
 ## F. Product experience

@@ -2,7 +2,7 @@
  * F6 — contrast meets the brand system's own WCAG standard.
  *
  * The standard now lives in `docs/ModelBox_AI_Design_Tokens.md` rather than in
- * `docs/research/`, because criterion E5 quarantines research as "cannot be
+ * a research document (since moved out of this repository), because criterion E5 quarantines research as "cannot be
  * read as specification" while F1 and F6 cited a research document as the
  * standard. Promoting it was not bookkeeping: measuring the research
  * document's contrast table found three published ratios wrong, one of them in
