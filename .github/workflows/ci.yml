@@ -264,6 +264,81 @@ jobs:
           # database, and ORM-vs-migration drift on Postgres (Step 3.3).
           pytest tests/test_migration_0013_populated.py tests/test_ledger_roles_postgres.py tests/test_migration_0015_to_head_populated.py -v --no-header
 
+  backend-lint:
+    name: Backend Lint (Ruff)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install Ruff at the locked version
+        # Only Ruff, at the version requirements.lock pins: its default rule
+        # set is part of what that version means, so CI and a developer's
+        # `ruff check .` enforce the same rules. An empty grep fails the step.
+        run: |
+          python -m pip install --upgrade pip
+          ruff_pin="$(grep -E '^ruff==' modelbox-ai/backend/requirements.lock)"
+          pip install "$ruff_pin"
+
+      - name: Run Ruff
+        run: |
+          cd modelbox-ai/backend
+          ruff check .
+
+  backend-typecheck:
+    name: Backend Type Check (mypy)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            modelbox-ai/backend/requirements.lock
+            modelbox-ai/backend/requirements-lint.txt
+
+      - name: Install Backend Dependencies and Type Stubs
+        # The application's locked dependencies, so mypy checks against the
+        # libraries that ship, plus the stub packages in requirements-lint.txt.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r modelbox-ai/backend/requirements.lock -r modelbox-ai/backend/requirements-lint.txt
+
+      - name: Run mypy
+        run: |
+          cd modelbox-ai/backend
+          mypy app
+
+  leak-guard:
+    name: Leak Guard
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Refuse private-repository paths
+        # Sprint prompts and plans, research, marketing plans, assessments and
+        # market studies belong in the private repository; the patterns are in
+        # the script.
+        run: python modelbox-ai/scripts/check_leak_guard.py
+
   versions:
     name: Version Consistency
     runs-on: ubuntu-24.04
