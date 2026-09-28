@@ -167,6 +167,18 @@ graphs; the assertion needed a mutated copy to mean anything (correction C7).
 - Documentation is updated in the same PR as the behaviour it describes. If the
   code does not do it, the doc does not say it.
 
+## Security fixes in public text
+
+**Commit messages, code comments, docstrings and docs describe a security fix
+neutrally: what the code does now, never how the previous behaviour could be
+exploited.** "Keys act only in their own workspace", not "a key could read
+another workspace". This repository and its branches are public, and a
+description of the old behaviour is a description of every deployment still
+running it, including released versions, until they upgrade. Exploit detail,
+if it needs recording at all, belongs in the private repository. A commit
+message cannot be changed without rewriting history, which this repository
+does not do, so the rule is applied before pushing, not after.
+
 ## Authorization
 
 **Every route declares its minimum role in `backend/app/api/v1/route_policy.py`,
