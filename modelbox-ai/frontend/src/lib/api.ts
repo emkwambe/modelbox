@@ -47,11 +47,12 @@ import type {
   WorkspaceInfo,
 } from '@/types/schema';
 
-const baseURL =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+// Same origin: the UI's server forwards /api/* to the backend (next.config.js),
+// so the browser never needs the backend's address and none is built in.
+export const API_BASE_PATH = '/api/v1';
 
 export const apiClient = axios.create({
-  baseURL: `${baseURL}/api/v1`,
+  baseURL: API_BASE_PATH,
   headers: { 'Content-Type': 'application/json' },
   timeout: 120_000,
 });

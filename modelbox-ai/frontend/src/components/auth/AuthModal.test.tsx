@@ -17,11 +17,19 @@
  * behaviour — the controls were already implicitly labelled by their wrapping
  * `<label>`, submit was already gated, and Dev Quick Login already worked — so
  * the suite says the conversion added those six without disturbing these three.
+ *
+ * Dev Quick Login was removed in Sprint 7: it signed in with a password
+ * published in this repository, from the production bundle. The last block
+ * fails if it, or the credentials it used, come back.
  */
+
+import { readFileSync } from 'node:fs';
 
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { SRC, isTest, relative, stripComments, walk } from '@/test/sourceWalk';
 
 import AuthModal from './AuthModal';
 
@@ -127,9 +135,48 @@ describe('AuthModal', () => {
     expect(alert).toHaveAttribute('aria-live', 'assertive');
   });
 
-  it('signs in with the development credentials in one click', async () => {
+});
+
+/** The published development credentials. Code must not carry either. */
+const DEV_CREDENTIALS = ['dev@modelbox.ai', 'password123'];
+
+/** `file: credential` for every non-test source that carries one in code. */
+function findDevCredentials(files: Record<string, string>): string[] {
+  return Object.entries(files).flatMap(([path, source]) => {
+    const code = stripComments(source);
+    return DEV_CREDENTIALS.filter((cred) => code.includes(cred)).map(
+      (cred) => `${path}: ${cred}`,
+    );
+  });
+}
+
+const appSources = (): Record<string, string> =>
+  Object.fromEntries(
+    walk(SRC)
+      .filter((path) => !isTest(path))
+      .map((path) => [relative(path), readFileSync(path, 'utf-8')]),
+  );
+
+describe('no development login', () => {
+  it('offers no one-click development sign-in', () => {
     render(<AuthModal onClose={() => {}} />);
-    await userEvent.click(screen.getByRole('button', { name: /Dev Quick Login/ }));
-    expect(login).toHaveBeenCalledWith('dev@modelbox.ai', 'password123');
+    expect(screen.queryByRole('button', { name: /dev|quick login/i })).toBeNull();
+  });
+
+  it('no application source carries the development credentials', () => {
+    const files = appSources();
+    // Precondition: the walk found the app, including this component.
+    expect(Object.keys(files)).toContain('components/auth/AuthModal.tsx');
+    expect(findDevCredentials(files)).toEqual([]);
+  });
+
+  it('negative control: the removed constants fail the check', () => {
+    const files = {
+      ...appSources(),
+      'components/auth/AuthModal.tsx': "const DEV_PASSWORD = 'password123';\n",
+    };
+    expect(findDevCredentials(files)).toEqual([
+      'components/auth/AuthModal.tsx: password123',
+    ]);
   });
 });

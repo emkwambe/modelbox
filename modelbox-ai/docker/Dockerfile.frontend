@@ -4,8 +4,11 @@
 # =============================================================================
 FROM node:20-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm install
+# `npm ci` installs exactly the lock and fails if it is incomplete, where
+# `npm install` would silently repair it (CLAUDE.md, the @esbuild incident).
+# The lock is required, so no wildcard on it.
+COPY package.json package-lock.json ./
+RUN npm ci
 
 FROM node:20-alpine AS builder
 WORKDIR /app

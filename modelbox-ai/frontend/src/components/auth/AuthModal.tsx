@@ -1,7 +1,12 @@
 'use client';
 
 /**
- * AuthModal — local sign-in / create-account form + one-click Dev Quick Login.
+ * AuthModal — local sign-in / create-account form.
+ *
+ * There is no one-click development login. It signed in with a password
+ * published in this repository, and it shipped in the production bundle; the
+ * development account now exists only when explicitly seeded (README, Local
+ * development), and is signed into like any other.
  *
  * The dialog shell is `ui/Modal` and the three inputs are `ui/Field`. This was
  * the worst of the three modals to meet with a keyboard: it had **no close
@@ -17,9 +22,6 @@ import { Field, Input, Modal, StatusText } from '@/components/ui';
 import { login, register } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { color, semantic } from '@/styles/tokens';
-
-const DEV_EMAIL = 'dev@modelbox.ai';
-const DEV_PASSWORD = 'password123';
 
 type Mode = 'signin' | 'register';
 
@@ -169,27 +171,6 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
               : 'Sign in'}
         </button>
       </form>
-
-      {!isRegister && (
-        <button
-          type="button"
-          onClick={() => void signIn(DEV_EMAIL, DEV_PASSWORD)}
-          disabled={loading}
-          style={{
-            width: '100%',
-            marginTop: 10,
-            padding: 10,
-            borderRadius: 8,
-            border: `1px dashed ${color.neutral[400]}`,
-            background: color.neutral[50],
-            color: color.neutral[700],
-            fontWeight: 600,
-            cursor: loading ? 'default' : 'pointer',
-          }}
-        >
-          ⚡ Dev Quick Login
-        </button>
-      )}
 
       {error && (
         <div style={{ marginTop: 12 }}>

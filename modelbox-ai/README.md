@@ -88,9 +88,19 @@ and that the keys in it are current — a retired model identifier surfaces as a
 404 and reads like a bad credential. If the UI fails to start with *"ports are
 not available"*, the `--env-file` flag is missing and `UI_PORT` never applied.
 
-- Web UI → http://localhost:3000
-- API docs → http://localhost:8000/docs
-- Health → http://localhost:8000/health
+- Web UI → http://localhost:3000 (or your `UI_PORT`)
+- API → http://localhost:3000/api/v1, through the UI's own origin
+- Health → http://localhost:3000/api/health (the backend's `/health`, for monitoring)
+
+**The UI port is the only port the appliance publishes.** The UI forwards
+`/api/*` to the backend over the compose network, so the backend, Postgres,
+Redis and Ollama are not reachable from the host. For the interactive API docs
+(`/docs`) on this machine, add the debug override, which publishes the backend
+on `127.0.0.1:8000` only:
+
+```bash
+docker compose --env-file .env -f docker/docker-compose.appliance.yml -f docker/docker-compose.debug.yml up --build
+```
 
 Enable the optional local inference engine (offline / air-gapped):
 
@@ -120,9 +130,13 @@ environment creates it, whatever the flag says.
 
 ```bash
 cd frontend
-npm install
-npm run dev
+npm ci
+MODELBOX_BACKEND_URL=http://localhost:8000 npm run dev   # PowerShell: $env:MODELBOX_BACKEND_URL='http://localhost:8000'; npm run dev
 ```
+
+The UI calls `/api/v1` on its own origin and the Next.js server forwards it.
+`MODELBOX_BACKEND_URL` tells `next dev` where the backend is; the Docker image
+forwards to `modelbox-backend:8000`.
 
 ## Key API endpoints
 

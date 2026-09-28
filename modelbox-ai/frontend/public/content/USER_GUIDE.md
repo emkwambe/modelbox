@@ -117,7 +117,7 @@ Automate ModelBox from pipelines and agents.
 ```bash
 # Example: export a data contract in CI
 curl -H "X-API-Key: $MODELBOX_KEY" \
-  "http://modelbox.internal:8000/api/v1/model/$MODEL_ID/export/contract?format=avro"
+  "http://modelbox.internal:3000/api/v1/model/$MODEL_ID/export/contract?format=avro"
 ```
 
 **API:** `POST /api/v1/auth/api-keys`, `GET /api/v1/auth/api-keys`,

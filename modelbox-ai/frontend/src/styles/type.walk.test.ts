@@ -68,7 +68,7 @@ const BUDGET: Readonly<Record<string, number>> = {
   'app/docs/page.tsx': 7,
   'components/canvas/ValidationPanel.tsx': 6,
   'app/global-error.tsx': 5,
-  'components/auth/AuthModal.tsx': 4,
+  'components/auth/AuthModal.tsx': 3,
   'components/auth/AuthBadge.tsx': 3,
   'components/editor/CodeEditor.tsx': 1,
   'components/canvas/ControlPanel.tsx': 1,

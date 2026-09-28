@@ -21,10 +21,12 @@ services:
       context: ../frontend
       dockerfile: ../docker/Dockerfile.frontend
     image: modelbox/web-ui:v1.10.0
+    # The only published port. The UI forwards /api/* to modelbox-backend over
+    # the compose network (a same-origin rewrite in next.config.js), so the
+    # backend, Postgres, Redis and Ollama publish nothing to the host.
+    # docker-compose.debug.yml re-publishes the backend on 127.0.0.1 only.
     ports:
       - "${UI_PORT:-3000}:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       modelbox-backend:
         condition: service_healthy
@@ -35,8 +37,6 @@ services:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
     image: modelbox/core-engine:v1.10.0
-    ports:
-      - "8000:8000"
     environment:
       # The appliance is a production deployment. Settings refuse the shipped
       # secrets outside development, and the dev account is never seeded.
@@ -188,8 +188,6 @@ services:
   ollama-engine:
     image: ollama/ollama:latest
     profiles: ["airgap"]
-    ports:
-      - "11434:11434"
     volumes:
       - ollama_storage:/root/.ollama
     restart: unless-stopped
