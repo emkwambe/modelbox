@@ -1,6 +1,6 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-28 on `sprint-7/secure-by-default` at `89aba35`. This file is rewritten at
+*Regenerated 2026-09-28 on `sprint-7/secure-by-default` at `ec0fe86`. This file is rewritten at
 every stop, merge, deploy and tag; a figure here is the output of a command run
 for it, not a copy from another document.*
 
@@ -10,7 +10,7 @@ for it, not a copy from another document.*
 | :-- | :-- | :-- |
 | `main` | `49d268c` | README and home page claims narrowed (#6); `dbt_date` 0.21.0 lock (#7) |
 | `sprint/6-product-experience` | `8001975` | Sprints 5, 6 and 6.5; never merged to `main` |
-| `sprint-7/secure-by-default` | `89aba35` | cut from `8001975`, `origin/main` merged in; pushed, CI green at `89aba35` (run 36484830142) |
+| `sprint-7/secure-by-default` | `ec0fe86` | cut from `8001975`, `origin/main` merged in; pushed, CI green at `ec0fe86` (run 36493409081, nine jobs) |
 
 Migration head: `0022_append_only_ledgers`.
 
@@ -41,6 +41,11 @@ least-privilege database role, a populated upgrade from 0015 to head with the
 ORM checked against the migrated Postgres schema, and a gateway that classifies
 provider failures by their cause and records every provider request, schema
 re-asks included, as its own ledger attempt, describing a failure without
-quoting the model's output in the ledger, the logs or its errors. CI runs per commit on
-ubuntu-24.04. Breaking changes and upgrade steps are in
-`docs/RELEASE_NOTES_v1.11.0.draft.md`.
+quoting the model's output in the ledger, the logs or its errors. Audit writes
+that fail are logged and reported on `/health`.
+
+CI runs per commit on ubuntu-24.04. Required on `main`: backend tests, Ruff,
+mypy, the leak guard, the fidelity harness, migrations, version consistency,
+and the frontend type check, build and lint. A release is published only for
+a tag whose commit is on `main` with a green CI run. Breaking changes and
+upgrade steps are in `docs/RELEASE_NOTES_v1.11.0.draft.md`.
