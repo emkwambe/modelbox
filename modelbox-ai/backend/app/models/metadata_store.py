@@ -31,12 +31,17 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
     mapped_column,
     relationship,
 )
+
+# JSONB on PostgreSQL, as migration 0006 created the trainer columns; plain
+# JSON elsewhere (the SQLite test schema).
+_JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 # Valid enumerations enforced at the database layer (CHECK constraints).
 PARADIGMS = ("3NF", "KIMBALL", "DATA_VAULT", "OBT")
@@ -65,11 +70,16 @@ class User(Base):
     """An authenticated user (identity from local creds or an OIDC provider)."""
 
     __tablename__ = "users"
+    # As migration 0002 created them: a named unique constraint and a separate
+    # plain index. `unique=True, index=True` on the column would instead
+    # declare a single unique index, which no migrated database has.
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_users_email"),
+        Index("ix_users_email", "email"),
+    )
 
     user_id: Mapped[uuid.UUID] = _uuid_pk()
-    email: Mapped[str] = mapped_column(
-        String(255), nullable=False, unique=True, index=True
-    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
     # Nullable: OIDC-provisioned users have no local password.
     hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -561,9 +571,9 @@ class TrainerAssignment(Base):
     title: Mapped[str] = mapped_column(String(150), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     # Optional defective seed graph for "Spot the Flaw" mode.
-    flawed_graph_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    flawed_graph_json: Mapped[dict | None] = mapped_column(_JSON_DOCUMENT, nullable=True)
     expected_graph_invariants: Mapped[dict] = mapped_column(
-        JSON, nullable=False
+        _JSON_DOCUMENT, nullable=False
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
@@ -589,9 +599,9 @@ class TrainerSubmission(Base):
         ForeignKey("users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
-    submitted_graph_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    submitted_graph_json: Mapped[dict] = mapped_column(_JSON_DOCUMENT, nullable=False)
     score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
-    feedback_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    feedback_json: Mapped[dict | None] = mapped_column(_JSON_DOCUMENT, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.current_timestamp(),
@@ -679,11 +689,12 @@ class EgressAudit(Base):
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
+    # Indexed by the named Index in __table_args__; `index=True` here would
+    # declare a second index that no migration creates.
     occurred_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.current_timestamp(),
         nullable=False,
-        index=True,
     )
 
 
@@ -781,11 +792,12 @@ class AuditEvent(Base):
     # ledger a digest rather than a second copy of the prompt.
     detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # Indexed by the named Index in __table_args__; `index=True` here would
+    # declare a second index that no migration creates.
     occurred_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.current_timestamp(),
         nullable=False,
-        index=True,
     )
 
 

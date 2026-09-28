@@ -23,8 +23,8 @@ upgrade with a message, and leaves the row alone.
 Postgres schema must be empty. It runs on Postgres, not SQLite, because the
 SQLite tests build their schema from the ORM and cannot disagree with it.
 
-Negative controls: with 0021's removed-action list emptied in-process, the
-precondition lets the row through; a table added to the database outside the
+Negative controls: with 0021's removed-action list replaced in-process by one
+naming no real action, the precondition lets the row through; a table added to the database outside the
 ORM makes the drift check fail.
 """
 
@@ -311,11 +311,13 @@ def test_the_orm_matches_the_migrated_schema(server: str) -> None:
 # --- Negative controls ----------------------------------------------------------
 
 
-async def test_negative_control_an_emptied_removed_list_lets_the_row_through(
+async def test_negative_control_without_the_removed_actions_the_row_gets_through(
     with_removed_action, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _load_0021()
-    monkeypatch.setattr(module, "REMOVED", ())
+    # Not empty: an empty list renders `IN ()`, a syntax error, and the control
+    # would fail for that reason instead of the one it is for.
+    monkeypatch.setattr(module, "REMOVED", ("NOT_AN_ACTION",))
     with pytest.raises(pytest.fail.Exception, match="DID NOT RAISE"):
         await _check_precondition_refuses(with_removed_action, module)
 
