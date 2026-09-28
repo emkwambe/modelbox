@@ -295,7 +295,6 @@ async def test_the_call_is_refused_even_when_resolution_was_bypassed(
             response_model=Trivial,
             messages=[{"role": "user", "content": PROMPT}],
             temperature=0.0,
-            max_retries=0,
             call_kwargs={"model": "anthropic/m"},
         )
     assert client.calls == []
@@ -321,7 +320,6 @@ async def test_a_residency_refusal_is_not_failed_over(router: str) -> None:
             response_model=Trivial,
             messages=[{"role": "user", "content": PROMPT}],
             temperature=0.0,
-            max_retries=0,
             call_kwargs={"model": "anthropic/m"},
         )
     assert client.calls == []

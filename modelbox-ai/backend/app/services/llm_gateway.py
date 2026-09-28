@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -163,17 +164,69 @@ _REPORTING_PRECEDENCE: tuple[type[LLMRouterError], ...] = (
 )
 
 
+# Instructor makes exactly one request per call; the gateway owns every retry
+# (`_call_with_schema_retries`). An Instructor-internal retry is a second HTTP
+# request under the first one's ledger row, so the ledger would show one
+# request where the network saw several.
+_INSTRUCTOR_MAX_RETRIES = 0
+
+
+def _exception_chain(exc: BaseException) -> list[BaseException]:
+    """``exc`` followed by its causes, outermost first.
+
+    Follows ``__cause__``, then ``__context__`` unless the raiser suppressed it
+    with ``raise ... from None``. Guarded against cycles, which Python permits.
+    """
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        if current.__cause__ is not None:
+            current = current.__cause__
+        elif current.__suppress_context__:
+            current = None
+        else:
+            current = current.__context__
+    return chain
+
+
+def _reask_messages(
+    exc: BaseException, sent: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The conversation for a schema re-ask.
+
+    Instructor puts it on its exception as ``messages``: the request as sent,
+    plus the invalid response and the validation error. Without it the request
+    is repeated as sent.
+    """
+    messages = getattr(exc, "messages", None)
+    if isinstance(messages, list) and messages:
+        return messages
+    return sent
+
+
 def classify_provider_failure(exc: BaseException) -> type[LLMRouterError]:
     """Map a provider exception to one of the typed failures.
 
-    Walks the exception's MRO so a subclass of a known error classifies with its
-    parent. Anything unrecognised becomes :class:`UnclassifiedProviderError`,
-    which does not fail over.
+    Classifies the **innermost recognised cause first**, then works outward to
+    the exception's own class. Instructor wraps every failure of a structured
+    call, a provider's ``AuthenticationError`` included, in
+    ``InstructorRetryException`` raised from the original; that wrapper is a
+    schema failure only when what it wraps is one. The walk goes innermost
+    first so a transport error nested under a provider's own exception still
+    classifies by the provider's exception, not by the wrapper around it.
+
+    Each exception is matched along its MRO, so a subclass of a known error
+    classifies with its parent. Anything unrecognised anywhere in the chain
+    becomes :class:`UnclassifiedProviderError`, which does not fail over.
     """
-    for klass in type(exc).__mro__:
-        mapped = _FAILURE_SIGNATURES.get(klass.__name__)
-        if mapped is not None:
-            return mapped
+    for link in reversed(_exception_chain(exc)):
+        for klass in type(link).__mro__:
+            mapped = _FAILURE_SIGNATURES.get(klass.__name__)
+            if mapped is not None:
+                return mapped
     return UnclassifiedProviderError
 
 
@@ -439,12 +492,16 @@ class LLMGateway:
         attempt: EgressAttempt,
         permitted_egress: frozenset[str],
         response_model: type[TModel],
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float,
-        max_retries: int,
         call_kwargs: dict[str, Any],
     ) -> TModel:
         """Make one provider request, recorded on every path through it.
+
+        One request, not one *call*: Instructor runs with
+        ``_INSTRUCTOR_MAX_RETRIES`` (0), so it never sends a second request
+        under this attempt's row. Schema re-asks happen one level up, each
+        through here with its own attempt.
 
         **This is the only method in the application that touches
         ``self.client``, and that is a tested property**
@@ -482,7 +539,7 @@ class LLMGateway:
                 response_model=response_model,
                 messages=messages,
                 temperature=temperature,
-                max_retries=max_retries,
+                max_retries=_INSTRUCTOR_MAX_RETRIES,
                 **call_kwargs,
             )
         except Exception as exc:
@@ -505,6 +562,49 @@ class LLMGateway:
         )
         return result
 
+    async def _call_with_schema_retries(
+        self,
+        *,
+        new_attempt: Callable[[], EgressAttempt],
+        permitted_egress: frozenset[str],
+        response_model: type[TModel],
+        messages: list[dict[str, Any]],
+        temperature: float,
+        max_retries: int,
+        call_kwargs: dict[str, Any],
+    ) -> TModel:
+        """One provider: a request, then up to ``max_retries`` schema re-asks.
+
+        Every request goes through `_call_provider` with an attempt of its own,
+        so the ledger holds one ATTEMPT and one outcome for each request that
+        left. Only a schema failure is retried here. Anything else goes straight
+        back to the failover loop, which classifies it.
+
+        A re-ask sends what Instructor's own retry sent: the conversation
+        Instructor returns on the exception, which appends the invalid response
+        and the validation error to the request. The attempt's digest stays the
+        user prompt's, as it was when those retries ran under a single row.
+        """
+        request = messages
+        # Clamped as Instructor clamped it: a negative budget is one request.
+        for retries_left in range(max(max_retries, 0), -1, -1):
+            try:
+                return await self._call_provider(
+                    attempt=new_attempt(),
+                    permitted_egress=permitted_egress,
+                    response_model=response_model,
+                    messages=request,
+                    temperature=temperature,
+                    call_kwargs=call_kwargs,
+                )
+            except (EgressLedgerError, EgressResidencyError, EgressPolicyError):
+                raise
+            except Exception as exc:
+                if retries_left == 0 or classify_provider_failure(exc) is not ProviderSchemaError:
+                    raise
+                request = _reask_messages(exc, request)
+        raise AssertionError("unreachable: the last iteration returns or raises")
+
     # -- execution ----------------------------------------------------------
     async def structured_completion(
         self,
@@ -523,8 +623,9 @@ class LLMGateway:
         """Run a structured completion for ``task`` with automatic failover.
 
         Iterates the resolved provider chain; the first provider to return a
-        response that validates against ``response_model`` wins. Instructor
-        handles per-provider schema re-prompting up to ``max_retries``.
+        response that validates against ``response_model`` wins. Each provider
+        gets up to ``max_retries`` schema re-asks, owned by the gateway so each
+        one is a ledger attempt of its own (`_call_with_schema_retries`).
         """
         # ---- fail-closed gate, before anything is constructed ---------------
         # Placed ahead of `self.client` deliberately: a refusal that fires after
@@ -549,10 +650,10 @@ class LLMGateway:
         # Every outbound prompt in the application passes through here; there
         # are exactly three call sites into this method (synthesis_engine,
         # paradigm_translator, trainer_service). The append-only ledger (B3,
-        # D3) is written one level down in `_call_provider`, so that each
-        # provider in a failover chain is recorded as the separate request it
-        # is. Prompt masking previously sat here and did nothing; see
-        # Settings.mask_metadata_in_prompts.
+        # D3) is written in `_call_provider`, so that each provider in a
+        # failover chain, and each schema re-ask to one provider, is recorded
+        # as the separate request it is. Prompt masking previously sat here
+        # and did nothing; see Settings.mask_metadata_in_prompts.
         messages.append({"role": "user", "content": prompt})
 
         # Computed once and shared by every attempt in the chain: the same
@@ -565,22 +666,26 @@ class LLMGateway:
         last_error: Exception | None = None
         seen: list[type[LLMRouterError]] = []
         for provider_name in chain:
+
+            def new_attempt(provider_name: str = provider_name) -> EgressAttempt:
+                return EgressAttempt(
+                    attempt_id=uuid.uuid4(),
+                    task=task,
+                    provider=provider_name,
+                    egress_class=self._egress_class(provider_name),
+                    prompt_sha256=digest,
+                    prompt_chars=len(prompt),
+                    model_id=model_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+
             try:
                 call_kwargs = self._litellm_kwargs(provider_name)
                 logger.info("Routing task '%s' -> provider '%s'", task, provider_name)
-                return await self._call_provider(
+                return await self._call_with_schema_retries(
+                    new_attempt=new_attempt,
                     permitted_egress=permitted,
-                    attempt=EgressAttempt(
-                        attempt_id=uuid.uuid4(),
-                        task=task,
-                        provider=provider_name,
-                        egress_class=self._egress_class(provider_name),
-                        prompt_sha256=digest,
-                        prompt_chars=len(prompt),
-                        model_id=model_id,
-                        user_id=user_id,
-                        workspace_id=workspace_id,
-                    ),
                     response_model=response_model,
                     messages=messages,
                     temperature=temp,
