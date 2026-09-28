@@ -1,6 +1,6 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-28 on `sprint-7/secure-by-default` at `ec0fe86`. This file is rewritten at
+*Regenerated 2026-09-28 on `sprint-7/secure-by-default` at `b6686f4`. This file is rewritten at
 every stop, merge, deploy and tag; a figure here is the output of a command run
 for it, not a copy from another document.*
 
@@ -10,7 +10,7 @@ for it, not a copy from another document.*
 | :-- | :-- | :-- |
 | `main` | `49d268c` | README and home page claims narrowed (#6); `dbt_date` 0.21.0 lock (#7) |
 | `sprint/6-product-experience` | `8001975` | Sprints 5, 6 and 6.5; never merged to `main` |
-| `sprint-7/secure-by-default` | `ec0fe86` | cut from `8001975`, `origin/main` merged in; pushed, CI green at `ec0fe86` (run 36493409081, nine jobs) |
+| `sprint-7/secure-by-default` | `b6686f4` | cut from `8001975`, `origin/main` merged in; pushed, CI green at `b6686f4` (run 36499325344, ten jobs) |
 
 Migration head: `0022_append_only_ledgers`.
 
@@ -43,6 +43,12 @@ provider failures by their cause and records every provider request, schema
 re-asks included, as its own ledger attempt, describing a failure without
 quoting the model's output in the ledger, the logs or its errors. Audit writes
 that fail are logged and reported on `/health`.
+
+A black-box acceptance suite (`tests/blackbox/`) runs in CI against the
+containers: the install refusing an unset `.env`, the hardened appliance, an
+upgraded database, an air-gapped appliance on a network with no route out, and
+a test-only insecure profile against which each check covering a weakness that
+profile reintroduces must fail.
 
 CI runs per commit on ubuntu-24.04. Required on `main`: backend tests, Ruff,
 mypy, the leak guard, the fidelity harness, migrations, version consistency,
