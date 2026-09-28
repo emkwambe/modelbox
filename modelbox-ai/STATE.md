@@ -1,6 +1,6 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-28 on `sprint-7/secure-by-default` at `00f6f11`. This file is rewritten at
+*Regenerated 2026-09-28 on `sprint-7/secure-by-default` at `89aba35`. This file is rewritten at
 every stop, merge, deploy and tag; a figure here is the output of a command run
 for it, not a copy from another document.*
 
@@ -10,7 +10,7 @@ for it, not a copy from another document.*
 | :-- | :-- | :-- |
 | `main` | `49d268c` | README and home page claims narrowed (#6); `dbt_date` 0.21.0 lock (#7) |
 | `sprint/6-product-experience` | `8001975` | Sprints 5, 6 and 6.5; never merged to `main` |
-| `sprint-7/secure-by-default` | `00f6f11` | cut from `8001975`, `origin/main` merged in; pushed, CI green at `00f6f11` (run 36483722964) |
+| `sprint-7/secure-by-default` | `89aba35` | cut from `8001975`, `origin/main` merged in; pushed, CI green at `89aba35` (run 36484830142) |
 
 Migration head: `0022_append_only_ledgers`.
 
