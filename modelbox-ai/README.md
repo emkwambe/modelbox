@@ -1,10 +1,10 @@
 # ModelBox AI
 
-An enterprise-grade, **LLM-agnostic** business data modeling workspace. ModelBox AI
-turns raw business requirements (PRDs, Jira stories, natural language) into
-production-ready data warehouse architecture (Snowflake, Databricks, BigQuery,
-Postgres) — with a visual ERD canvas, multi-paradigm transformation, and
-zero-data-egress options for regulated industries.
+An **LLM-agnostic** data modeling workspace. ModelBox AI drafts a data model from business requirements (PRDs, Jira stories, natural language) for a modeller to review and edit on a visual ERD canvas, then emits artifacts verified by the tools that consume them: DDL, dbt projects, data contracts, and semantic layers. DDL is certified for PostgreSQL, Snowflake, Redshift, and DuckDB; other dialects are Preview. In air-gapped mode, application prompts route only to local providers through a recorded gateway.
+
+## Status
+
+Not for deployment on a shared network before v1.11.0.
 
 > Shipped as a single-node Docker appliance ("The Box").
 
@@ -100,7 +100,7 @@ New providers are pure config — any OpenAI-compatible endpoint uses
 > **Data-residency note:** the APAC *cloud* providers (DeepSeek, Kimi) are wired
 > as **opt-in fallbacks**, never primaries for sensitive tasks. Sending schema
 > metadata to any third-party cloud has residency/compliance implications —
-> for zero-egress guarantees use `AIRGAPPED=true` with local open-weights.
+> use `AIRGAPPED=true` with local open-weights.
 
 ## SQL dialects
 
@@ -128,7 +128,8 @@ names while the same request carries the source requirements document verbatim
 leaks the same semantics. Setting the flag now fails startup. Use air-gapped
 mode, which is a real control.
 
-Set `AIRGAPPED=true` to enforce **zero data egress** (FR-6.2): the LLM gateway
+Set `AIRGAPPED=true` for air-gapped mode. In air-gapped mode, application
+prompts route only to local providers through a recorded gateway: the LLM gateway
 strips every cloud provider from each task's routing chain and pins execution to
 local runtimes (Ollama / vLLM). Routing is keyed off the explicit `egress:`
 classification in `config/model_router.yaml` (any non-`local` egress — including
