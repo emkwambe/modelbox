@@ -68,12 +68,32 @@ _STRICT = os.environ.get("MODELBOX_MIGRATION_STRICT") == "1"
 DOCKER = shutil.which("docker")
 
 
+def _unavailable(reason: str, strict: bool | None = None) -> None:
+    """Stop a gate that cannot run: fail under the strict flag, else skip.
+
+    Every path that would skip goes through here. The strict flag exists so
+    that a CI run cannot report green having migrated nothing, and a skip that
+    bypasses it is exactly that report. The baseline-worktree path once did.
+    """
+    if _STRICT if strict is None else strict:
+        pytest.fail(f"MODELBOX_MIGRATION_STRICT=1 but {reason}")
+    pytest.skip(f"{reason}; migration verification not run")
+
+
 def _need_docker() -> None:
     if DOCKER:
         return
-    if _STRICT:
-        pytest.fail("MODELBOX_MIGRATION_STRICT=1 but docker is unavailable")
-    pytest.skip("docker unavailable; migration verification not run")
+    _unavailable("docker is unavailable")
+
+
+def _add_baseline_worktree(target: Path, tag: str = BASELINE_TAG) -> None:
+    """Check out ``tag`` at ``target``, or stop the gate through `_unavailable`."""
+    result = subprocess.run(
+        ["git", "worktree", "add", "--detach", str(target), tag],
+        cwd=REPO, capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        _unavailable(f"the {tag} worktree cannot be created: {result.stderr[-300:]}")
 
 
 # ---------------------------------------------------------------------------
@@ -125,12 +145,7 @@ def baseline_worktree(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A checkout of v1.6.0, so 'before' is produced by the code that shipped."""
     root = tmp_path_factory.mktemp("baseline")
     target = root / "v1_6_0"
-    result = subprocess.run(
-        ["git", "worktree", "add", "--detach", str(target), BASELINE_TAG],
-        cwd=REPO, capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        pytest.skip(f"cannot create {BASELINE_TAG} worktree: {result.stderr[-300:]}")
+    _add_baseline_worktree(target)
     try:
         yield target / "modelbox-ai" / "backend"
     finally:
