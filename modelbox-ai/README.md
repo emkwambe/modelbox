@@ -63,6 +63,11 @@ it on its own:
   their defaults: the UI binds port 3000 rather than your `UI_PORT`, and the
   database comes up with the default password.
 
+**Outside `ENVIRONMENT=development` the backend refuses to start on a shipped
+secret.** If `JWT_SECRET`, `ENCRYPTION_KEY` or the database password is the
+value in this repository, or `JWT_SECRET` is shorter than 32 bytes, startup
+fails with an error that names each variable and never prints its value.
+
 If synthesis fails with *"All providers exhausted"*, check that the file exists
 and that the keys in it are current — a retired model identifier surfaces as a
 404 and reads like a bad credential. If the UI fails to start with *"ports are

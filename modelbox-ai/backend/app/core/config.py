@@ -12,12 +12,26 @@ import json
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import AliasChoices, Field, PostgresDsn, RedisDsn, field_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    PostgresDsn,
+    RedisDsn,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 CostOptimizationMode = Literal[
     "performance", "balanced", "cost_optimized", "air_gapped"
 ]
+
+# The values this repository ships. Public by definition, so outside
+# development each one is treated as no secret at all.
+DEFAULT_JWT_SECRET = "dev-secret-change-me"
+DEFAULT_ENCRYPTION_KEY = "dev-encryption-key-change-me"
+DEFAULT_POSTGRES_PASSWORD = "secret"
+MIN_JWT_SECRET_BYTES = 32
 
 
 class Settings(BaseSettings):
@@ -32,6 +46,10 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        # A validation error otherwise echoes its input — every secret this
+        # class holds — into the startup log, truncated to a head and a tail
+        # that are both real characters of real values.
+        hide_input_in_errors=True,
     )
 
     # --- Service metadata -----------------------------------------------------
@@ -110,7 +128,7 @@ class Settings(BaseSettings):
 
     # --- Authentication (Slice 3A) -------------------------------------------
     jwt_secret: str = Field(
-        default="dev-secret-change-me",
+        default=DEFAULT_JWT_SECRET,
         description="HS256 signing/verification secret for local & test tokens.",
     )
     jwt_algorithm: str = Field(
@@ -166,7 +184,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     # Key material for AES-256-GCM encryption of stored secrets (connection URIs).
     encryption_key: str = Field(
-        default="dev-encryption-key-change-me",
+        default=DEFAULT_ENCRYPTION_KEY,
         description="Secret used to derive the AES-256-GCM key for stored creds.",
     )
 
@@ -216,6 +234,41 @@ class Settings(BaseSettings):
                 "docs/RELEASE_NOTES_v1.6.0.md."
             )
         return value
+
+    @model_validator(mode="after")
+    def _refuse_shipped_secrets(self) -> Settings:
+        """Outside development, refuse to start on a secret this repo publishes.
+
+        A default that ships in source is known to everyone who can read it,
+        so a token signed with it or a credential encrypted under it protects
+        nothing. The error names the variable and never its value: startup
+        errors reach logs, and a log is not where a secret should appear, even
+        a wrong one.
+        """
+        if self.environment == "development":
+            return self
+        problems: list[str] = []
+        if self.jwt_secret == DEFAULT_JWT_SECRET:
+            problems.append("JWT_SECRET is the shipped default")
+        elif len(self.jwt_secret.encode("utf-8")) < MIN_JWT_SECRET_BYTES:
+            problems.append(
+                f"JWT_SECRET is shorter than {MIN_JWT_SECRET_BYTES} bytes"
+            )
+        if self.encryption_key == DEFAULT_ENCRYPTION_KEY:
+            problems.append("ENCRYPTION_KEY is the shipped default")
+        passwords = [host.get("password") for host in self.database_url.hosts()]
+        if DEFAULT_POSTGRES_PASSWORD in passwords:
+            problems.append(
+                "POSTGRES_PASSWORD (the password in DATABASE_URL) is the "
+                "shipped default"
+            )
+        if problems:
+            raise ValueError(
+                f"Refusing to start with ENVIRONMENT={self.environment}: "
+                + "; ".join(problems)
+                + "."
+            )
+        return self
 
     @property
     def is_airgapped(self) -> bool:
