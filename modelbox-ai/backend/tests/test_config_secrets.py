@@ -4,6 +4,10 @@ Each case starts from a baseline that is asserted to start, then changes one
 field. A refusal can therefore only come from that field, which is what lets a
 case fail for the right reason rather than because the baseline was already
 broken.
+
+The negative controls at the end disable each control inside this process only
+and assert the same check then fails. They run on every CI run, so the checks
+are shown to discriminate continuously rather than once.
 """
 
 from __future__ import annotations
@@ -11,7 +15,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
+from pydantic import ValidationError, model_validator
+from pydantic_settings import SettingsConfigDict
 
 from app.core.config import (
     DEFAULT_ENCRYPTION_KEY,
@@ -23,13 +28,14 @@ from app.core.config import (
 GOOD_JWT_SECRET = "j" * 48
 GOOD_ENCRYPTION_KEY = "e" * 48
 GOOD_PASSWORD = "p" * 32
+SHORT_JWT_SECRET = "s" * 31
 
 
 def _dsn(password: str) -> str:
     return f"postgresql+asyncpg://modelbox:{password}@postgres-db:5432/modelbox_metadata"
 
 
-def _settings(**overrides: Any) -> Settings:
+def _settings(cls: type[Settings] = Settings, **overrides: Any) -> Settings:
     values: dict[str, Any] = {
         "environment": "production",
         "jwt_secret": GOOD_JWT_SECRET,
@@ -37,40 +43,35 @@ def _settings(**overrides: Any) -> Settings:
         "database_url": _dsn(GOOD_PASSWORD),
     }
     values.update(overrides)
-    return Settings(_env_file=None, **values)  # type: ignore[call-arg]
+    return cls(_env_file=None, **values)  # type: ignore[call-arg]
 
 
-def test_the_baseline_starts() -> None:
-    """Precondition for every refusal below."""
-    assert _settings().environment == "production"
-
-
-@pytest.mark.parametrize("environment", ["production", "staging"])
-@pytest.mark.parametrize(
-    ("override", "variable", "value"),
-    [
-        ({"jwt_secret": DEFAULT_JWT_SECRET}, "JWT_SECRET", DEFAULT_JWT_SECRET),
-        (
-            {"encryption_key": DEFAULT_ENCRYPTION_KEY},
-            "ENCRYPTION_KEY",
-            DEFAULT_ENCRYPTION_KEY,
-        ),
-        (
-            {"database_url": _dsn(DEFAULT_POSTGRES_PASSWORD)},
-            "POSTGRES_PASSWORD",
-            DEFAULT_POSTGRES_PASSWORD,
-        ),
-    ],
-    ids=["jwt_secret", "encryption_key", "postgres_password"],
-)
-def test_a_shipped_default_refuses_to_start(
-    environment: str, override: dict[str, str], variable: str, value: str
-) -> None:
-    with pytest.raises(ValidationError) as excinfo:
-        _settings(environment=environment, **override)
-    message = str(excinfo.value)
-    assert variable in message
-    _assert_no_secret_material(message, value)
+REFUSALS = [
+    pytest.param(
+        {"jwt_secret": DEFAULT_JWT_SECRET},
+        "JWT_SECRET is the shipped default",
+        DEFAULT_JWT_SECRET,
+        id="jwt_secret",
+    ),
+    pytest.param(
+        {"encryption_key": DEFAULT_ENCRYPTION_KEY},
+        "ENCRYPTION_KEY is the shipped default",
+        DEFAULT_ENCRYPTION_KEY,
+        id="encryption_key",
+    ),
+    pytest.param(
+        {"database_url": _dsn(DEFAULT_POSTGRES_PASSWORD)},
+        "POSTGRES_PASSWORD (the password in DATABASE_URL) is the shipped default",
+        DEFAULT_POSTGRES_PASSWORD,
+        id="postgres_password",
+    ),
+    pytest.param(
+        {"jwt_secret": SHORT_JWT_SECRET},
+        "JWT_SECRET is shorter than 32 bytes",
+        SHORT_JWT_SECRET,
+        id="short_jwt_secret",
+    ),
+]
 
 
 def _assert_no_secret_material(message: str, *refused: str) -> None:
@@ -88,13 +89,32 @@ def _assert_no_secret_material(message: str, *refused: str) -> None:
             assert secret[start : start + 8] not in stripped
 
 
-def test_a_short_jwt_secret_refuses_to_start() -> None:
-    short = "s" * 31
+def _check_refuses(
+    cls: type[Settings],
+    environment: str,
+    override: dict[str, str],
+    reason: str,
+    value: str,
+) -> None:
+    """The check itself, shared by the tests and their negative controls."""
     with pytest.raises(ValidationError) as excinfo:
-        _settings(jwt_secret=short)
+        _settings(cls, environment=environment, **override)
     message = str(excinfo.value)
-    assert "JWT_SECRET is shorter than 32 bytes" in message
-    _assert_no_secret_material(message, short)
+    assert reason in message
+    _assert_no_secret_material(message, value)
+
+
+def test_the_baseline_starts() -> None:
+    """Precondition for every refusal below."""
+    assert _settings().environment == "production"
+
+
+@pytest.mark.parametrize("environment", ["production", "staging"])
+@pytest.mark.parametrize(("override", "reason", "value"), REFUSALS)
+def test_a_shipped_or_short_secret_refuses_to_start(
+    environment: str, override: dict[str, str], reason: str, value: str
+) -> None:
+    _check_refuses(Settings, environment, override, reason, value)
 
 
 def test_the_length_is_counted_in_bytes() -> None:
@@ -123,3 +143,55 @@ def test_development_keeps_the_defaults() -> None:
         database_url=_dsn(DEFAULT_POSTGRES_PASSWORD),
     )
     assert settings.jwt_secret == DEFAULT_JWT_SECRET
+
+
+# --- Negative controls -------------------------------------------------------
+#
+# Pydantic compiles validators into the class when it is created, so patching
+# the method afterwards disables nothing and a control built that way would
+# pass while proving nothing. A subclass that redefines a validator under the
+# same name replaces it, which switches off exactly the control the fix
+# introduced, in this process only.
+
+
+class _Unguarded(Settings):
+    """`Settings` with `_refuse_shipped_secrets` replaced by a no-op."""
+
+    @model_validator(mode="after")
+    def _refuse_shipped_secrets(self) -> _Unguarded:
+        return self
+
+
+class _Echoing(Settings):
+    """`Settings` with `hide_input_in_errors` switched back off.
+
+    It inherits the real validator, so the refusal still fires and the echo is
+    the only difference from `Settings`.
+    """
+
+    model_config = SettingsConfigDict(
+        **{**Settings.model_config, "hide_input_in_errors": False}
+    )
+
+
+def test_negative_control_the_unguarded_class_is_unguarded() -> None:
+    """Precondition: the override took. Otherwise the control below is vacuous."""
+    settings = _settings(_Unguarded, jwt_secret=DEFAULT_JWT_SECRET)
+    assert settings.jwt_secret == DEFAULT_JWT_SECRET
+
+
+@pytest.mark.parametrize(("override", "reason", "value"), REFUSALS)
+def test_negative_control_without_the_validator_the_check_fails(
+    override: dict[str, str], reason: str, value: str
+) -> None:
+    with pytest.raises(pytest.fail.Exception, match="DID NOT RAISE"):
+        _check_refuses(_Unguarded, "production", override, reason, value)
+
+
+@pytest.mark.parametrize(("override", "reason", "value"), REFUSALS)
+def test_negative_control_with_input_echo_the_check_fails(
+    override: dict[str, str], reason: str, value: str
+) -> None:
+    # The refusal still fires, so this fails at the leak check and nowhere else.
+    with pytest.raises(AssertionError, match="input_value"):
+        _check_refuses(_Echoing, "production", override, reason, value)
