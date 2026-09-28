@@ -16,7 +16,9 @@ class is importable without any credentials present.
 from __future__ import annotations
 
 import logging
+import math
 import os
+import re
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -225,6 +227,89 @@ def _field_errors(exc: BaseException) -> list[str]:
     return errors
 
 
+# A provider's error type or code is recorded only if it looks like one: an
+# identifier, never a sentence. Anything else is dropped rather than truncated.
+_ERROR_TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
+_MAX_RETRY_AFTER_SECONDS = 86_400
+
+
+def _token(value: object) -> str | None:
+    if isinstance(value, str) and _ERROR_TOKEN.fullmatch(value):
+        return value
+    return None
+
+
+def _status(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+        return value
+    return None
+
+
+def _retry_after(headers: object) -> int | None:
+    """Whole seconds from ``retry-after`` or ``retry-after-ms``; an HTTP date is
+    not read, and a value outside 0..86400 seconds is dropped."""
+    getter = getattr(headers, "get", None)
+    if getter is None:
+        return None
+    for name, scale in (("retry-after", 1.0), ("retry-after-ms", 0.001)):
+        raw = getter(name)
+        if raw is None:
+            continue
+        try:
+            seconds = float(str(raw).strip()) * scale
+        except ValueError:
+            continue
+        if 0 <= seconds <= _MAX_RETRY_AFTER_SECONDS:
+            return math.ceil(seconds)
+    return None
+
+
+def _response_json(response: object) -> object:
+    """The provider response's JSON body, or None. LiteLLM keeps the response
+    but does not parse its error object; only tokens are read from it."""
+    reader = getattr(response, "json", None)
+    if reader is None:
+        return None
+    try:
+        return reader()
+    # Not JSON (ValueError, which JSONDecodeError and UnicodeDecodeError are),
+    # or a streamed body never read (httpx raises a RuntimeError subclass).
+    except (ValueError, RuntimeError):
+        return None
+
+
+def _provider_fields(exc: BaseException) -> list[str]:
+    """``status=``, ``type=``, ``code=`` and ``retry_after=`` from the chain.
+
+    Each is taken from the first exception in the chain that carries a valid
+    value. The status is the exception's ``status_code``; retry-after comes
+    from its headers or its response's. The type and code come only from the
+    provider's own error object (an SDK's parsed ``body``, else the response's
+    JSON): LiteLLM sets ``type`` and ``code`` attributes of its own, such as
+    ``throttling_error`` for every 429, which are not what the provider said.
+    Every value is validated as a number or an identifier; nothing is copied as
+    text.
+    """
+    fields: dict[str, int | str] = {}
+    for link in _exception_chain(exc):
+        body = getattr(link, "body", None)
+        if not isinstance(body, dict):
+            body = _response_json(getattr(link, "response", None))
+        error = body.get("error") if isinstance(body, dict) else None
+        error = error if isinstance(error, dict) else {}
+        candidates: dict[str, int | str | None] = {
+            "status": _status(getattr(link, "status_code", None)),
+            "type": _token(error.get("type")),
+            "code": _token(error.get("code")),
+            "retry_after": _retry_after(getattr(link, "headers", None))
+            or _retry_after(getattr(getattr(link, "response", None), "headers", None)),
+        }
+        for key, value in candidates.items():
+            if value is not None and key not in fields:
+                fields[key] = value
+    return [f"{key}={fields[key]}" for key in ("status", "type", "code", "retry_after") if key in fields]
+
+
 def describe_provider_failure(
     exc: BaseException,
     *,
@@ -235,13 +320,16 @@ def describe_provider_failure(
     """What the ledger, the gateway's log and its raised errors say about a failure.
 
     Provider, model, the classification, the exception classes along the
-    chain, and for a schema failure each error's field path and type. Never an
-    exception's message: a validation error's message quotes the invalid value,
-    which is the model's output, and a wrapper's message quotes the validation
-    error. The ledger is append-only, so what is written there stays.
+    chain; for a provider failure its HTTP status, error type or code, and
+    retry-after seconds (`_provider_fields`); for a schema failure each error's
+    field path and type. Never an exception's message: a validation error's
+    message quotes the invalid value, which is the model's output, and a
+    wrapper's message quotes the validation error. The ledger is append-only,
+    so what is written there stays.
     """
     classes = "<".join(type(link).__name__ for link in _exception_chain(exc))
     parts = [f"{classification.__name__}/{classes}", f"provider={provider}", f"model={model}"]
+    parts += _provider_fields(exc)
     errors = _field_errors(exc)
     if errors:
         parts.append("errors=" + ",".join(errors))
