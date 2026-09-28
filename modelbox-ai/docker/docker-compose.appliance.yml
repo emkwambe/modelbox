@@ -186,7 +186,12 @@ services:
   # Optional local inference engine for offline / air-gapped setups.
   # Enable with:  docker compose --profile airgap up
   ollama-engine:
-    image: ollama/ollama:latest
+    # Pinned by digest: `latest` is a different image every week, and this is
+    # the one service that runs a third party's code beside the models. The tag
+    # names the release; the digest (the multi-arch index, linux/amd64 and
+    # linux/arm64, read from registry-1.docker.io on 2026-09-28) is what is
+    # pulled. Bump both together.
+    image: ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
     profiles: ["airgap"]
     volumes:
       - ollama_storage:/root/.ollama

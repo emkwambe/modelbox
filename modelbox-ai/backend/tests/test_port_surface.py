@@ -4,6 +4,7 @@ The backend, Postgres, Redis and Ollama publish nothing to the host; the UI
 forwards `/api/*` over the compose network. The debug override may publish the
 backend, and only on loopback. `NEXT_PUBLIC_API_URL` is gone from every place
 that could set or read it, and the frontend image installs with `npm ci`.
+The Ollama image is pinned to a version and a digest.
 
 Each check is a function shared with a negative control that hands it a
 synthetic copy with the control undone, and asserts it fails.
@@ -91,7 +92,37 @@ def test_no_build_time_api_url_remains() -> None:
     assert not found, f"NEXT_PUBLIC_API_URL is still set or read in {found}"
 
 
+_DIGEST_PINNED = re.compile(r"^ollama/ollama:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$")
+
+
+def _check_ollama_is_pinned(spec: dict[str, Any]) -> None:
+    image = str(spec["services"]["ollama-engine"]["image"])
+    assert _DIGEST_PINNED.fullmatch(image), (
+        f"ollama-engine is {image!r}; it must be ollama/ollama:<version>@sha256:<digest>"
+    )
+
+
+def test_the_ollama_image_is_pinned_by_digest() -> None:
+    _check_ollama_is_pinned(APPLIANCE)
+
+
 # --- Negative controls -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        "ollama/ollama:latest",
+        "ollama/ollama:0.34.4",
+        "ollama/ollama@sha256:" + "0" * 64,
+    ],
+    ids=["latest", "tag-only", "digest-without-version"],
+)
+def test_negative_control_an_unpinned_ollama_fails_the_check(image: str) -> None:
+    spec = copy.deepcopy(APPLIANCE)
+    spec["services"]["ollama-engine"]["image"] = image
+    with pytest.raises(AssertionError, match="ollama-engine is"):
+        _check_ollama_is_pinned(spec)
 
 
 @pytest.mark.parametrize(
