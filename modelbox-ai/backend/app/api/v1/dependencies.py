@@ -11,7 +11,7 @@ import dataclasses
 import datetime
 import functools
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import (
@@ -499,7 +499,7 @@ def require_body_workspace_role(min_role: str):
 
 
 @functools.cache
-def require_resource_role(min_role: str, model_cls: type, param: str, source: str):
+def require_resource_role(min_role: str, model_cls: type[Any], param: str, source: str):
     """A row that carries ``workspace_id``, named by a path or body field.
 
     ``source`` is ``"path"`` or ``"body"``; ``param`` is the field. The row is

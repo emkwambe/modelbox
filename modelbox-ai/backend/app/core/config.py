@@ -77,14 +77,17 @@ class Settings(BaseSettings):
     # --- Datastores -----------------------------------------------------------
     # Async SQLAlchemy engine URL, e.g.
     #   postgresql+asyncpg://modelbox:secret@postgres-db:5432/modelbox_metadata
+    # Defaults are written as the declared types so the declarations type-check.
+    # Behaviour is unchanged: pydantic-settings validates defaults
+    # (validate_default=True), so a string default became a PostgresDsn anyway.
     database_url: PostgresDsn = Field(
-        default=(
+        default=PostgresDsn(
             "postgresql+asyncpg://modelbox:secret@localhost:5432/modelbox_metadata"
         ),
         description="Async PostgreSQL 16 metadata store DSN.",
     )
     redis_url: RedisDsn = Field(
-        default="redis://localhost:6379/0",
+        default=RedisDsn("redis://localhost:6379/0"),
         description="Redis 7 cache / task-broker DSN.",
     )
     # Celery broker/result backend (async synthesis jobs — FR-1.1).

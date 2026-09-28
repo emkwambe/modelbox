@@ -17,6 +17,7 @@ service class — API handlers only orchestrate it.
 from __future__ import annotations
 
 import re
+from enum import Enum
 
 import networkx as nx
 
@@ -465,7 +466,7 @@ class GraphEngine:
         issues: list[ValidationIssue] = []
         for entity in entities:
             tier = entity.tier
-            tier_value = tier.value if hasattr(tier, "value") else str(tier)
+            tier_value = tier.value if isinstance(tier, Enum) else str(tier)
             if tier_value in critical and not (
                 entity.freshness_sla and entity.freshness_sla.strip()
             ):

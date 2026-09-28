@@ -362,7 +362,7 @@ async def export_synthetic_data(
     await _audit("ARTIFACT_GENERATED", user, model, artifact="synthetic-data", format=payload.format)
     return SyntheticSeedResponse(
         model_id=model.model_id,
-        format=payload.format,  # type: ignore[arg-type]
+        format=payload.format,
         dialect=payload.dialect,
         row_count_per_entity=payload.row_count_per_entity,
         generation_order=seed.generation_order,

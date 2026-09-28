@@ -29,6 +29,7 @@ _ENV_REASON = (
 # (file, method, first argument as written) -> why raising=False is right there.
 ALLOWED: dict[tuple[str, str, str], str] = {
     ("test_config.py", "delenv", "'CORS_ORIGINS'"): _ENV_REASON,
+    ("test_config_secrets.py", "delenv", "'DATABASE_URL'"): _ENV_REASON,
     ("test_egress_choke_point.py", "delenv", "'MODELBOX_ALLOW_PROVIDER_CALLS'"): _ENV_REASON,
     ("test_jwt_audience_issuer.py", "delenv", "'JWT_AUDIENCE'"): _ENV_REASON,
     ("test_jwt_audience_issuer.py", "delenv", "'JWT_ISSUER'"): _ENV_REASON,

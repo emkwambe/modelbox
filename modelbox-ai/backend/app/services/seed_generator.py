@@ -336,9 +336,10 @@ class SyntheticSeedGenerator:
         if high is None:
             # The widest value the declared precision admits, so a bare
             # NUMERIC(5,2) never produces six digits.
+            # `_precision_scale` returns a scale whenever it returns a precision.
             high = (
                 float(10 ** (precision - scale)) - (10.0 ** -scale)
-                if precision is not None
+                if precision is not None and scale is not None
                 else 10_000.0
             )
         # Contradictory bounds are a lint finding about the model, not ours.
@@ -400,9 +401,9 @@ class SyntheticSeedGenerator:
         for n in range(1, len(taken) + 2):
             suffix = str(n)
             base = value if limit is None else value[: max(0, limit - len(suffix))]
-            candidate = f"{base}{suffix}"
-            if candidate not in taken:
-                return candidate
+            suffixed = f"{base}{suffix}"
+            if suffixed not in taken:
+                return suffixed
         return value  # unsatisfiable within the declared length
 
     def _fit(self, value: object, col: ColumnSchema) -> object:

@@ -22,6 +22,16 @@ from app.schemas.data_model import (
 
 logger = logging.getLogger(__name__)
 
+
+def _snowflake_rows(cursor: Any, sql: str, params: tuple[Any, ...] | None = None) -> Any:
+    """Run ``sql`` on a Snowflake cursor and return the cursor to iterate.
+
+    ``SnowflakeCursor.execute`` returns the cursor itself, but is typed as
+    possibly ``None``; iterating the cursor after executing reads the same rows.
+    """
+    cursor.execute(sql, params)
+    return cursor
+
 # Identifiers that reach introspection SQL (Sprint 7, Step 2.4). BigQuery and
 # Snowflake interpolate them into the statement; Postgres and MySQL bind them.
 # All four drivers check before use, so no driver relies on its caller.
@@ -482,7 +492,7 @@ class IntrospectionService:
         # Interpolated into SHOW ... IN SCHEMA below; check before use.
         require_identifier(schema_name, "schema")
         try:
-            import snowflake.connector as sf  # type: ignore[import-not-found]
+            import snowflake.connector as sf
         except ModuleNotFoundError as exc:
             raise IntrospectionDriverError(
                 "snowflake-connector-python is not installed on the appliance."
@@ -507,7 +517,8 @@ class IntrospectionService:
                 cur = conn.cursor(sf.DictCursor)
                 tables = [
                     _lower_keys(r)["table_name"]
-                    for r in cur.execute(
+                    for r in _snowflake_rows(
+                        cur,
                         "SELECT table_name FROM information_schema.tables "
                         "WHERE table_schema = %s AND table_type = 'BASE TABLE' "
                         "ORDER BY table_name",
@@ -523,7 +534,8 @@ class IntrospectionService:
                         "is_nullable": lr.get("is_nullable"),
                         "default": lr.get("column_default"),
                     }
-                    for r in cur.execute(
+                    for r in _snowflake_rows(
+                        cur,
                         "SELECT table_name, column_name, data_type, "
                         "ordinal_position, is_nullable, column_default "
                         "FROM information_schema.columns "
@@ -543,18 +555,16 @@ class IntrospectionService:
                     # Snowflake declares but does not enforce UNIQUE. It is
                     # still the modeller's stated intent, so it is read and
                     # carried; what Snowflake will not do is police it.
-                    for r in cur.execute(
-                        f"SHOW UNIQUE KEYS IN SCHEMA {schema_name}"
-                    ):
+                    for r in _snowflake_rows(cur, f"SHOW UNIQUE KEYS IN SCHEMA {schema_name}"):
                         lr = _lower_keys(r)
                         unique_columns.add((lr["table_name"], lr["column_name"]))
                 except Exception:  # noqa: BLE001 - constraints are best-effort
                     unique_columns = set()
                 try:
-                    for r in cur.execute(f"SHOW PRIMARY KEYS IN SCHEMA {schema_name}"):
+                    for r in _snowflake_rows(cur, f"SHOW PRIMARY KEYS IN SCHEMA {schema_name}"):
                         lr = _lower_keys(r)
                         primary_keys.add((lr["table_name"], lr["column_name"]))
-                    for r in cur.execute(f"SHOW IMPORTED KEYS IN SCHEMA {schema_name}"):
+                    for r in _snowflake_rows(cur, f"SHOW IMPORTED KEYS IN SCHEMA {schema_name}"):
                         lr = _lower_keys(r)
                         foreign_keys.append(
                             {
@@ -631,8 +641,8 @@ class IntrospectionService:
         project = require_identifier(project, "BigQuery project", _BIGQUERY_PROJECT)
 
         try:
-            from google.cloud import bigquery  # type: ignore[import-not-found]
-            from google.oauth2 import service_account  # type: ignore[import-not-found]
+            from google.cloud import bigquery
+            from google.oauth2 import service_account
         except ModuleNotFoundError as exc:
             raise IntrospectionDriverError(
                 "google-cloud-bigquery is not installed on the appliance."
@@ -732,7 +742,7 @@ class IntrospectionService:
         require_identifier(schema, "schema")
 
         try:
-            import aiomysql  # type: ignore[import-not-found]
+            import aiomysql
         except ModuleNotFoundError as exc:
             raise IntrospectionDriverError(
                 "aiomysql is not installed on the appliance."

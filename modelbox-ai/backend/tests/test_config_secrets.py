@@ -145,6 +145,32 @@ def test_development_keeps_the_defaults() -> None:
     assert settings.jwt_secret == DEFAULT_JWT_SECRET
 
 
+def _check_unset_database_url_refused(cls: type[Settings]) -> None:
+    """The check, shared by the test and its negative control."""
+    with pytest.raises(ValidationError) as excinfo:
+        cls(  # type: ignore[call-arg]
+            _env_file=None,
+            environment="production",
+            jwt_secret=GOOD_JWT_SECRET,
+            encryption_key=GOOD_ENCRYPTION_KEY,
+        )
+    assert "POSTGRES_PASSWORD (the password in DATABASE_URL) is the shipped default" in str(
+        excinfo.value
+    )
+
+
+def test_an_unset_database_url_is_refused_as_the_shipped_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With DATABASE_URL unset, the shipped default DSN is refused by name.
+
+    The other cases pass a DSN; this is the path an operator who forgot the
+    variable takes, through the field's own default.
+    """
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    _check_unset_database_url_refused(Settings)
+
+
 # --- Negative controls -------------------------------------------------------
 #
 # Pydantic compiles validators into the class when it is created, so patching
@@ -186,6 +212,14 @@ def test_negative_control_without_the_validator_the_check_fails(
 ) -> None:
     with pytest.raises(pytest.fail.Exception, match="DID NOT RAISE"):
         _check_refuses(_Unguarded, "production", override, reason, value)
+
+
+def test_negative_control_an_unset_database_url_without_the_validator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(pytest.fail.Exception, match="DID NOT RAISE"):
+        _check_unset_database_url_refused(_Unguarded)
 
 
 @pytest.mark.parametrize(("override", "reason", "value"), REFUSALS)

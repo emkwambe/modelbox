@@ -15,7 +15,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 
 from app.api.v1.dependencies import SessionDep, require_listed_workspaces
 from app.models.metadata_store import EgressAudit
@@ -71,7 +71,7 @@ async def list_egress_events(
     if not ws_ids:
         return EgressLedgerPage(events=[], total=0, unattributed=unattributed)
 
-    filters = [EgressAudit.workspace_id.in_(ws_ids)]
+    filters: list[ColumnElement[bool]] = [EgressAudit.workspace_id.in_(ws_ids)]
     if provider:
         filters.append(EgressAudit.provider == provider)
     if event:
