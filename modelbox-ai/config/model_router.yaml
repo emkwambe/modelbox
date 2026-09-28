@@ -1,7 +1,7 @@
 # =============================================================================
 # ModelBox AI — Task-Based LLM Model Router
-# Consumed by the LiteLLM gateway (berriai/litellm) and the backend
-# services.llm_gateway orchestrator. See Blueprint §3 and PRD/TRD FR-5.
+# Consumed by the backend's in-process gateway, services.llm_gateway, which
+# calls providers through the LiteLLM library. See Blueprint §3 and PRD/TRD FR-5.
 #
 # Providers cover the full FR-5.2 matrix: OpenAI, Anthropic, Google Gemini,
 # Mistral (EU sovereign), and local/air-gapped runtimes (Ollama, vLLM).

@@ -2,8 +2,9 @@
 # ModelBox AI — "The Box" Appliance
 # Single-node, ready-to-run container environment.
 #   modelbox-ui        Next.js web UI
-#   modelbox-backend   FastAPI modeling engine
-#   litellm-proxy      Unified LLM routing gateway
+#   modelbox-backend   FastAPI modeling engine; its in-process gateway is the
+#                      only path to a model provider
+#   modelbox-worker    Celery worker for synthesis jobs (same image, same gateway)
 #   postgres-db        PostgreSQL 16 metadata store
 #   redis-cache        Redis 7 cache / task broker
 #   ollama-engine      Optional local inference (air-gapped / offline)
@@ -48,7 +49,6 @@ services:
       - REDIS_URL=redis://redis-cache:6379/0
       - CELERY_BROKER_URL=redis://redis-cache:6379/1
       - CELERY_RESULT_BACKEND=redis://redis-cache:6379/1
-      - LLM_GATEWAY_URL=http://litellm-proxy:4000
       - MODEL_ROUTER_CONFIG_PATH=/app/config/model_router.yaml
       # Allow the web UI origin(s). JSON array form (pydantic-settings decodes
       # list fields from env as JSON). UI may run on 3000 or remapped (13000).
@@ -93,15 +93,13 @@ services:
     env_file:
       - ../.env
     volumes:
-      # Give the backend read access to the same router config as the gateway.
+      # The task router the in-process gateway reads.
       - ../config/model_router.yaml:/app/config/model_router.yaml:ro
     depends_on:
       postgres-db:
         condition: service_healthy
       redis-cache:
         condition: service_healthy
-      litellm-proxy:
-        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
       interval: 15s
@@ -156,21 +154,6 @@ services:
         condition: service_healthy
       redis-cache:
         condition: service_healthy
-    restart: unless-stopped
-
-  litellm-proxy:
-    image: ghcr.io/berriai/litellm:main-v1.45.0
-    ports:
-      - "4000:4000"
-    volumes:
-      # LiteLLM proxy reads its own model_list config (not model_router.yaml).
-      - ../config/litellm_config.yaml:/app/config.yaml:ro
-    # Same reason as the backend and worker: interpolation resolved these to
-    # empty strings under the documented install, so the proxy's model_list
-    # authenticated with nothing.
-    env_file:
-      - ../.env
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
     restart: unless-stopped
 
   postgres-db:

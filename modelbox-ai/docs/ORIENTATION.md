@@ -100,7 +100,8 @@ fixtures, never transcribed, with a drift guard.
 
 `config/model_router.yaml` is where the governance model is actually declared —
 see §4. `docker/docker-compose.appliance.yml` defines UI, backend, worker,
-LiteLLM proxy, Postgres 16, Redis 7, and an `airgap`-profiled Ollama engine.
+Postgres 16, Redis 7, and an `airgap`-profiled Ollama engine. (A LiteLLM proxy
+service was removed in Sprint 7; the gateway is in-process.)
 Image tags and `backend/app/__version__.py` are both `1.9.0`, and a CI job
 enforces that they agree.
 

@@ -88,10 +88,8 @@ class Settings(BaseSettings):
     db_max_overflow: int = 20
 
     # --- LLM gateway & governance --------------------------------------------
-    llm_gateway_url: str = Field(
-        default="http://localhost:4000",
-        description="Base URL of the LiteLLM routing gateway.",
-    )
+    # The gateway is in-process (app.services.llm_gateway); there is no
+    # separate routing service and so no gateway URL to configure.
     model_router_config_path: str = Field(
         default="/app/config/model_router.yaml",
         description="Path to the task-based model router YAML.",

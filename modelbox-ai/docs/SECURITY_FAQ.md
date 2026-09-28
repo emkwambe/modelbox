@@ -171,9 +171,10 @@ security document.
   different thing and should not be read as a substitute.
 - **No claim about provider-side retention.** Where your prompt goes after it
   reaches a provider is governed by that provider's terms. The
-  `enforce_zero_retention` setting in the router config expresses an intent to
-  the proxy layer; it is **not** something this appliance can verify, and it must
-  not be read as a guarantee about a third party.
+  `enforce_zero_retention` setting in the router config records an intent and
+  is read by no code in this appliance; it is **not** something this appliance
+  can enforce or verify, and it must not be read as a guarantee about a third
+  party.
 - **Preview dialects are labelled, not certified.** Three SQL dialects and
   LookML are marked Preview in the export UI and excluded from the artifact
   fidelity burn-down.

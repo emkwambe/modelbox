@@ -145,7 +145,7 @@ def test_every_modelbox_env_var_binds_to_a_real_setting(service: str) -> None:
 # the one that would be reintroduced by someone "restoring" the explicit list:
 # `environment:` overrides `env_file:`, so an empty-defaulting entry there
 # silently wins over the file.
-KEY_SERVICES = ("modelbox-backend", "modelbox-worker", "litellm-proxy")
+KEY_SERVICES = ("modelbox-backend", "modelbox-worker")
 PROVIDER_KEY_SUFFIX = "_API_KEY"
 
 

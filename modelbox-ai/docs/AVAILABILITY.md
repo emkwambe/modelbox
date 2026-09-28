@@ -24,7 +24,7 @@ does not:
 | `postgres-db` | **All of it.** Users, workspaces, models, entities, columns, relationships, jobs, connections, API keys, trainer progress, the egress ledger, the audit trail | Everything. This is the backup target |
 | `ollama-engine` (air-gap only) | Downloaded model weights | Re-pullable, but not over an air gap — treat as a restore input, not as data |
 | `redis-cache` | Job queue and cache | Nothing durable. In-flight synthesis jobs are lost and must be re-run |
-| `modelbox-api`, `modelbox-worker`, `modelbox-ui`, `litellm-proxy` | None | Nothing |
+| `modelbox-api`, `modelbox-worker`, `modelbox-ui` | None | Nothing |
 
 So the recovery question is a single question: **can `postgres-db` be restored
 from a dump into a new volume, at a revision the application will start
