@@ -1,6 +1,6 @@
-# ModelBox AI — v1.10.0 Release Notes
+# ModelBox AI — v1.10.0: Unreleased — superseded by v1.11.0
 
-**Tag:** `v1.10.0`  ·  **Sprint:** 5 — governance that holds
+**Tag:** none. `v1.10.0` was never tagged; its changes ship in v1.11.0.  ·  **Sprint:** 5 — governance that holds
 
 **This is the release where the appliance can be asked what it did.** v1.9.0
 could say "our exports run". This one says: nothing reaches a model provider

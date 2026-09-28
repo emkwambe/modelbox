@@ -685,13 +685,45 @@ F2 has screens left — and a tag would claim a close that has not happened.
 
 ---
 
+## Sprint 6.5 — enterprise access
+
+*Recorded 2026-09-28, after the fact. The work landed on this branch on
+2026-09-02, from `c862268` to `1ec16eb`, and this file was not updated at those
+commit boundaries. Each line below is taken from the commit that did the work,
+not reconstructed. Status is as those commits recorded it; the register, not
+this file, carries current status.*
+
+| Criterion | Commit | Recorded as | Evidence the commit states |
+| :-- | :-- | :-- | :-- |
+| — | `c862268` | criteria G8–G12 added to the register | — |
+| G11 — audit-log export | `c200e6d` | MET | JSONL export; `DENIED` distinct from `FAILURE`; attribution survives deleting the actor. Mutations: an admin gate downgraded to membership, and a removed record separator, each fail by name |
+| G10 — roles at the API | `05c2a6a` | MET | `VIEWER` and `APPROVER` added to the ladder with no row changing value; approval written to the audit trail. Mutation: approval gate downgraded to `MEMBER` fails the matrix row and the refused-approval test |
+| G12 — availability position | `2a58597` | MET | `docs/AVAILABILITY.md`; `scripts/verify_restore.py` destroys the volume and restores, checking a marker row and the Alembic revision. Run 2026-09-02 at `0017`: RESTORE VERIFIED, exit 0 |
+| G8a — OIDC subject to user | `e8c16cc` | part of G8 | linked on (issuer, subject), never email; provisioning gated on an issuer allowlist that is empty by default; no workspace granted on provisioning |
+| G8b — JWKS rotation | `acca016` | part of G8 | JWKS cached by `kid`, one refetch per cooldown, and a failed fetch never empties the cache. Mutation: replacing rather than merging fetched keys survived the first seven tests and is now killed by name |
+| G9 — SCIM de-provisioning | `1ec16eb` | MET | asserted by using the credential: the key works, the IdP deletes, the key returns 401. Both `PATCH active=false` shapes covered. Mutations: keys left in place, and `PATCH` ignored, each fail |
+| G8 — SSO | `1ec16eb` | **NOT MET** | the criterion named SAML 2.0 and OIDC, and only OIDC existed; no partial credit |
+
+Also in the range: `ed6b88d` and `f698781` extended the PL-id guard to every
+Markdown and HTML marketing surface (mutation: a citation changed to `PL-099`
+fails by name); `19c0b9d` replaced a mount flag with a three-state
+`useAuthStatus` on five screens; `76f5711` ignored the root-level npm stub lock.
+
+Suites across the range: app 746 → **811 passed**; frontend 32 files / 341 →
+**33 / 347**; Alembic single head at `0019`; Ruff 69 → **47**, of which 21 were
+repaired by `ruff --fix` in `c200e6d` and checked against an unchanged suite
+before the new tests were added.
+
+---
+
 ## Carried, and why each is still open
 
 | Item | Why it is open |
 | :-- | :-- |
 | **D10** — two conformance runs | Instrument is repaired and verified; the runs need a provider opt-in and a spend decision. The cloud half must pin `claude-sonnet-4-5-20250929` to isolate the metric change from a model change |
-| **F4** — everything | Needs a synthetic N-entity fixture before any measurement is possible |
-| **Task 7** — linter-feedback repair | `synthesis_engine.py:150-159` computes the report, logs a count, discards the issues |
+| ~~**F4** — synthetic N-entity fixture~~ | **Closed 2026-09-01** — `d454288`, see the Task 2 entry |
+| **F4** — virtualisation, history cost, recorded browser benchmark | Not started. The benchmark comes first, or nothing can say the rest helped (Task 2 entry) |
+| ~~**Task 7** — linter-feedback repair~~ | **Closed 2026-09-01** — `9c8c54a`, see the Task 7 entry. Whether the pass fires on real provider output is a D10 question, taken up later on this branch (`7385ce9`, `8001975`) and not recorded in this file |
 | ~~Two Docker-backed migration gates~~ | **Closed 2026-09-01** — 9 passed under Docker 29.6.1 |
 | Data dictionary fidelity gate | Does not exist; three formats held at `UNVERIFIED` because of it |
 | Violet-600 tier label | Needs a design decision, not a conversion (`colour.walk.test.ts:73-74`) |
@@ -702,15 +734,14 @@ F2 has screens left — and a tag would claim a close that has not happened.
 
 ## Mutation results
 
-*None yet this sprint. Recorded here as an absence rather than omitted: Sprint 5
-carried a mutation table per task, and the register's standard is that a test
-which cannot be shown to fail for the right reason has not been shown to work.*
+*This section read "none yet" when the file opened. Both candidates it named
+were run when their tasks landed, and the results are in the log entries rather
+than repeated here:*
 
-The two candidates already identified, to be run when their tasks land:
+* **F4 render-count invariant** — run in `d454288`. Reverting the `issues`
+  selector returns the count to 500 and fails two assertions; reverting the
+  `selectedColumn` subscription fails one. See the Task 2 entry.
+* **Task 7 repair pass** — run in `9c8c54a`. Removing the acceptance gate and
+  bypassing the allowlist are each killed. See the Task 7 entry.
 
-* **F4 render-count invariant** — revert the `EntityNode` selector fix and the
-  count must return to 500. If it does not, the test is measuring something
-  else.
-* **Task 7 repair pass** — feed back a report with zero errors and assert no
-  second call is made; feed back a report the model cannot satisfy and assert
-  the original model is kept rather than a worse one.
+Sprint 6.5's mutations are listed with their criteria in the Sprint 6.5 section.

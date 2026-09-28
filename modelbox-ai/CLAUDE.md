@@ -119,6 +119,10 @@ Two lessons, and the second is the general one:
   and CI would have caught it the first time; nothing ran because nothing left
   the laptop. Push early enough that CI can disagree with you.
 
+**After every branch switch, delete `frontend/.next` before running `tsc` or
+`next build`.** Generated route type stubs survive a checkout, so `tsc` fails
+on routes that exist only on the previous branch.
+
 ## The fidelity harness
 
 `backend/tests/test_artifact_fidelity.py` asserts artifacts against the tools

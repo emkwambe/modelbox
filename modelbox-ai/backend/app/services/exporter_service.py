@@ -307,8 +307,8 @@ class ExporterService:
         redirected on dbt Hub and resolving it raises PackageRedirectDeprecation
         — twice, because its own transitive `dbt_date` is redirected too, which
         is inside the upstream package and not ours to fix. Verified against
-        dbt 1.11.12 on 2026-08-11: `metaplane/dbt_expectations` 0.10.10 pulls
-        `godatadriven/dbt_date` 0.19.0 and resolves with zero deprecations,
+        dbt 1.11.12 on 2026-09-01: `metaplane/dbt_expectations` 0.10.10 pulls
+        `godatadriven/dbt_date` 0.21.0 and resolves with zero deprecations,
         which is what keeps B12 reachable for a project with quality rules.
         `scripts/refresh_dbt_packages.py` is the gate that enforces it — the
         deprecations fire against the registry, so no offline check can see them.
