@@ -31,10 +31,20 @@ import shutil
 import socket
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
+import yaml
 
 DOCKER = shutil.which("docker")
+
+# The Postgres the appliance ships, read from its compose file rather than
+# restated, so the migration gates run against exactly the pinned image and
+# cannot drift to a floating tag.
+_COMPOSE = Path(__file__).resolve().parents[2] / "docker" / "docker-compose.appliance.yml"
+POSTGRES_IMAGE: str = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))["services"][
+    "postgres-db"
+]["image"]
 
 
 def published_port(container: str, container_port: int = 5432) -> str:
@@ -90,4 +100,4 @@ def assert_reachable_from_host(port: str, timeout_seconds: int = 30) -> None:
     )
 
 
-__all__ = ["DOCKER", "assert_reachable_from_host", "published_port"]
+__all__ = ["DOCKER", "POSTGRES_IMAGE", "assert_reachable_from_host", "published_port"]

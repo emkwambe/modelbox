@@ -36,9 +36,16 @@ import time
 import uuid
 from pathlib import Path
 
+import yaml
+
 _BACKEND = Path(__file__).resolve().parents[1]
 
-IMAGE = "postgres:16-alpine"
+# The Postgres the appliance ships, read from its compose file so a restore is
+# verified against exactly the pinned image rather than a restated tag.
+_COMPOSE = _BACKEND.parent / "docker" / "docker-compose.appliance.yml"
+IMAGE: str = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))["services"][
+    "postgres-db"
+]["image"]
 CONTAINER = "modelbox-restore-test"
 VOLUME = "modelbox-restore-test-data"
 PASSWORD = "restoretest"

@@ -32,7 +32,11 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests._docker_postgres import assert_reachable_from_host, published_port
+from tests._docker_postgres import (
+    POSTGRES_IMAGE,
+    assert_reachable_from_host,
+    published_port,
+)
 
 # Imported rather than copied. `_upgrade_to` carries the M1 fix — it resolves
 # what `head` actually is and asserts the database reports it — and a second
@@ -82,7 +86,7 @@ def postgres_dsn() -> str:
         [DOCKER, "run", "-d", "--name", name,
          "-e", "POSTGRES_PASSWORD=verify", "-e", "POSTGRES_USER=verify",
          "-e", "POSTGRES_DB=verify", "-p", "0:5432",
-         "postgres:16-alpine"],
+         POSTGRES_IMAGE],
         check=True, capture_output=True, text=True,
     )
     try:

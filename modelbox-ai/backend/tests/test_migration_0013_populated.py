@@ -36,7 +36,11 @@ from pathlib import Path
 
 import pytest
 
-from tests._docker_postgres import assert_reachable_from_host, published_port
+from tests._docker_postgres import (
+    POSTGRES_IMAGE,
+    assert_reachable_from_host,
+    published_port,
+)
 
 BACKEND = Path(__file__).resolve().parents[1]
 REPO = BACKEND.parents[1]
@@ -95,7 +99,7 @@ def postgres_dsn() -> str:
         [DOCKER, "run", "-d", "--name", name,
          "-e", "POSTGRES_PASSWORD=verify", "-e", "POSTGRES_USER=verify",
          "-e", "POSTGRES_DB=verify", "-p", "0:5432",
-         "postgres:16-alpine"],
+         POSTGRES_IMAGE],
         check=True, capture_output=True, text=True,
     )
     try:

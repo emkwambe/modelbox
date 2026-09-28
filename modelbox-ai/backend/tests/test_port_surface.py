@@ -92,37 +92,77 @@ def test_no_build_time_api_url_remains() -> None:
     assert not found, f"NEXT_PUBLIC_API_URL is still set or read in {found}"
 
 
-_DIGEST_PINNED = re.compile(r"^ollama/ollama:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$")
+# `<repo>:<numeric version>[-suffix]@sha256:<64 hex>`. A version with no digest
+# can be re-pushed; a digest with no version cannot be read.
+_DIGEST_PINNED = re.compile(r"^[a-z0-9./_-]+:\d+\.\d+(\.\d+)?(-[a-z0-9]+)?@sha256:[0-9a-f]{64}$")
+
+# Services that pull someone else's image rather than building ours.
+PULLED = {"ollama-engine", "postgres-db", "redis-cache"}
 
 
-def _check_ollama_is_pinned(spec: dict[str, Any]) -> None:
-    image = str(spec["services"]["ollama-engine"]["image"])
-    assert _DIGEST_PINNED.fullmatch(image), (
-        f"ollama-engine is {image!r}; it must be ollama/ollama:<version>@sha256:<digest>"
+def _pulled(spec: dict[str, Any]) -> dict[str, str]:
+    return {
+        name: str(service["image"])
+        for name, service in spec["services"].items()
+        if "image" in service and "build" not in service
+    }
+
+
+def _check_pulled_images_are_pinned(spec: dict[str, Any]) -> None:
+    unpinned = {
+        name: image for name, image in _pulled(spec).items() if not _DIGEST_PINNED.fullmatch(image)
+    }
+    assert not unpinned, (
+        f"pulled images must be <repo>:<version>@sha256:<digest>; unpinned: {unpinned}"
     )
 
 
-def test_the_ollama_image_is_pinned_by_digest() -> None:
-    _check_ollama_is_pinned(APPLIANCE)
+def test_the_pulled_services_are_the_expected_three() -> None:
+    """Precondition: a new pulled service would otherwise be covered silently."""
+    assert set(_pulled(APPLIANCE)) == PULLED
+
+
+def test_every_pulled_image_is_pinned_by_version_and_digest() -> None:
+    _check_pulled_images_are_pinned(APPLIANCE)
+
+
+def test_the_migration_gates_and_restore_script_use_the_shipped_postgres() -> None:
+    """They exist to exercise the Postgres the appliance ships, so no restated tag."""
+    from scripts import verify_restore
+    from tests._docker_postgres import POSTGRES_IMAGE
+
+    shipped = APPLIANCE["services"]["postgres-db"]["image"]
+    assert POSTGRES_IMAGE == shipped
+    assert verify_restore.IMAGE == shipped
 
 
 # --- Negative controls -------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "image",
+    ("service", "image"),
     [
-        "ollama/ollama:latest",
-        "ollama/ollama:0.34.4",
-        "ollama/ollama@sha256:" + "0" * 64,
+        ("ollama-engine", "ollama/ollama:latest"),
+        ("ollama-engine", "ollama/ollama:0.34.4"),
+        ("ollama-engine", "ollama/ollama@sha256:" + "0" * 64),
+        ("postgres-db", "postgres:16-alpine"),
+        ("postgres-db", "postgres:16.15-alpine"),
+        ("postgres-db", "postgres@sha256:" + "0" * 64),
+        ("redis-cache", "redis:7-alpine"),
+        ("redis-cache", "redis:7.4.11-alpine"),
+        ("redis-cache", "redis@sha256:" + "0" * 64),
     ],
-    ids=["latest", "tag-only", "digest-without-version"],
+    ids=[
+        "ollama-latest", "ollama-tag-only", "ollama-digest-only",
+        "postgres-floating", "postgres-tag-only", "postgres-digest-only",
+        "redis-floating", "redis-tag-only", "redis-digest-only",
+    ],
 )
-def test_negative_control_an_unpinned_ollama_fails_the_check(image: str) -> None:
+def test_negative_control_an_unpinned_image_fails_the_check(service: str, image: str) -> None:
     spec = copy.deepcopy(APPLIANCE)
-    spec["services"]["ollama-engine"]["image"] = image
-    with pytest.raises(AssertionError, match="ollama-engine is"):
-        _check_ollama_is_pinned(spec)
+    spec["services"][service]["image"] = image
+    with pytest.raises(AssertionError, match=service):
+        _check_pulled_images_are_pinned(spec)
 
 
 @pytest.mark.parametrize(
