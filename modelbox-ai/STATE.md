@@ -1,6 +1,6 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-28 on `sprint-7/secure-by-default` at `454c219`. This file is rewritten at
+*Regenerated 2026-09-28 on `sprint-7/secure-by-default` at `00f6f11`. This file is rewritten at
 every stop, merge, deploy and tag; a figure here is the output of a command run
 for it, not a copy from another document.*
 
@@ -10,7 +10,7 @@ for it, not a copy from another document.*
 | :-- | :-- | :-- |
 | `main` | `49d268c` | README and home page claims narrowed (#6); `dbt_date` 0.21.0 lock (#7) |
 | `sprint/6-product-experience` | `8001975` | Sprints 5, 6 and 6.5; never merged to `main` |
-| `sprint-7/secure-by-default` | `454c219` | cut from `8001975`, `origin/main` merged in; pushed, CI green at `454c219` (run 36479585210) |
+| `sprint-7/secure-by-default` | `00f6f11` | cut from `8001975`, `origin/main` merged in; pushed, CI green at `00f6f11` (run 36483722964) |
 
 Migration head: `0022_append_only_ledgers`.
 
@@ -40,6 +40,7 @@ vocabulary with an appliance owner, append-only ledgers with a
 least-privilege database role, a populated upgrade from 0015 to head with the
 ORM checked against the migrated Postgres schema, and a gateway that classifies
 provider failures by their cause and records every provider request, schema
-re-asks included, as its own ledger attempt. CI runs per commit on
+re-asks included, as its own ledger attempt, describing a failure without
+quoting the model's output in the ledger, the logs or its errors. CI runs per commit on
 ubuntu-24.04. Breaking changes and upgrade steps are in
 `docs/RELEASE_NOTES_v1.11.0.draft.md`.
