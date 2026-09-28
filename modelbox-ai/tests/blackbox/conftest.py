@@ -28,6 +28,8 @@ environment, never on a command line and never in a message.
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import subprocess
 import time
@@ -178,25 +180,84 @@ def base_url() -> str:
     return f"http://localhost:{read_env().get('UI_PORT', '3000')}"
 
 
+# Runs inside the UI container: one request to the UI's own port, with Node's
+# fetch, returned as JSON. The body travels base64 both ways.
+_FETCH_JS = r"""
+let raw = '';
+process.stdin.on('data', (c) => (raw += c)).on('end', async () => {
+  const r = JSON.parse(raw);
+  try {
+    const res = await fetch(r.url, {
+      method: r.method, headers: r.headers,
+      body: r.body ? Buffer.from(r.body, 'base64') : undefined,
+    });
+    const body = Buffer.from(await res.arrayBuffer()).toString('base64');
+    process.stdout.write(JSON.stringify({ status: res.status, headers: Object.fromEntries(res.headers), body }));
+  } catch (e) {
+    process.stdout.write(JSON.stringify({ error: String(e) }));
+  }
+});
+"""
+
+# Set by fetch itself, or describing an encoding fetch has already undone.
+_HOP_HEADERS = {"host", "content-length", "connection", "accept-encoding", "transfer-encoding"}
+
+
+class ExecTransport(httpx.BaseTransport):
+    """HTTP to the UI's own port, sent from inside the UI container.
+
+    Configuration C only (see tests/blackbox/compose/egress-deny.yml): the same
+    front door and the same /api forwarding, reached over `docker compose
+    exec` instead of the host port.
+    """
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        payload = {
+            "method": request.method,
+            "url": f"http://127.0.0.1:3000{request.url.raw_path.decode()}",
+            "headers": {k: v for k, v in request.headers.items() if k.lower() not in _HOP_HEADERS},
+            "body": base64.b64encode(request.read()).decode() if request.content else None,
+        }
+        done = compose(
+            "exec", "-T", "modelbox-ui", "node", "-e", _FETCH_JS, input_text=json.dumps(payload)
+        )
+        if done.returncode != 0 or not done.stdout:
+            raise httpx.ConnectError(f"exec transport: exit {done.returncode}", request=request)
+        reply = json.loads(done.stdout)
+        if "error" in reply:
+            raise httpx.ConnectError(f"exec transport: {reply['error']}", request=request)
+        headers = {k: v for k, v in reply["headers"].items() if k.lower() not in _HOP_HEADERS | {"content-encoding"}}
+        return httpx.Response(
+            reply["status"], headers=headers, content=base64.b64decode(reply["body"]), request=request
+        )
+
+
+def new_client() -> httpx.Client:
+    if PROFILE == "egress-deny":
+        return httpx.Client(base_url="http://appliance", transport=ExecTransport(), timeout=30)
+    return httpx.Client(base_url=base_url(), timeout=30)
+
+
 def wait_for_health(timeout_seconds: int = 240) -> dict:
     deadline = time.time() + timeout_seconds
     last = ""
-    while time.time() < deadline:
-        try:
-            response = httpx.get(f"{base_url()}/api/health", timeout=5)
-            if response.status_code == 200:
-                return response.json()
-            last = f"HTTP {response.status_code}"
-        except httpx.HTTPError as exc:
-            last = type(exc).__name__
-        time.sleep(3)
+    with new_client() as probe:
+        while time.time() < deadline:
+            try:
+                response = probe.get("/api/health", timeout=5)
+                if response.status_code == 200:
+                    return response.json()
+                last = f"HTTP {response.status_code}"
+            except httpx.HTTPError as exc:
+                last = f"{type(exc).__name__}: {exc}"
+            time.sleep(3)
     raise AssertionError(f"the appliance never answered /api/health: {last}")
 
 
 @pytest.fixture(scope="session")
 def client() -> Iterator[httpx.Client]:
     wait_for_health()
-    with httpx.Client(base_url=base_url(), timeout=30) as c:
+    with new_client() as c:
         yield c
 
 
