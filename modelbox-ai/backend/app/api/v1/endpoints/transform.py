@@ -13,6 +13,7 @@ from app.schemas.data_model import (
     TransformParadigmRequest,
     TransformParadigmResponse,
 )
+from app.services.paradigm_translator import ModelApprovedError, TransformLintError
 
 router = APIRouter(prefix="/model", tags=["transform"])
 
@@ -31,13 +32,27 @@ async def transform_paradigm(
     """Transform an existing model graph into a new paradigm (FR-3, TRD §2.4).
 
     MEMBER+: it replaces the model's graph and calls a model provider.
+
+    409 if the model's current version is approved; 422 if the transformed
+    graph has linter errors. Either way the stored graph is unchanged.
     """
-    result = await translator.transform(
-        model.model_id,
-        payload,
-        user_id=user.user_id,
-        workspace_id=model.workspace_id,
-    )
+    try:
+        result = await translator.transform(
+            model.model_id,
+            payload,
+            user_id=user.user_id,
+            workspace_id=model.workspace_id,
+        )
+    except ModelApprovedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except TransformLintError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "message": str(exc),
+                "errors": [issue.model_dump() for issue in exc.errors],
+            },
+        ) from exc
     if result is None:  # pragma: no cover - AuthorizedModelDep already checked
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Model not found."

@@ -62,6 +62,14 @@ Listings (models, connections, assignments, API keys, egress) return only the
 workspaces where the caller holds the listed role; naming another workspace is
 a 403. `GET /api/v1/export/status` now requires sign-in.
 
+### Paradigm transformation refuses two cases
+
+`POST /api/v1/model/{id}/transform-paradigm` now returns **409** when the
+model's current version has a recorded approval (sign-off covers the version
+signed; any edit lapses it), and **422** with the linter's error codes when the
+transformed graph has linter errors. In both cases the stored graph is
+unchanged.
+
 ### The LiteLLM proxy service is removed
 
 `litellm-proxy` (port 4000), `config/litellm_config.yaml` and `LLM_GATEWAY_URL`
