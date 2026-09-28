@@ -111,8 +111,11 @@ Automate ModelBox from pipelines and agents.
 1. Go to **API keys** (`/settings/api-keys`).
 2. **Generate key** with a name. Copy the `mb_live_...` secret shown **once**.
 3. Store it as a CI secret. Send it as an `X-API-Key` header — no interactive
-   login. The key authenticates as its creating user and inherits that user's
-   RBAC. Revoke anytime from the same page.
+   login. The key acts as its creating user, but only in its own workspace and
+   only up to its cap: VIEWER unless a higher cap was chosen at creation via the
+   API (`role_cap`), never above the creator's own role, and never above the
+   creator's role *today*. A key cannot create keys. Revoke anytime from the
+   same page.
 
 ```bash
 # Example: export a data contract in CI

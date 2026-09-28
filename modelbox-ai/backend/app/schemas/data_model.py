@@ -19,6 +19,7 @@ import datetime
 import enum
 import logging
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -120,6 +121,9 @@ class ApiKeyCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     workspace_id: uuid.UUID | None = None
     expires_at: datetime.datetime | None = None
+    # The most the key may do. Never above the creator's current role, and the
+    # key's effective role is always the lower of the two on each request.
+    role_cap: Literal["VIEWER", "MEMBER", "APPROVER", "ADMIN", "OWNER"] = "VIEWER"
 
 
 class ApiKeyInfo(BaseModel):
@@ -131,6 +135,7 @@ class ApiKeyInfo(BaseModel):
     workspace_id: uuid.UUID
     name: str
     key_prefix: str
+    role_cap: str
     created_at: datetime.datetime
     expires_at: datetime.datetime | None = None
     last_used_at: datetime.datetime | None = None

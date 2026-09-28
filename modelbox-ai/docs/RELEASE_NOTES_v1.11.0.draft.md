@@ -74,6 +74,21 @@ Listings (models, connections, assignments, API keys, egress) return only the
 workspaces where the caller holds the listed role; naming another workspace is
 a 403. `GET /api/v1/export/status` now requires sign-in.
 
+### API keys are scoped to their workspace and capped; existing keys become VIEWER
+
+A key now acts only in the workspace it was created for (another workspace is
+403), and at the lower of its `role_cap` and its creator's current role,
+re-read on every request. A key cannot create keys.
+
+`POST /api/v1/auth/api-keys` takes an optional `role_cap` (`VIEWER`, `MEMBER`,
+`APPROVER`, `ADMIN`, `OWNER`). It defaults to `VIEWER` and may not exceed the
+creator's own role in that workspace.
+
+**Every existing key is set to `VIEWER` by the upgrade** (migration `0020`).
+A pipeline that synthesizes, edits or administers with a key will get 403
+after upgrading. **Recreate any key that needs more**, passing the `role_cap`
+it needs, and revoke the old one.
+
 ### Paradigm transformation refuses two cases
 
 `POST /api/v1/model/{id}/transform-paradigm` now returns **409** when the

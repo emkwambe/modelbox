@@ -12,7 +12,10 @@ Every endpoint except registration/login and `/health` requires authentication. 
 
 - **Session JWT** — `Authorization: Bearer <token>` (from `POST /auth/token`).
 - **API key** — `X-API-Key: mb_live_...` (from `POST /auth/api-keys`), for
-  CI/CD pipelines and agents. A key authenticates as its creating user.
+  CI/CD pipelines and agents. A key acts as its creating user within its own
+  workspace only, at the lower of its `role_cap` (default `VIEWER`; set at
+  creation, never above the creator's role) and the creator's current role,
+  re-read on every request. A key cannot create keys.
 
 ```bash
 # Session token

@@ -493,14 +493,19 @@ class DatabaseConnection(Base):
 class ApiKey(Base):
     """A programmatic API key (workspace-scoped, SHA-256 hashed at rest).
 
-    Authenticates as its creating user, so it inherits that user's workspace
-    memberships and RBAC. Only the prefix and hash are stored — the plaintext
-    secret is shown once at creation and is unrecoverable thereafter.
+    Authenticates as its creating user, but only in its own workspace and only
+    up to the lower of ``role_cap`` and the creator's current role there, which
+    is re-read on every request. Only the prefix and hash are stored — the
+    plaintext secret is shown once at creation and is unrecoverable thereafter.
     """
 
     __tablename__ = "api_keys"
     __table_args__ = (
         UniqueConstraint("key_hash", name="uq_api_keys_key_hash"),
+        CheckConstraint(
+            "role_cap IN (" + ", ".join(f"'{r}'" for r in WORKSPACE_ROLES) + ")",
+            name="ck_api_keys_role_cap",
+        ),
     )
 
     api_key_id: Mapped[uuid.UUID] = _uuid_pk()
@@ -518,6 +523,9 @@ class ApiKey(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     key_prefix: Mapped[str] = mapped_column(String(20), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    role_cap: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="VIEWER", default="VIEWER"
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.current_timestamp(),

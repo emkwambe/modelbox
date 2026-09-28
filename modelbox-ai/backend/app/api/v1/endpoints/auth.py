@@ -10,16 +10,19 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 
 from app.api.v1.dependencies import (
+    _ROLE_LEVEL,
     AuthenticatedDep,
     CurrentUserDep,
     SessionDep,
+    forbid_api_key_principal,
     require_body_workspace_role,
     require_listed_workspaces,
+    require_membership,
     require_resource_role,
 )
 from app.core.config import Settings, get_settings
@@ -159,12 +162,25 @@ async def read_me(user: AuthenticatedDep) -> UserOut:
     summary="Create an API key (ADMIN+); returns the secret ONCE",
 )
 async def create_api_key(
+    request: Request,
     payload: ApiKeyCreateRequest,
     session: SessionDep,
     user: CurrentUserDep,
     workspace_id: Annotated[uuid.UUID, Depends(require_body_workspace_role("ADMIN"))],
 ) -> ApiKeyCreatedResponse:
-    """Mint a workspace API key (ADMIN+). The plaintext secret is shown once here."""
+    """Mint a workspace API key (ADMIN+). The plaintext secret is shown once here.
+
+    A key cannot mint a key. ``role_cap`` defaults to VIEWER and may not exceed
+    the creator's current role in the workspace; on each use the key acts with
+    the lower of its cap and the creator's role at that moment.
+    """
+    forbid_api_key_principal(request)
+    member = await require_membership(session, user.user_id, workspace_id)
+    if _ROLE_LEVEL[payload.role_cap] > _ROLE_LEVEL.get(member.role, 0):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"A key's cap cannot exceed your own role ({member.role}).",
+        )
     plaintext, prefix, key_hash = generate_api_key()
     record = ApiKey(
         workspace_id=workspace_id,
@@ -172,6 +188,7 @@ async def create_api_key(
         name=payload.name,
         key_prefix=prefix,
         key_hash=key_hash,
+        role_cap=payload.role_cap,
         expires_at=payload.expires_at,
     )
     session.add(record)

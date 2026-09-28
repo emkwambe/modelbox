@@ -7,6 +7,7 @@ hosts the authentication + workspace-authorization dependencies (Slice 3A).
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import functools
 import uuid
@@ -75,8 +76,32 @@ _bearer = HTTPBearer(auto_error=False)
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-async def _user_from_api_key(session: AsyncSession, raw_key: str) -> User | None:
-    """Resolve the user behind an ``X-API-Key`` (None if invalid/expired)."""
+@dataclasses.dataclass(frozen=True)
+class Principal:
+    """Who is calling, and within what limits.
+
+    A bearer token is its user, unlimited beyond their memberships. An API key
+    is its creator limited to the key's workspace and to the lower of the
+    key's ``role_cap`` and the creator's current role there, which
+    :func:`_authorize` re-reads on every request.
+    """
+
+    user: User
+    key_workspace_id: uuid.UUID | None = None
+    key_role_cap: str | None = None
+
+    @property
+    def is_api_key(self) -> bool:
+        return self.key_workspace_id is not None
+
+
+def principal_of(request: Request) -> Principal | None:
+    """The principal `get_current_user` recorded for this request."""
+    return getattr(request.state, "principal", None)
+
+
+async def _api_key_record(session: AsyncSession, raw_key: str) -> ApiKey | None:
+    """The live key row behind an ``X-API-Key`` (None if invalid/expired)."""
     record = (
         await session.execute(
             select(ApiKey).where(ApiKey.key_hash == hash_api_key(raw_key))
@@ -95,21 +120,22 @@ async def _user_from_api_key(session: AsyncSession, raw_key: str) -> User | None
 
     record.last_used_at = now
     await session.flush()
-
-    user = await session.get(User, record.user_id)
-    if user is None or not user.is_active:
-        return None
-    return user
+    return record
 
 
 async def get_current_user(
+    request: Request,
     session: SessionDep,
     credentials: Annotated[
         HTTPAuthorizationCredentials | None, Depends(_bearer)
     ],
     api_key: Annotated[str | None, Depends(_api_key_header)] = None,
 ) -> User:
-    """Resolve the caller from a Bearer JWT or an ``X-API-Key`` (401 on failure)."""
+    """Resolve the caller from a Bearer JWT or an ``X-API-Key`` (401 on failure).
+
+    Records the :class:`Principal` on the request, so the authorization
+    dependencies can apply a key's workspace and role cap.
+    """
     unauthorized = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Not authenticated.",
@@ -117,9 +143,15 @@ async def get_current_user(
     )
     # Programmatic access: X-API-Key (for CI/CD pipelines and agents).
     if api_key:
-        user = await _user_from_api_key(session, api_key)
-        if user is None:
+        record = await _api_key_record(session, api_key)
+        if record is None:
             raise unauthorized
+        user = await session.get(User, record.user_id)
+        if user is None or not user.is_active:
+            raise unauthorized
+        request.state.principal = Principal(
+            user=user, key_workspace_id=record.workspace_id, key_role_cap=record.role_cap
+        )
         return user
 
     if credentials is None:
@@ -139,6 +171,7 @@ async def get_current_user(
     user = await federated_identity.resolve(session, payload)
     if user is None or not user.is_active:
         raise unauthorized
+    request.state.principal = Principal(user=user)
     return user
 
 
@@ -241,6 +274,53 @@ async def require_workspace_role(
     return member
 
 
+def key_allows_workspace(principal: Principal | None, workspace_id: uuid.UUID) -> bool:
+    """A key reaches its own workspace only; any other caller is not limited here."""
+    return principal is None or not principal.is_api_key or (
+        principal.key_workspace_id == workspace_id
+    )
+
+
+def effective_role(member_role: str, principal: Principal | None) -> str:
+    """The role a request acts with: a key's is the lower of its cap and the member's."""
+    if principal is None or not principal.is_api_key or principal.key_role_cap is None:
+        return member_role
+    return min(member_role, principal.key_role_cap, key=lambda role: _ROLE_LEVEL.get(role, 0))
+
+
+def _forbidden(detail: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+async def _authorize(
+    request: Request,
+    session: AsyncSession,
+    user: User,
+    workspace_id: uuid.UUID,
+    min_role: str,
+) -> WorkspaceMember:
+    """Assert the caller may act at ``min_role`` in ``workspace_id``.
+
+    The membership row is read on every call, so a key's creator who has been
+    demoted or removed takes the key down with them at once.
+    """
+    principal = principal_of(request)
+    if not key_allows_workspace(principal, workspace_id):
+        raise _forbidden("This API key is scoped to another workspace.")
+    member = await require_membership(session, user.user_id, workspace_id)
+    role = effective_role(member.role, principal)
+    if _ROLE_LEVEL.get(role, 0) < _ROLE_LEVEL.get(min_role, 0):
+        raise _forbidden(f"Action requires minimum role of {min_role}.")
+    return member
+
+
+def forbid_api_key_principal(request: Request) -> None:
+    """Refuse a request authenticated by an API key (key auth cannot mint keys)."""
+    principal = principal_of(request)
+    if principal is not None and principal.is_api_key:
+        raise _forbidden("API keys cannot create API keys. Sign in to create one.")
+
+
 # ---------------------------------------------------------------------------
 # Route authorization (Sprint 7, Step 2)
 # ---------------------------------------------------------------------------
@@ -251,8 +331,11 @@ async def require_workspace_role(
 #
 # Enforcement lives in dependencies rather than in handler bodies because only
 # a dependency is visible to that walk. A check inside a handler cannot be told
-# apart from a missing one without reading the code, which is how
-# `transform-paradigm` shipped checking membership alone.
+# apart from a missing one without reading the code.
+#
+# Every role check goes through `_authorize`, which also applies an API key's
+# limits: its own workspace only, and the lower of its cap and the creator's
+# current role, read from the membership table on every request.
 #
 # The factories are cached per role, so `require_model_role("MEMBER")` is one
 # object everywhere: a test can override exactly the dependency a route uses.
@@ -324,10 +407,10 @@ def require_model_role(min_role: str):
 
     @_declares(min_role, "model")
     async def _checker(
-        model_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
+        request: Request, model_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
     ) -> DataModel:
         model = await _load_model(session, model_id)
-        await require_workspace_role(session, user.user_id, model.workspace_id, min_role)
+        await _authorize(request, session, user, model.workspace_id, min_role)
         return model
 
     _checker.__qualname__ = f"require_model_role({min_role!r})"
@@ -340,11 +423,12 @@ def require_query_workspace_role(min_role: str):
 
     @_declares(min_role, "query")
     async def _checker(
+        request: Request,
         workspace_id: Annotated[uuid.UUID, Query()],
         session: SessionDep,
         user: CurrentUserDep,
     ) -> uuid.UUID:
-        await require_workspace_role(session, user.user_id, workspace_id, min_role)
+        await _authorize(request, session, user, workspace_id, min_role)
         return workspace_id
 
     _checker.__qualname__ = f"require_query_workspace_role({min_role!r})"
@@ -355,9 +439,10 @@ def require_query_workspace_role(min_role: str):
 def require_body_workspace_role(min_role: str):
     """The workspace named by the body's optional ``workspace_id``.
 
-    Omitted means the caller's first workspace, or a new personal one where
-    they are OWNER (:func:`resolve_user_workspace`). The role is checked on
-    whichever workspace results, so the default cannot bypass it.
+    Omitted means the key's workspace for an API key; otherwise the caller's
+    first workspace, or a new personal one where they are OWNER
+    (:func:`resolve_user_workspace`). The role is checked on whichever
+    workspace results, so the default cannot bypass it.
     """
 
     @_declares(min_role, "body")
@@ -366,8 +451,11 @@ def require_body_workspace_role(min_role: str):
     ) -> uuid.UUID:
         raw = (await _json_body(request)).get("workspace_id")
         requested = None if raw is None else _as_uuid(raw, "workspace_id")
+        principal = principal_of(request)
+        if requested is None and principal is not None and principal.is_api_key:
+            requested = principal.key_workspace_id
         workspace_id = await resolve_user_workspace(session, user, requested)
-        await require_workspace_role(session, user.user_id, workspace_id, min_role)
+        await _authorize(request, session, user, workspace_id, min_role)
         return workspace_id
 
     _checker.__qualname__ = f"require_body_workspace_role({min_role!r})"
@@ -399,7 +487,7 @@ def require_resource_role(min_role: str, model_cls: type, param: str, source: st
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"{model_cls.__name__} {resource_id} not found.",
             )
-        await require_workspace_role(session, user.user_id, row.workspace_id, min_role)
+        await _authorize(request, session, user, row.workspace_id, min_role)
         return row
 
     _checker.__qualname__ = (
@@ -420,9 +508,7 @@ def require_body_models_role(min_role: str, fields: tuple[str, ...]):
         models: list[DataModel] = []
         for field in fields:
             model = await _load_model(session, _as_uuid(body.get(field), field))
-            await require_workspace_role(
-                session, user.user_id, model.workspace_id, min_role
-            )
+            await _authorize(request, session, user, model.workspace_id, min_role)
             models.append(model)
         return models
 
@@ -436,15 +522,18 @@ def require_listed_workspaces(min_role: str):
 
     An optional ``workspace_id`` query parameter narrows it to one, and names a
     workspace the caller holds no such role in is a 403 rather than an empty
-    list, so a refusal is not mistaken for an empty workspace.
+    list, so a refusal is not mistaken for an empty workspace. An API key lists
+    its own workspace only, at its effective role.
     """
 
     @_declares(min_role, "listing")
     async def _checker(
+        request: Request,
         session: SessionDep,
         user: CurrentUserDep,
         workspace_id: Annotated[uuid.UUID | None, Query()] = None,
     ) -> list[uuid.UUID]:
+        principal = principal_of(request)
         rows = (
             await session.execute(
                 select(WorkspaceMember).where(WorkspaceMember.user_id == user.user_id)
@@ -453,7 +542,8 @@ def require_listed_workspaces(min_role: str):
         allowed = [
             row.workspace_id
             for row in rows
-            if _ROLE_LEVEL.get(row.role, 0) >= _ROLE_LEVEL[min_role]
+            if key_allows_workspace(principal, row.workspace_id)
+            and _ROLE_LEVEL.get(effective_role(row.role, principal), 0) >= _ROLE_LEVEL[min_role]
         ]
         if workspace_id is None:
             return allowed
