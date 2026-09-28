@@ -6,8 +6,9 @@ Sprint 7 Step 3 (owner decisions, 2026-09-28).
   ``appliance`` when it does not (logins, SCIM). Added nullable, backfilled
   from ``workspace_id``, then made NOT NULL under a CHECK that keeps the two
   consistent. Locking the ledgers comes in 0022, after this backfill.
-* ``users.is_appliance_owner`` — set only by ``create-owner``; it grants
-  reading appliance-scope events.
+* ``users.is_appliance_owner`` — set by ``create-owner`` on a new install, or
+  by ``designate-appliance-owner`` on an upgraded one; it grants reading
+  appliance-scope events. ``APPLIANCE_OWNER_DESIGNATED`` joins the vocabulary.
 * The action CHECK drops AUTH_LOGOUT, MEMBER_ROLE_CHANGED and MEMBER_REMOVED,
   which no code path emits. **A raw-SQL precondition refuses the upgrade if any
   row uses one of them**: narrowing a CHECK over such a row would fail anyway,
@@ -43,8 +44,12 @@ _AFTER = (
     "USER_PROVISIONED",
     "USER_DEPROVISIONED",
     "ARTIFACT_GENERATED",
+    "APPLIANCE_OWNER_DESIGNATED",
 )
-_BEFORE = (*_AFTER, *REMOVED)
+_BEFORE = (
+    *(a for a in _AFTER if a != "APPLIANCE_OWNER_DESIGNATED"),
+    *REMOVED,
+)
 
 _SCOPE_CHECK = (
     "(scope = 'workspace' AND workspace_id IS NOT NULL) OR "

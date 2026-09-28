@@ -146,22 +146,41 @@ def test_the_prompt_asks_twice_and_refuses_a_mismatch() -> None:
         cli.read_password(False, prompt=lambda _: next(answers))
 
 
-def test_main_reads_stdin_and_never_prints_the_password(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+async def test_the_command_reads_stdin_and_never_prints_the_password(
+    session, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    seen: dict[str, str] = {}
-
-    async def fake_run(email: str, password: str, workspace_name: str) -> User:
-        seen["password"] = password
-        return User(email=email, hashed_password="x")
-
-    monkeypatch.setattr(cli, "_run_create_owner", fake_run)
+    """The real command, end to end, against this test's database."""
     monkeypatch.setattr("sys.stdin", io.StringIO(PASSWORD + "\n"))
-    code = cli.main(["create-owner", "--email", "owner@example.com", "--password-stdin"])
+    code = await cli.run(
+        ["create-owner", "--email", "owner@example.com", "--password-stdin"],
+        session.info["maker"],
+    )
     out = capsys.readouterr()
-    assert code == 0
-    assert seen["password"] == PASSWORD
+    assert code == 0, out.err
     assert PASSWORD not in out.out + out.err
+    async with real_client(session) as client:
+        signed_in = await client.post(
+            "/api/v1/auth/token", data={"username": "owner@example.com", "password": PASSWORD}
+        )
+    assert signed_in.status_code == 200, "the password read from stdin is not the one stored"
+
+
+async def test_designate_refuses_while_an_appliance_owner_exists(session) -> None:
+    await cli.create_owner(session, "owner@example.com", PASSWORD, "Org")
+    code = await cli.run(
+        ["designate-appliance-owner", "--email", "owner@example.com"], session.info["maker"]
+    )
+    assert code == 1
+
+
+async def test_designate_refuses_someone_who_owns_no_workspace(session) -> None:
+    user = await make_user(session, "member@example.com")
+    await make_workspace(session, "W", {user: "MEMBER"})
+    await session.commit()
+    code = await cli.run(
+        ["designate-appliance-owner", "--email", "member@example.com"], session.info["maker"]
+    )
+    assert code == 1
 
 
 # --- Negative controls ------------------------------------------------------

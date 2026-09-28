@@ -35,6 +35,8 @@ async def sqlite_session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Async
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr("app.core.database.AsyncSessionLocal", maker, raising=False)
     async with maker() as session:
+        # For code that opens its own sessions, such as `app.cli.run`.
+        session.info["maker"] = maker
         yield session
     await engine.dispose()
 

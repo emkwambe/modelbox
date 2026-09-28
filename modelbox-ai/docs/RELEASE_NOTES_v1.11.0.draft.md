@@ -8,6 +8,25 @@ v1.11.0 supersedes v1.10.0, which was never tagged.
 
 ---
 
+## Upgrading an existing install
+
+1. **Keep your `.env`.** Its secrets protect your existing data (see the
+   breaking changes below for what the backend now refuses).
+2. **Designate the appliance owner.** An upgraded install has workspace owners
+   but no appliance owner, and appliance-wide audit events (sign-ins, SCIM)
+   are readable only by one. After starting v1.11.0, choose one existing
+   workspace OWNER:
+
+   ```bash
+   docker compose --env-file .env -f docker/docker-compose.appliance.yml exec modelbox-backend python -m app.cli designate-appliance-owner --email you@example.com
+   ```
+
+   It refuses if an appliance owner already exists, and records
+   `APPLIANCE_OWNER_DESIGNATED` in the audit trail. A new install gets its
+   appliance owner from `create-owner` instead.
+
+---
+
 ## Breaking changes
 
 ### The API is served on the UI's port, and the backend publishes no port

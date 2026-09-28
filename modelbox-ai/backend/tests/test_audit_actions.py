@@ -46,7 +46,13 @@ from tests._real_auth import (
 
 PASSWORD = "a-long-enough-password"
 SCIM_TOKEN = "s" * 40
-APPLIANCE_ACTIONS = {"AUTH_LOGIN", "AUTH_LOGIN_FAILED", "USER_PROVISIONED", "USER_DEPROVISIONED"}
+APPLIANCE_ACTIONS = {
+    "AUTH_LOGIN",
+    "AUTH_LOGIN_FAILED",
+    "USER_PROVISIONED",
+    "USER_DEPROVISIONED",
+    "APPLIANCE_OWNER_DESIGNATED",
+}
 
 
 class _Gateway:
@@ -83,7 +89,7 @@ async def world(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> dict[
     monkeypatch.setattr(
         scim, "get_settings", lambda: Settings(_env_file=None, scim_token=SCIM_TOKEN)  # type: ignore[call-arg]
     )
-    return {"owner": owner, "admin": admin, "ws": workspace, "spare": spare}
+    return {"owner": owner, "admin": admin, "ws": workspace, "spare": spare, "session": session}
 
 
 def _client(session: AsyncSession) -> AsyncClient:
@@ -194,6 +200,18 @@ async def _user_deprovisioned(c: AsyncClient, w: dict[str, Any]) -> None:
     )
 
 
+async def _appliance_owner_designated(c: AsyncClient, w: dict[str, Any]) -> None:
+    """The real command, on an install in the upgraded state: owners, no flag."""
+    session: AsyncSession = w["session"]
+    owner = await session.get(type(w["owner"]), w["owner"].user_id)
+    owner.is_appliance_owner = False
+    await session.commit()
+    code = await cli.run(
+        ["designate-appliance-owner", "--email", "owner@example.com"], session.info["maker"]
+    )
+    assert code == 0, "designate-appliance-owner refused"
+
+
 TRIGGERS: dict[str, Trigger] = {
     "AUTH_LOGIN": _login,
     "AUTH_LOGIN_FAILED": _login_failed,
@@ -207,6 +225,7 @@ TRIGGERS: dict[str, Trigger] = {
     "ARTIFACT_GENERATED": _artifact_generated,
     "USER_PROVISIONED": _user_provisioned,
     "USER_DEPROVISIONED": _user_deprovisioned,
+    "APPLIANCE_OWNER_DESIGNATED": _appliance_owner_designated,
 }
 
 

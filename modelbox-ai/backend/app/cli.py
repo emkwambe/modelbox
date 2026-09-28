@@ -16,6 +16,12 @@ could ever sign in (owner decision H3, Sprint 7).
   it is not a way to mint a second owner around the product's own controls.
 * The user it creates is the **appliance owner** (`is_appliance_owner`), the
   one account that reads appliance-scope audit events such as logins.
+
+**designate-appliance-owner** is the same step for an appliance upgraded from
+before v1.11.0, which has workspace owners but no appliance owner, so
+`create-owner` refuses. It sets the flag on an existing account that is OWNER of
+some workspace, refuses if an appliance owner already exists, and records
+`APPLIANCE_OWNER_DESIGNATED` (owner decision, Sprint 7 Step 3).
 """
 
 from __future__ import annotations
@@ -88,6 +94,45 @@ async def create_owner(
     return user
 
 
+async def appliance_owner_exists(session: AsyncSession) -> bool:
+    """True if any account already holds the appliance-owner flag."""
+    row = (
+        await session.execute(select(User).where(User.is_appliance_owner.is_(True)).limit(1))
+    ).scalar_one_or_none()
+    return row is not None
+
+
+async def designate_appliance_owner(session: AsyncSession, email: str) -> User:
+    """Give an existing workspace OWNER the appliance-owner flag, or refuse."""
+    if await appliance_owner_exists(session):
+        raise CreateOwnerRefused("This appliance already has an appliance owner.")
+    user = (
+        await session.execute(select(User).where(User.email == email))
+    ).scalar_one_or_none()
+    if user is None:
+        raise CreateOwnerRefused(f"No account for {email}.")
+    owns = (
+        await session.execute(
+            select(WorkspaceMember).where(
+                WorkspaceMember.user_id == user.user_id, WorkspaceMember.role == "OWNER"
+            ).limit(1)
+        )
+    ).scalar_one_or_none()
+    if owns is None:
+        raise CreateOwnerRefused(f"{email} is not the OWNER of any workspace.")
+    user.is_appliance_owner = True
+    await session.commit()
+    await audit_log.record(
+        action="APPLIANCE_OWNER_DESIGNATED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        resource_type="user",
+        resource_id=str(user.user_id),
+        detail={"via": "designate-appliance-owner"},
+    )
+    return user
+
+
 def read_password(from_stdin: bool, prompt: Callable[[str], str] = getpass.getpass) -> str:
     """The password from a prompt (entered twice) or from standard input."""
     if from_stdin:
@@ -110,26 +155,40 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Read the password from standard input instead of prompting.",
     )
+    designate = commands.add_parser(
+        "designate-appliance-owner",
+        help="Upgraded installs: make an existing workspace OWNER the appliance owner.",
+    )
+    designate.add_argument("--email", required=True)
     return parser
 
 
-async def _run_create_owner(email: str, password: str, workspace_name: str) -> User:
-    from app.core.database import get_sessionmaker
+async def run(argv: Sequence[str] | None, session_factory: Callable[[], AsyncSession]) -> int:
+    """The command: parse, dispatch, report. Returns the exit code.
 
-    async with get_sessionmaker()() as session:
-        return await create_owner(session, email, password, workspace_name)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
+    Separate from :func:`main` only so a test can drive the real command
+    against its own database; ``main`` passes the appliance's session factory.
+    """
     args = _parser().parse_args(argv)
     try:
-        password = read_password(args.password_stdin)
-        user = asyncio.run(_run_create_owner(args.email, password, args.workspace_name))
+        async with session_factory() as session:
+            if args.command == "designate-appliance-owner":
+                user = await designate_appliance_owner(session, args.email)
+                print(f"{user.email} is now the appliance owner.")
+                return 0
+            password = read_password(args.password_stdin)
+            user = await create_owner(session, args.email, password, args.workspace_name)
     except CreateOwnerRefused as exc:
-        print(f"create-owner refused: {exc}", file=sys.stderr)
+        print(f"{args.command} refused: {exc}", file=sys.stderr)
         return 1
     print(f"Created owner {user.email} in workspace {args.workspace_name!r}.")
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    from app.core.database import get_sessionmaker
+
+    return asyncio.run(run(argv, get_sessionmaker()))
 
 
 if __name__ == "__main__":

@@ -707,6 +707,7 @@ AUDIT_ACTIONS: tuple[str, ...] = (
     "USER_PROVISIONED",
     "USER_DEPROVISIONED",
     "ARTIFACT_GENERATED",
+    "APPLIANCE_OWNER_DESIGNATED",
 )
 
 #: Outcomes. `DENIED` is separate from `FAILURE` on purpose: a refused
