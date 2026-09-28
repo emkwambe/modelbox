@@ -26,6 +26,7 @@ arriving through the deployment rather than through a `validation_alias`.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -201,6 +202,64 @@ def test_the_documented_install_passes_the_env_file() -> None:
         "the documented install omits --env-file, so compose-level variables "
         f"fall back to defaults: {missing}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The three secrets have no default, and the appliance runs as production
+# ---------------------------------------------------------------------------
+# Read from the raw text: a YAML parse keeps `${VAR:?msg}` as an opaque string,
+# and the operator after the name is the whole question. `:-` brings the
+# appliance up on whatever follows it; `:?` stops Compose and names the
+# variable before any container exists.
+REQUIRED_SECRETS = ("JWT_SECRET", "ENCRYPTION_KEY", "POSTGRES_PASSWORD")
+_REFERENCE = re.compile(r"\$\{(" + "|".join(REQUIRED_SECRETS) + r")(:\?|:-|\?|-|\})")
+
+
+def _check_secrets_required(text: str) -> None:
+    """The check, shared by the test and its negative control."""
+    references = _REFERENCE.findall(text)
+    seen = {name for name, _ in references}
+    assert seen == set(REQUIRED_SECRETS), (
+        f"compose no longer references {sorted(set(REQUIRED_SECRETS) - seen)}"
+    )
+    defaulted = sorted({name for name, op in references if op != ":?"})
+    assert not defaulted, (
+        f"{defaulted} can start without a value; every reference must be "
+        f"${{NAME:?message}}"
+    )
+
+
+def test_the_three_secrets_have_no_default() -> None:
+    _check_secrets_required(COMPOSE.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("service", APP_SERVICES)
+def test_the_app_services_receive_every_secret(service: str) -> None:
+    """Required in the file is not the same as delivered to the service."""
+    env = _env(service)
+    assert env.get("JWT_SECRET", "").startswith("${JWT_SECRET:?")
+    assert env.get("ENCRYPTION_KEY", "").startswith("${ENCRYPTION_KEY:?")
+    assert "${POSTGRES_PASSWORD:?" in env.get("DATABASE_URL", "")
+
+
+def test_the_database_receives_its_password() -> None:
+    env = SPEC["services"]["postgres-db"]["environment"]
+    assert str(env["POSTGRES_PASSWORD"]).startswith("${POSTGRES_PASSWORD:?")
+
+
+@pytest.mark.parametrize("service", APP_SERVICES)
+def test_the_appliance_runs_as_production(service: str) -> None:
+    """Literal, not interpolated: an operator's stray variable cannot turn it off."""
+    assert _env(service).get("ENVIRONMENT") == "production"
+
+
+@pytest.mark.parametrize("name", REQUIRED_SECRETS)
+def test_negative_control_a_defaulted_secret_fails_the_check(name: str) -> None:
+    text = COMPOSE.read_text(encoding="utf-8")
+    mutated = text.replace("${" + name + ":?", "${" + name + ":-dev-default", 1)
+    assert mutated != text, f"fixture precondition: no ${{{name}:? in compose"
+    with pytest.raises(AssertionError, match=name):
+        _check_secrets_required(mutated)
 
 
 def test_the_accepted_name_set_is_not_empty() -> None:

@@ -45,7 +45,8 @@ modelbox-ai/
 ## Quick start (Docker appliance)
 
 ```bash
-cp .env.example .env          # then fill in provider API keys
+cp .env.example .env          # then set JWT_SECRET, ENCRYPTION_KEY, POSTGRES_PASSWORD
+                              # to long random hex values, and fill in provider API keys
 docker compose --env-file .env -f docker/docker-compose.appliance.yml up --build
 ```
 
@@ -56,15 +57,16 @@ it on its own:
 - **Provider credentials** reach the containers through `env_file:` entries in
   the compose file, whose paths resolve relative to the compose file itself. These
   work from any directory, with or without the flag.
-- **Everything written as `${VAR}` in the compose file** — `UI_PORT`,
-  `POSTGRES_PASSWORD`, `ENCRYPTION_KEY`, `AIRGAPPED` — is substituted by Compose
-  *before* any service is created, and that substitution reads Compose's project
-  directory, which is `docker/`. Without the flag those silently fall back to
-  their defaults: the UI binds port 3000 rather than your `UI_PORT`, and the
-  database comes up with the default password.
+- **Everything written as `${VAR}` in the compose file** — `JWT_SECRET`,
+  `ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, `UI_PORT`, `AIRGAPPED` — is substituted
+  by Compose *before* any service is created, and that substitution reads
+  Compose's project directory, which is `docker/`. Without the flag the three
+  secrets have no value and Compose refuses to start, naming each one; `UI_PORT`
+  and `AIRGAPPED` silently fall back to their defaults, so the UI binds port
+  3000 rather than your `UI_PORT`.
 
-**Outside `ENVIRONMENT=development` the backend refuses to start on a shipped
-secret.** If `JWT_SECRET`, `ENCRYPTION_KEY` or the database password is the
+**The appliance runs with `ENVIRONMENT=production`, and outside
+`ENVIRONMENT=development` the backend refuses to start on a shipped secret.** If `JWT_SECRET`, `ENCRYPTION_KEY` or the database password is the
 value in this repository, or `JWT_SECRET` is shorter than 32 bytes, startup
 fails with an error that names each variable and never prints its value.
 

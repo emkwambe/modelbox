@@ -147,9 +147,9 @@ Two consequences a reviewer should weigh:
 - **Provider credentials** are supplied by environment file and are never
   written to the ledger, the database, or any exported artifact.
 - **Connection strings** for reverse-engineering are encrypted at rest with
-  `ENCRYPTION_KEY`. **Change it from the shipped default before any real use** —
-  the compose file defaults it to a development value so a first run works, and
-  a default encryption key is not encryption.
+  `ENCRYPTION_KEY`. The compose file has no default for it, and the appliance
+  refuses to start while it is unset or equal to the development value in this
+  repository, because a default encryption key is not encryption.
 
 ---
 

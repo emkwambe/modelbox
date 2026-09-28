@@ -37,7 +37,14 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:-secret}@postgres-db:5432/modelbox_metadata
+      # The appliance is a production deployment. Settings refuse the shipped
+      # secrets outside development, and the dev account is never seeded.
+      - ENVIRONMENT=production
+      # The three secrets have no default here. `:?` stops Compose before any
+      # container exists and names the variable, where a default would bring
+      # the appliance up on a value published in this repository.
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - see the README install steps}
+      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - see the README install steps}@postgres-db:5432/modelbox_metadata
       - REDIS_URL=redis://redis-cache:6379/0
       - CELERY_BROKER_URL=redis://redis-cache:6379/1
       - CELERY_RESULT_BACKEND=redis://redis-cache:6379/1
@@ -58,7 +65,7 @@ services:
       # every non-local provider at route resolution. Set this to 0 to hard-
       # disable outbound calls regardless of keys or routing.
       - MODELBOX_ALLOW_PROVIDER_CALLS=${MODELBOX_ALLOW_PROVIDER_CALLS:-1}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-dev-encryption-key-change-me}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env - see the README install steps}
     # Provider keys come from the file, not from `${VAR:-}` interpolation.
     #
     # Interpolation reads Compose's *project directory*, which is this file's
@@ -77,12 +84,12 @@ services:
     # reintroduced one layer down.
     #
     # This fixes credentials and nothing else. Every `${VAR}` elsewhere in this
-    # file — UI_PORT, POSTGRES_PASSWORD, ENCRYPTION_KEY, AIRGAPPED — is still
-    # substituted by Compose before any container exists, still from the project
-    # directory, and still falls back to its default without `--env-file .env`.
-    # That is why the README documents the flag rather than treating it as
-    # optional: the failure is silent for the database password and merely loud
-    # for the port.
+    # file is still substituted by Compose before any container exists, still
+    # from the project directory. Without `--env-file .env`, JWT_SECRET,
+    # ENCRYPTION_KEY and POSTGRES_PASSWORD have no value and Compose refuses to
+    # start, naming them; UI_PORT and AIRGAPPED still fall back to their
+    # defaults. That is why the README documents the flag rather than treating
+    # it as optional.
     env_file:
       - ../.env
     volumes:
@@ -111,7 +118,10 @@ services:
     image: modelbox/core-engine:v1.10.0
     command: ["celery", "-A", "app.worker", "worker", "--loglevel=info"]
     environment:
-      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:-secret}@postgres-db:5432/modelbox_metadata
+      # As the backend: production, and no default for any of the three secrets.
+      - ENVIRONMENT=production
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - see the README install steps}
+      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - see the README install steps}@postgres-db:5432/modelbox_metadata
       - REDIS_URL=redis://redis-cache:6379/0
       - CELERY_BROKER_URL=redis://redis-cache:6379/1
       - CELERY_RESULT_BACKEND=redis://redis-cache:6379/1
@@ -121,7 +131,7 @@ services:
       # needs the same opt-in — a backend that works and a worker that silently
       # refuses would be worse than both failing.
       - MODELBOX_ALLOW_PROVIDER_CALLS=${MODELBOX_ALLOW_PROVIDER_CALLS:-1}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-dev-encryption-key-change-me}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env - see the README install steps}
     # See the backend service: keys arrive by file, and must not be restated
     # under `environment:` or that block overrides them with empty strings.
     # The worker matters most here — it is the service that actually runs
@@ -167,7 +177,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: modelbox
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - see the README install steps}
       POSTGRES_DB: modelbox_metadata
     volumes:
       - pgdata:/var/lib/postgresql/data
