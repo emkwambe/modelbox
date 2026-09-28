@@ -85,9 +85,8 @@ async def set_app_password(connection: Any, password: str) -> None:
 
 
 def _migrate() -> None:
-    from alembic.config import Config
-
     from alembic import command
+    from alembic.config import Config
 
     config = Config(os.path.join(os.path.dirname(os.path.dirname(__file__)), "alembic.ini"))
     command.upgrade(config, "head")

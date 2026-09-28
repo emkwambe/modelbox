@@ -447,7 +447,7 @@ class ExporterService:
         row_count: int = 50,
         seed_format: str = "sql_insert",
         dialect: str = "postgres",
-    ) -> "SeedResult":
+    ) -> SeedResult:
         """Generate FK-consistent mock rows as SQL INSERTs or a CSV bundle.
 
         Delegates to :class:`SyntheticSeedGenerator`; returns the file-map plus

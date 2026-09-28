@@ -79,7 +79,7 @@ class JobService:
             result = await engine.synthesize(request, user_id=job.user_id)
             job.result_model_id = result.model_id
             job.status = "COMPLETED"
-        except Exception as exc:  # noqa: BLE001 - record any failure on the job
+        except Exception as exc:  # broad: record any failure on the job
             logger.exception("Synthesis job %s failed", job_id)
             job.status = "FAILED"
             job.error_message = str(exc)[:2000]

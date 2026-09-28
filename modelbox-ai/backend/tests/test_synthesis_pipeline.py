@@ -1022,9 +1022,11 @@ async def test_create_connection_unsupported_engine(api_client: AsyncClient) -> 
 # Canvas edit persistence (v2 FR-1.2)
 # ---------------------------------------------------------------------------
 async def test_put_graph_replaces_and_validates(session: AsyncSession) -> None:
-    from app.main import create_app
-    from app.models.metadata_store import DataModel as DM, ModelEntity
     from sqlalchemy import select
+
+    from app.main import create_app
+    from app.models.metadata_store import DataModel as DM
+    from app.models.metadata_store import ModelEntity
 
     user, workspace = await _seed_user_workspace(session, "graph@example.com")
     model_id = await _seed_model(session, workspace)  # 2 entities from kimball

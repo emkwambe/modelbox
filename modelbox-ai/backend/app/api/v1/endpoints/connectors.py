@@ -171,7 +171,7 @@ async def introspect_connection(
         ) from exc
     except HTTPException:
         raise
-    except Exception as exc:  # noqa: BLE001 - surface connection/query failures
+    except Exception as exc:  # broad: surface any connection or query failure
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Introspection failed: {exc}",

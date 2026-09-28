@@ -257,7 +257,7 @@ def _fk_columns(model: SynthesizedModel) -> set[str]:
 
 
 def _declared_length(data_type: str) -> int | None:
-    match = re.search(r"(?:VAR)?CHAR\s*\(\s*(\d+)\s*\)", data_type, re.I)
+    match = re.search(r"(?:VAR)?CHAR\s*\(\s*(\d+)\s*\)", data_type, re.IGNORECASE)
     return int(match.group(1)) if match else None
 
 
@@ -696,7 +696,7 @@ def test_every_certified_artifact_family_has_collected_tests() -> None:
     question is what pytest *collects* — a test skipped at import, or lost to a
     renamed marker, is not a gate however present its source looks.
     """
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [sys.executable, "-m", "pytest", str(Path(__file__)), "--collect-only", "-q"],
         capture_output=True,
         text=True,
@@ -841,7 +841,7 @@ def test_ddl_primary_key_columns_are_not_null(gid: str) -> None:
             if not column.is_primary_key:
                 continue
             pattern = rf"\b{re.escape(column.name)}\b[^,\n]*NOT NULL"
-            assert re.search(pattern, ddl, re.I), (
+            assert re.search(pattern, ddl, re.IGNORECASE), (
                 f"{entity.entity_name}.{column.name} is a primary key but is "
                 f"not emitted NOT NULL"
             )
@@ -880,12 +880,12 @@ def test_ddl_not_null_follows_declared_nullability(gid: str) -> None:
         block = re.search(
             rf"CREATE TABLE {re.escape(entity.entity_name)} \((.*?)\n\);",
             ddl,
-            re.S,
+            re.DOTALL,
         )
         assert block, f"no CREATE TABLE emitted for {entity.entity_name}"
         for column in entity.columns:
             pattern = rf"^\s*{re.escape(column.name)}\s+\S.*$"
-            line = re.search(pattern, block.group(1), re.M)
+            line = re.search(pattern, block.group(1), re.MULTILINE)
             assert line, f"{entity.entity_name}.{column.name} not emitted"
             emitted = "NOT NULL" in line.group(0).upper()
             assert emitted is (not column.is_nullable), (
@@ -1859,7 +1859,7 @@ def test_protobuf_decimal_is_not_double(gid: str) -> None:
         f"{e.entity_name}.{c.name}({c.data_type})"
         for e in fixture.model.entities for c in e.columns
         if any(t in c.data_type.upper() for t in ("NUMERIC", "DECIMAL", "NUMBER"))
-        and re.search(rf"^\s*double {re.escape(c.name)} = \d+;", proto, re.M)
+        and re.search(rf"^\s*double {re.escape(c.name)} = \d+;", proto, re.MULTILINE)
     ]
     assert not offending, f"fixed-point columns emitted as double: {offending}"
 

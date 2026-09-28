@@ -42,8 +42,8 @@ from pathlib import Path
 _BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_BACKEND))
 
-from app.schemas.data_model import SynthesizedModel  # noqa: E402
-from app.services.exporter_service import ExporterService  # noqa: E402
+from app.schemas.data_model import SynthesizedModel
+from app.services.exporter_service import ExporterService
 
 CACHE_DIR = _BACKEND / ".dbt-packages"
 LOCK_FIXTURE = _BACKEND / "tests" / "fixtures" / "dbt" / "package-lock.yml"

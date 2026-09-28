@@ -449,7 +449,7 @@ class IntrospectionService:
         if len(path) > 1:
             params["schema"] = path[1]
         for key in ("warehouse", "role"):
-            if key in query and query[key]:
+            if query.get(key):
                 params[key] = query[key][0]
         return params
 
