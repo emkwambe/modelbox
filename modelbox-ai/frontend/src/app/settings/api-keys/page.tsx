@@ -10,13 +10,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 
-import { createApiKey, listApiKeys, revokeApiKey } from '@/lib/api';
+import { createApiKey, listApiKeys, listWorkspaces, revokeApiKey } from '@/lib/api';
+import { capsUpTo } from '@/lib/roles';
 import { ErrorState, LoadingState, StatusText, toneColor, toneTint } from '@/components/ui';
 import { color, fontFamily, semantic, surface } from '@/styles/tokens';
 import { errMessage, errorKind } from '@/lib/errors';
 import type { ErrorKind } from '@/lib/errors';
 import { useAuthStatus, useAuthStore } from '@/store/authStore';
-import type { ApiKeyInfo } from '@/types/schema';
+import type { ApiKeyInfo, WorkspaceInfo } from '@/types/schema';
 
 /**
  * A list load has three outcomes, and "empty" is not one of the first two.
@@ -37,10 +38,12 @@ type ListState =
 const pageHeading = { fontSize: 28, fontWeight: 700, marginTop: 8 } as const;
 
 export default function ApiKeysPage() {
-  const token = useAuthStore((s) => s.token);
   const openModal = useAuthStore((s) => s.openModal);
+  const activeWorkspaceId = useAuthStore((s) => s.activeWorkspaceId);
 
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
+  const [cap, setCap] = useState('VIEWER');
   const [listState, setListState] = useState<ListState>({ status: 'loading' });
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -74,14 +77,32 @@ export default function ApiKeysPage() {
     if (signedIn) void refresh();
   }, [signedIn, refresh]);
 
+  useEffect(() => {
+    if (!signedIn) return;
+    listWorkspaces()
+      .then(setWorkspaces)
+      .catch(() => setWorkspaces([]));
+  }, [signedIn]);
+
+  // The key is created in one named workspace, and its cap options come from
+  // the creator's role in that same workspace, so the two cannot disagree.
+  const target =
+    workspaces.find((w) => w.workspace_id === activeWorkspaceId) ?? workspaces[0];
+  const caps = capsUpTo(target?.role);
+  const chosenCap = caps.includes(cap as (typeof caps)[number]) ? cap : 'VIEWER';
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || !target || caps.length === 0) return;
     setBusy(true);
     setError(null);
     setNewSecret(null);
     try {
-      const created = await createApiKey({ name: name.trim() });
+      const created = await createApiKey({
+        name: name.trim(),
+        workspace_id: target.workspace_id,
+        role_cap: chosenCap,
+      });
       setNewSecret(created.api_key);
       setName('');
       await refresh();
@@ -185,7 +206,22 @@ export default function ApiKeysPage() {
                 placeholder="e.g. CI pipeline"
                 style={{ ...inputStyle, flex: 1, minWidth: 220 }}
               />
-              <button type="submit" disabled={busy} style={primaryBtn}>
+              {/* Up to the creator's own role in this workspace, never above;
+                  the server refuses a higher cap regardless. */}
+              <select
+                aria-label="Key access"
+                value={chosenCap}
+                onChange={(e) => setCap(e.target.value)}
+                disabled={caps.length === 0}
+                style={inputStyle}
+              >
+                {caps.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+              <button type="submit" disabled={busy || caps.length === 0} style={primaryBtn}>
                 {busy ? 'Generating…' : 'Generate key'}
               </button>
             </div>
@@ -217,7 +253,8 @@ export default function ApiKeysPage() {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{key.name}</div>
                     <div style={{ fontSize: 12, color: color.neutral[500] }}>
-                      <code>{key.key_prefix}…</code> · created{' '}
+                      <code>{key.key_prefix}…</code> · {key.role_cap ?? 'VIEWER'} access ·
+                      created{' '}
                       {fmtDate(key.created_at)}
                       {key.last_used_at
                         ? ` · last used ${fmtDate(key.last_used_at)}`

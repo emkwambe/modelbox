@@ -117,6 +117,8 @@ export async function listApiKeys(): Promise<ApiKeyInfo[]> {
 
 export async function createApiKey(payload: {
   name: string;
+  workspace_id?: string;
+  role_cap?: string;
   expires_at?: string | null;
 }): Promise<ApiKeyCreatedResponse> {
   const { data } = await apiClient.post<ApiKeyCreatedResponse>(

@@ -232,6 +232,8 @@ export interface ApiKeyInfo {
   workspace_id: string;
   name: string;
   key_prefix: string;
+  /** The most the key may do; it acts at the lower of this and its creator's role. */
+  role_cap?: string;
   created_at: string;
   expires_at?: string | null;
   last_used_at?: string | null;

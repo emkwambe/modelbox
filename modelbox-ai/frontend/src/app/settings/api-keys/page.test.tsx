@@ -20,13 +20,14 @@ import { useAuthStore } from '@/store/authStore';
 
 import ApiKeysPage from './page';
 
-const { createApiKey, listApiKeys, revokeApiKey } = vi.hoisted(() => ({
+const { createApiKey, listApiKeys, listWorkspaces, revokeApiKey } = vi.hoisted(() => ({
   createApiKey: vi.fn(),
   listApiKeys: vi.fn(),
+  listWorkspaces: vi.fn(),
   revokeApiKey: vi.fn(),
 }));
 
-vi.mock('@/lib/api', () => ({ createApiKey, listApiKeys, revokeApiKey }));
+vi.mock('@/lib/api', () => ({ createApiKey, listApiKeys, listWorkspaces, revokeApiKey }));
 
 const KEY = {
   api_key_id: 'k1',
@@ -48,6 +49,7 @@ beforeEach(() => {
   listApiKeys.mockReset();
   createApiKey.mockReset();
   revokeApiKey.mockReset();
+  listWorkspaces.mockReset().mockResolvedValue([]);
   useAuthStore.setState({ token: 'a-token', email: 'dev@modelbox.ai' });
 });
 
