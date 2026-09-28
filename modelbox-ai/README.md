@@ -179,6 +179,10 @@ local runtimes (Ollama / vLLM). Routing is keyed off the explicit `egress:`
 classification in `config/model_router.yaml` (any non-`local` egress — including
 `cloud_apac` — is stripped in air-gapped mode), so the policy is deterministic.
 
+The backend image sets `LITELLM_LOCAL_MODEL_COST_MAP=True`, so the LiteLLM
+library uses its bundled model cost map instead of fetching one from GitHub
+when it loads.
+
 ## Releases (container images)
 
 Tagging a commit with a semver tag publishes versioned images to GHCR via the

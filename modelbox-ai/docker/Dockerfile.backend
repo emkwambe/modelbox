@@ -8,6 +8,12 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
+# `import litellm` otherwise fetches its model cost map from GitHub at start-up:
+# an outbound request no gateway records, on every boot, air-gapped or not.
+# In the image rather than in compose, so every way of running the image gets
+# it, not only the appliance's compose file.
+ENV LITELLM_LOCAL_MODEL_COST_MAP=True
+
 WORKDIR /app
 
 # System deps for asyncpg / psycopg2 / cryptography builds.
