@@ -290,6 +290,7 @@ jobs:
         run: |
           cd modelbox-ai/backend
           ruff check .
+          ruff check ../tests/blackbox
 
   backend-typecheck:
     name: Backend Type Check (mypy)
@@ -338,6 +339,100 @@ jobs:
         # market studies belong in the private repository; the patterns are in
         # the script.
         run: python modelbox-ai/scripts/check_leak_guard.py
+
+  blackbox:
+    name: Black-box Acceptance
+    # The appliance proven from outside (Sprint 7 Step 6, Amendments 1 and 3).
+    # tests/blackbox imports nothing from the application; it drives the
+    # compose stack over HTTP, `docker compose exec` and psql. Each
+    # configuration runs even if an earlier one failed, and each ends with
+    # `down -v`, so every configuration starts from empty volumes.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    defaults:
+      run:
+        working-directory: modelbox-ai
+    env:
+      COMPOSE: docker compose --env-file .env -f docker/docker-compose.appliance.yml
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install the suite's dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tests/blackbox/requirements.txt
+
+      - name: "A: only .env.example, compose refuses"
+        run: python -m pytest tests/blackbox -m config_a -v --no-header -rA
+
+      - name: Create .env with init-env
+        run: sh scripts/init-env.sh
+
+      - name: Build the appliance images
+        run: $COMPOSE build
+
+      - name: "B: the hardened appliance, every check passes"
+        if: ${{ !cancelled() }}
+        env:
+          BLACKBOX_PROFILE: hardened
+        run: |
+          $COMPOSE up -d
+          python -m pytest tests/blackbox -m config_b -v --no-header -rA
+
+      - name: Stop B
+        if: ${{ !cancelled() }}
+        run: docker compose -p modelbox-ai down -v --remove-orphans
+
+      - name: "Upgrade: designate-appliance-owner on an upgraded database"
+        if: ${{ !cancelled() }}
+        env:
+          BLACKBOX_PROFILE: hardened
+        run: python -m pytest tests/blackbox -m upgrade -v --no-header -rA
+
+      - name: Stop the upgraded appliance
+        if: ${{ !cancelled() }}
+        run: docker compose -p modelbox-ai down -v --remove-orphans
+
+      - name: "Insecure profile: each check covering a reintroduced weakness fails"
+        # Strict expected failures (conftest): a weakened check that passes, or
+        # that fails other than on its own check, turns this step red.
+        if: ${{ !cancelled() }}
+        env:
+          BLACKBOX_PROFILE: insecure
+        run: |
+          $COMPOSE -f tests/blackbox/compose/insecure.yml --profile airgap up -d
+          python -m pytest tests/blackbox -m config_b -v --no-header -rA
+
+      - name: Stop the insecure profile
+        if: ${{ !cancelled() }}
+        run: docker compose -p modelbox-ai down -v --remove-orphans
+
+      - name: "C: AIRGAPPED, sentinel keys, egress-deny network"
+        if: ${{ !cancelled() }}
+        env:
+          BLACKBOX_PROFILE: egress-deny
+        run: |
+          sed -i 's/^AIRGAPPED=.*/AIRGAPPED=true/' .env
+          for key in OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY MOONSHOT_API_KEY; do
+            sed -i "s/^${key}=.*/${key}=sentinel-${key}-must-never-leave/" .env
+          done
+          $COMPOSE -f tests/blackbox/compose/egress-deny.yml up -d
+          python -m pytest tests/blackbox -m config_c -v --no-header -rA
+
+      - name: Appliance logs
+        if: ${{ failure() }}
+        run: docker compose -p modelbox-ai logs --no-color --tail 200
+
+      - name: Stop C
+        if: ${{ always() }}
+        run: docker compose -p modelbox-ai down -v --remove-orphans
 
   versions:
     name: Version Consistency
