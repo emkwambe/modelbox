@@ -273,7 +273,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"Refusing to start with ENVIRONMENT={self.environment}: "
                 + "; ".join(problems)
-                + "."
+                + ". Generate a new .env with scripts/init-env.ps1 or "
+                "scripts/init-env.sh."
             )
         return self
 

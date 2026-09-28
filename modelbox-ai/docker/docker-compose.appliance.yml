@@ -43,8 +43,8 @@ services:
       # The three secrets have no default here. `:?` stops Compose before any
       # container exists and names the variable, where a default would bring
       # the appliance up on a value published in this repository.
-      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - see the README install steps}
-      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - see the README install steps}@postgres-db:5432/modelbox_metadata
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}@postgres-db:5432/modelbox_metadata
       - REDIS_URL=redis://redis-cache:6379/0
       - CELERY_BROKER_URL=redis://redis-cache:6379/1
       - CELERY_RESULT_BACKEND=redis://redis-cache:6379/1
@@ -65,7 +65,7 @@ services:
       # every non-local provider at route resolution. Set this to 0 to hard-
       # disable outbound calls regardless of keys or routing.
       - MODELBOX_ALLOW_PROVIDER_CALLS=${MODELBOX_ALLOW_PROVIDER_CALLS:-1}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env - see the README install steps}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
     # Provider keys come from the file, not from `${VAR:-}` interpolation.
     #
     # Interpolation reads Compose's *project directory*, which is this file's
@@ -120,8 +120,8 @@ services:
     environment:
       # As the backend: production, and no default for any of the three secrets.
       - ENVIRONMENT=production
-      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - see the README install steps}
-      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - see the README install steps}@postgres-db:5432/modelbox_metadata
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}@postgres-db:5432/modelbox_metadata
       - REDIS_URL=redis://redis-cache:6379/0
       - CELERY_BROKER_URL=redis://redis-cache:6379/1
       - CELERY_RESULT_BACKEND=redis://redis-cache:6379/1
@@ -131,7 +131,7 @@ services:
       # needs the same opt-in — a backend that works and a worker that silently
       # refuses would be worse than both failing.
       - MODELBOX_ALLOW_PROVIDER_CALLS=${MODELBOX_ALLOW_PROVIDER_CALLS:-1}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env - see the README install steps}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
     # See the backend service: keys arrive by file, and must not be restated
     # under `environment:` or that block overrides them with empty strings.
     # The worker matters most here — it is the service that actually runs
@@ -177,7 +177,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: modelbox
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - see the README install steps}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
       POSTGRES_DB: modelbox_metadata
     volumes:
       - pgdata:/var/lib/postgresql/data

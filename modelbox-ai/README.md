@@ -45,10 +45,20 @@ modelbox-ai/
 ## Quick start (Docker appliance)
 
 ```bash
-cp .env.example .env          # then set JWT_SECRET, ENCRYPTION_KEY, POSTGRES_PASSWORD
-                              # to long random hex values, and fill in provider API keys
+# 1. Generate .env with fresh secrets (from this directory; refuses to overwrite an existing .env)
+pwsh scripts/init-env.ps1     # Windows (PowerShell 7)
+sh scripts/init-env.sh        # Linux / macOS
+
+# 2. Fill in provider API keys in .env, then start
 docker compose --env-file .env -f docker/docker-compose.appliance.yml up --build
 ```
+
+**Step 1 comes first.** The init script writes `.env` from `.env.example`
+with a generated 64-character hex value for `JWT_SECRET`, `ENCRYPTION_KEY` and
+`POSTGRES_PASSWORD`, and prints only their names. It never overwrites an
+existing `.env`: a new `ENCRYPTION_KEY` would make every stored connection
+secret unreadable, and a new `POSTGRES_PASSWORD` would lock the appliance out
+of its own database. Keep `.env` with your backups (see `docs/AVAILABILITY.md`).
 
 `.env` belongs here, beside this README, and **`--env-file .env` is not
 optional.** Two different mechanisms read that file and only one of them finds
