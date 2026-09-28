@@ -13,11 +13,6 @@ with no gateway.
 
 The first check is the precondition: the network really denies egress, so a
 pass below is not a box that merely happened to have no route out.
-
-HTTP here goes from inside the UI container to the UI's own port
-(conftest.ExecTransport): with the UI also on the internal network, Docker
-Engine 28.0.4 reset every host connection to its published port. The
-requests take the same path through the UI to the backend.
 """
 
 from __future__ import annotations

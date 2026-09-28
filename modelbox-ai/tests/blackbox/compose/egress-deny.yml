@@ -15,12 +15,12 @@ networks:
 
 services:
   modelbox-ui:
-    # On Docker Engine 28.0.4 the UI's published port accepted and then reset
-    # every host connection while the UI was also on the internal network, with
-    # or without gw_priority. Configuration C therefore sends its HTTP from
-    # inside the UI container to the UI's own port (conftest.ExecTransport);
-    # the host-port checks are configuration B's (B3).
     networks: [egress-deny, host-facing]
+    environment:
+      # Next.js's standalone server listens on the address $HOSTNAME resolves
+      # to, which on two networks is only the first one's. Listening on every
+      # interface lets the published port reach it on host-facing.
+      - HOSTNAME=0.0.0.0
   modelbox-backend:
     networks: [egress-deny]
   modelbox-worker:
