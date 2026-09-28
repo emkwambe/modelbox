@@ -428,7 +428,11 @@ jobs:
 
       - name: Appliance logs
         if: ${{ failure() }}
-        run: docker compose -p modelbox-ai logs --no-color --tail 200
+        run: |
+          docker version --format 'engine {{.Server.Version}}'
+          docker compose version
+          docker compose -p modelbox-ai ps -a
+          docker compose -p modelbox-ai logs --no-color --tail 200
 
       - name: Stop C
         if: ${{ always() }}

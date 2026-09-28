@@ -53,7 +53,9 @@ def test_designate_on_an_upgraded_database_reaches_the_owners_export() -> None:
         },
     )
 
-    whole = compose("up", "-d", "--wait")
+    # No --wait: the worker has no healthcheck and the migrate service exits by
+    # design, so readiness is the UI answering /api/health.
+    whole = compose("up", "-d")
     assert whole.returncode == 0, f"setup: the appliance did not start: {whole.stderr[-600:]}"
     wait_for_health()
     assert sql_ok("SELECT version_num FROM alembic_version;") == "0022_append_only_ledgers", (

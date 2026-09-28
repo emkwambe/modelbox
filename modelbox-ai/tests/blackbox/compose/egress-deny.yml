@@ -15,7 +15,13 @@ networks:
 
 services:
   modelbox-ui:
-    networks: [egress-deny, host-facing]
+    networks:
+      # The host-facing network is the UI's gateway network, so its published
+      # port maps to the UI's address there. Without the priority the mapping
+      # took its address on the internal network, which the host cannot reach.
+      host-facing:
+        gw_priority: 1
+      egress-deny: {}
   modelbox-backend:
     networks: [egress-deny]
   modelbox-worker:
