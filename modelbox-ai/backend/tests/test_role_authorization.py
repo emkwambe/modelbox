@@ -49,7 +49,7 @@ async def session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession
     """A database, plus the audit sink pointed at the same one.
 
     `audit_log.record` deliberately opens its **own** session through
-    `AsyncSessionLocal` rather than joining the caller's, so that a DENIED event
+    `get_sessionmaker()` rather than joining the caller's, so that a DENIED event
     survives the 403 that rolls the request back. That is correct in production
     and invisible in a test, where overriding `get_db_session` redirects the
     request but not the sink — the audit row is written to whatever the real
@@ -68,7 +68,7 @@ async def session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    monkeypatch.setattr("app.core.database.AsyncSessionLocal", maker, raising=False)
+    monkeypatch.setattr("app.core.database.get_sessionmaker", lambda: maker)
     async with maker() as sess:
         yield sess
     await engine.dispose()

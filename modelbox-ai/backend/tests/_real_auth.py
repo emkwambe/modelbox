@@ -7,8 +7,10 @@ authenticates with a real bearer token from `create_access_token`, or a real
 `X-API-Key`, and `get_current_user` resolves it exactly as it would in the
 appliance.
 
-The audit sink opens its own session through `AsyncSessionLocal`, so it is
-pointed at the same database, or an audited 403 is written somewhere else.
+The audit sink opens its own session through `get_sessionmaker()`, so it is
+pointed at the same database, or an audited 403 is written somewhere else. The
+patch uses monkeypatch's default `raising=True`: it fails if the name does not
+exist in `app.core.database`, which is what production would call.
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ async def sqlite_session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Async
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    monkeypatch.setattr("app.core.database.AsyncSessionLocal", maker, raising=False)
+    monkeypatch.setattr("app.core.database.get_sessionmaker", lambda: maker)
     async with maker() as session:
         # For code that opens its own sessions, such as `app.cli.run`.
         session.info["maker"] = maker

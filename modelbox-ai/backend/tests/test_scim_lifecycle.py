@@ -51,7 +51,7 @@ async def session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    monkeypatch.setattr("app.core.database.AsyncSessionLocal", maker, raising=False)
+    monkeypatch.setattr("app.core.database.get_sessionmaker", lambda: maker)
     async with maker() as sess:
         yield sess
     await engine.dispose()
@@ -59,7 +59,7 @@ async def session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession
 
 @pytest.fixture
 def scim_enabled(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(get_settings(), "scim_token", TOKEN, raising=False)
+    monkeypatch.setattr(get_settings(), "scim_token", TOKEN)
 
 
 async def _client(session: AsyncSession) -> AsyncClient:

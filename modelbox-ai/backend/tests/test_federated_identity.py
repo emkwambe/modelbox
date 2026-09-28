@@ -53,7 +53,7 @@ async def session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    monkeypatch.setattr("app.core.database.AsyncSessionLocal", maker, raising=False)
+    monkeypatch.setattr("app.core.database.get_sessionmaker", lambda: maker)
     async with maker() as sess:
         yield sess
     await engine.dispose()
@@ -63,7 +63,7 @@ async def session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession
 def allow_issuer(monkeypatch: pytest.MonkeyPatch):
     """Put ISSUER on the allowlist for one test."""
     settings = get_settings()
-    monkeypatch.setattr(settings, "oidc_allowed_issuers", [ISSUER], raising=False)
+    monkeypatch.setattr(settings, "oidc_allowed_issuers", [ISSUER])
     return settings
 
 
@@ -176,7 +176,7 @@ async def test_the_same_subject_from_another_issuer_is_a_different_person(
     """
     settings = get_settings()
     monkeypatch.setattr(
-        settings, "oidc_allowed_issuers", [ISSUER, OTHER_ISSUER], raising=False
+        settings, "oidc_allowed_issuers", [ISSUER, OTHER_ISSUER]
     )
     a = await federated_identity.resolve(session, _claims("00u-abc", iss=ISSUER))
     b = await federated_identity.resolve(

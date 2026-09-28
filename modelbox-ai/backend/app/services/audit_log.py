@@ -29,10 +29,16 @@ precisely backwards.
 *The actor's email is copied, not joined.* `actor_user_id` is not a foreign key.
 An audit trail has to survive the user being deleted, which is the moment
 somebody most wants to read it.
+
+**A write that fails is not silent.** It is logged at ERROR and counted, and
+the count is on `/health` (`write_failure_status`), which reports `degraded`
+while it is non-zero. The count is per process: the API and the worker each
+report their own.
 """
 
 from __future__ import annotations
 
+import datetime
 import logging
 import uuid
 from typing import Any
@@ -40,6 +46,34 @@ from typing import Any
 from app.models.metadata_store import AUDIT_ACTIONS, AUDIT_OUTCOMES
 
 logger = logging.getLogger(__name__)
+
+
+class _WriteFailures:
+    """Audit events this process failed to write, since it started."""
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.last_at: datetime.datetime | None = None
+
+    def note(self) -> None:
+        self.count += 1
+        self.last_at = datetime.datetime.now(datetime.UTC)
+
+
+_failures = _WriteFailures()
+
+
+def note_write_failure() -> None:
+    """Count one failed audit write. Separate so `/health`'s test can disable it."""
+    _failures.note()
+
+
+def write_failure_status() -> dict[str, Any]:
+    """What `/health` reports about this process's audit writes."""
+    return {
+        "write_failures": _failures.count,
+        "last_write_failure": _failures.last_at.isoformat() if _failures.last_at else None,
+    }
 
 
 async def record(
@@ -68,19 +102,22 @@ async def record(
     """
     if action not in AUDIT_ACTIONS:
         logger.error("Refusing to record unknown audit action %r", action)
+        note_write_failure()
         return
     if outcome not in AUDIT_OUTCOMES:
         logger.error("Refusing to record unknown audit outcome %r", outcome)
+        note_write_failure()
         return
 
     try:
         # Imported here, not at module scope, for the reason the egress ledger
         # defers it: this module is imported by structural tests that must not
-        # pull in the async database driver.
-        from app.core.database import AsyncSessionLocal
+        # pull in the async database driver. `test_audit_sink_unpatched` writes
+        # a row through this path with nothing patched.
+        from app.core.database import get_sessionmaker
         from app.models.metadata_store import AuditEvent
 
-        async with AsyncSessionLocal() as session:
+        async with get_sessionmaker()() as session:
             session.add(
                 AuditEvent(
                     action=action,
@@ -95,9 +132,11 @@ async def record(
                 )
             )
             await session.commit()
-    except Exception:  # pragma: no cover - defensive, asserted by test
+    except Exception:
         # Deliberately broad, and deliberately not re-raised. See the module
-        # docstring: the action already happened.
+        # docstring: the action already happened. Logged at ERROR and counted
+        # for `/health`, so a sink that cannot write is visible.
+        note_write_failure()
         logger.exception(
             "Failed to write audit event %s/%s for actor %s",
             action,

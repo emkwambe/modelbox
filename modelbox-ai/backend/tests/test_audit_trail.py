@@ -188,7 +188,7 @@ async def test_an_unknown_action_is_refused_rather_than_written(
         called = True
         raise AssertionError("should not reach the database")
 
-    monkeypatch.setattr("app.core.database.AsyncSessionLocal", _boom, raising=False)
+    monkeypatch.setattr("app.core.database.get_sessionmaker", _boom)
     await audit_log.record(action="NOT_A_REAL_ACTION")
     assert not called
 

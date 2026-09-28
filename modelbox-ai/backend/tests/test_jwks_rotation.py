@@ -91,11 +91,11 @@ class _Response:
 def idp(monkeypatch: pytest.MonkeyPatch):
     """A configured IdP whose published key set the test controls."""
     settings = get_settings()
-    monkeypatch.setattr(settings, "jwt_algorithm", "RS256", raising=False)
-    monkeypatch.setattr(settings, "jwt_jwks_url", JWKS_URL, raising=False)
-    monkeypatch.setattr(settings, "jwt_audience", AUDIENCE, raising=False)
-    monkeypatch.setattr(settings, "jwt_issuer", ISSUER, raising=False)
-    monkeypatch.setattr(settings, "jwt_public_key", None, raising=False)
+    monkeypatch.setattr(settings, "jwt_algorithm", "RS256")
+    monkeypatch.setattr(settings, "jwt_jwks_url", JWKS_URL)
+    monkeypatch.setattr(settings, "jwt_audience", AUDIENCE)
+    monkeypatch.setattr(settings, "jwt_issuer", ISSUER)
+    monkeypatch.setattr(settings, "jwt_public_key", None)
     jwks.reset_cache()
 
     state = {"keys": [OLD["jwk"]], "fetches": 0, "fail": False}
@@ -223,7 +223,7 @@ def test_a_configured_jwks_never_falls_back_to_the_static_key(
     would surface later as tokens that stop working for no visible reason.
     """
     settings = get_settings()
-    monkeypatch.setattr(settings, "jwt_public_key", OLD["pem"], raising=False)
+    monkeypatch.setattr(settings, "jwt_public_key", OLD["pem"])
     idp["keys"] = []
     jwks.reset_cache()
 

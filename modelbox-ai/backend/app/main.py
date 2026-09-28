@@ -120,13 +120,22 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["system"], summary="Liveness & readiness probe")
     async def health() -> dict[str, Any]:
-        """Return service health, version, and egress mode."""
+        """Return service health, version, egress mode, and audit-write health.
+
+        ``degraded`` while this process has failed to write an audit event. The
+        HTTP status stays 200: the container healthchecks read only the status
+        code, and restarting the backend would not repair an audit sink.
+        """
+        from app.services.audit_log import write_failure_status
+
+        audit = write_failure_status()
         return {
-            "status": "ok",
+            "status": "degraded" if audit["write_failures"] else "ok",
             "service": settings.app_name,
             "version": app.version,
             "environment": settings.environment,
             "airgapped": settings.is_airgapped,
+            "audit": audit,
         }
 
     _mount_api_router(app)
