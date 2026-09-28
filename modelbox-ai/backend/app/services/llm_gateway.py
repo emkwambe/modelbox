@@ -24,6 +24,7 @@ from typing import Any, TypeVar
 
 import yaml
 from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
 
 from app.core.config import Settings, get_settings
 from app.services.egress_ledger import (
@@ -205,6 +206,46 @@ def _reask_messages(
     if isinstance(messages, list) and messages:
         return messages
     return sent
+
+
+def _field_errors(exc: BaseException) -> list[str]:
+    """``field.path:error_type`` for every pydantic error along the chain.
+
+    Read with ``include_input=False`` and without messages or context, which is
+    where pydantic puts the value it was given: here, the model's output.
+    """
+    errors: list[str] = []
+    for link in _exception_chain(exc):
+        if isinstance(link, PydanticValidationError):
+            for error in link.errors(
+                include_input=False, include_url=False, include_context=False
+            ):
+                path = ".".join(str(part) for part in error["loc"]) or "(root)"
+                errors.append(f"{path}:{error['type']}")
+    return errors
+
+
+def describe_provider_failure(
+    exc: BaseException,
+    *,
+    classification: type[LLMRouterError],
+    provider: str,
+    model: str,
+) -> str:
+    """What the ledger, the gateway's log and its raised errors say about a failure.
+
+    Provider, model, the classification, the exception classes along the
+    chain, and for a schema failure each error's field path and type. Never an
+    exception's message: a validation error's message quotes the invalid value,
+    which is the model's output, and a wrapper's message quotes the validation
+    error. The ledger is append-only, so what is written there stays.
+    """
+    classes = "<".join(type(link).__name__ for link in _exception_chain(exc))
+    parts = [f"{classification.__name__}/{classes}", f"provider={provider}", f"model={model}"]
+    errors = _field_errors(exc)
+    if errors:
+        parts.append("errors=" + ",".join(errors))
+    return " ".join(parts)
 
 
 def classify_provider_failure(exc: BaseException) -> type[LLMRouterError]:
@@ -545,12 +586,18 @@ class LLMGateway:
         except Exception as exc:
             # The classification goes in the ledger, not just the log. "Which
             # provider failed and why" is an operator question, and the answer
-            # is worth as much as the record that the request was made.
-            classification = classify_provider_failure(exc)
+            # is worth as much as the record that the request was made. What
+            # is written is `describe_provider_failure`, never the exception's
+            # message, which can quote the model's output.
             await self._ledger.record_outcome(
                 attempt,
                 event=EGRESS_FAILURE,
-                error=f"{classification.__name__}/{type(exc).__name__}: {exc}",
+                error=describe_provider_failure(
+                    exc,
+                    classification=classify_provider_failure(exc),
+                    provider=attempt.provider,
+                    model=str(call_kwargs.get("model", "unknown")),
+                ),
             )
             raise
         prompt_tokens, completion_tokens = usage_tokens(result)
@@ -663,7 +710,7 @@ class LLMGateway:
         digest = prompt_digest(prompt)
 
         permitted = self._permitted_egress_classes(task)
-        last_error: Exception | None = None
+        last_error: str | None = None
         seen: list[type[LLMRouterError]] = []
         for provider_name in chain:
 
@@ -680,8 +727,10 @@ class LLMGateway:
                     workspace_id=workspace_id,
                 )
 
+            model = "unknown"
             try:
                 call_kwargs = self._litellm_kwargs(provider_name)
+                model = str(call_kwargs.get("model", "unknown"))
                 logger.info("Routing task '%s' -> provider '%s'", task, provider_name)
                 return await self._call_with_schema_retries(
                     new_attempt=new_attempt,
@@ -705,13 +754,17 @@ class LLMGateway:
             except Exception as exc:
                 classification = classify_provider_failure(exc)
                 seen.append(classification)
-                last_error = exc
+                # Described, never quoted: the message can carry the model's
+                # output, and this text reaches the log and, through the error
+                # raised below, a job's stored error.
+                last_error = describe_provider_failure(
+                    exc, classification=classification, provider=provider_name, model=model
+                )
                 logger.warning(
-                    "Provider '%s' failed for task '%s' [%s]: %s",
+                    "Provider '%s' failed for task '%s': %s",
                     provider_name,
                     task,
-                    classification.__name__,
-                    exc,
+                    last_error,
                 )
                 # Looked up rather than defaulted: a classification added
                 # without deciding its failover behaviour raises here instead of
@@ -720,9 +773,8 @@ class LLMGateway:
                     raise classification(
                         f"Provider '{provider_name}' failed for task '{task}' in "
                         f"a way this gateway does not recognise, so the chain was "
-                        f"abandoned rather than continued: "
-                        f"{type(exc).__name__}: {exc}. Classify it in "
-                        f"_FAILURE_SIGNATURES if failing over is correct."
+                        f"abandoned rather than continued: {last_error}. Classify "
+                        f"it in _FAILURE_SIGNATURES if failing over is correct."
                     ) from exc
                 continue
 

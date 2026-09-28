@@ -397,7 +397,11 @@ async def test_a_failed_call_writes_attempt_then_failure(router_config: str) -> 
         await gateway.structured_completion("one_provider", PROMPT, Trivial)
 
     assert ledger.events() == ["ATTEMPT", "FAILURE"]
-    assert "provider exploded" in str(ledger.rows[1]["error"])
+    # The failure is described by class, provider and model, never quoted: an
+    # exception's message can carry the model's output (test_model_output_redaction).
+    error = str(ledger.rows[1]["error"])
+    assert error.startswith("UnclassifiedProviderError/RuntimeError provider=")
+    assert "provider exploded" not in error
 
 
 async def test_failover_records_each_provider_as_its_own_request(

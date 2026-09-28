@@ -21,10 +21,46 @@ there too.
 
 from __future__ import annotations
 
+import logging
 import logging.config
+import re
 from typing import Any
 
 from app.core.config import Settings
+
+# Pydantic renders each error as `... [type=T, input_value=<repr>, input_type=X]`
+# on one line; a repr escapes newlines, so the value cannot span lines. Greedy to
+# the line's last `, input_type=`, so a value that itself contains that text is
+# still covered.
+_INPUT_VALUE = re.compile(r"input_value=.*, input_type=")
+REDACTED = "input_value=<redacted>, input_type="
+
+
+def redact_model_output(text: str) -> str:
+    """``text`` with every pydantic ``input_value`` replaced."""
+    return _INPUT_VALUE.sub(REDACTED, text)
+
+
+class RedactModelOutput(logging.Filter):
+    """Redacts ``input_value`` from Instructor's log records.
+
+    Instructor logs a failed structured call's validation error, and pydantic's
+    rendering of it quotes the value it rejected: the model's output. The
+    gateway never logs that value itself (`describe_provider_failure`); this
+    covers the library's own records. Installed on the handler rather than on
+    the ``instructor`` logger, because a logger's filters do not apply to
+    records from its children, and Instructor logs from ``instructor.v2.*``.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name == "instructor" or record.name.startswith("instructor."):
+            record.msg = redact_model_output(record.getMessage())
+            record.args = None
+            if record.exc_info:
+                record.exc_text = redact_model_output(
+                    logging.Formatter().formatException(record.exc_info)
+                )
+        return True
 
 
 def logging_dict_config(settings: Settings) -> dict[str, Any]:
@@ -42,11 +78,13 @@ def logging_dict_config(settings: Settings) -> dict[str, Any]:
         # them in place keeps access logs and worker output intact.
         "disable_existing_loggers": False,
         "formatters": {"standard": {"format": fmt}},
+        "filters": {"redact_model_output": {"()": RedactModelOutput}},
         "handlers": {
             "console": {
                 "class": "logging.StreamHandler",
                 "formatter": "standard",
                 "stream": "ext://sys.stdout",
+                "filters": ["redact_model_output"],
             }
         },
         "root": {"handlers": ["console"], "level": "WARNING"},
