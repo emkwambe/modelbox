@@ -89,6 +89,14 @@ A pipeline that synthesizes, edits or administers with a key will get 403
 after upgrading. **Recreate any key that needs more**, passing the `role_cap`
 it needs, and revoke the old one.
 
+### Column types, defaults and introspected identifiers are checked before SQL
+
+A column's `data_type` must parse as exactly one SQL type and its
+`default_value` as exactly one scalar expression. Anything else is a linter
+**error** (`INVALID_DATA_TYPE`, `INVALID_DEFAULT`), and DDL and dbt export
+refuse the model (400) rather than emit it. Introspection refuses a schema,
+dataset or BigQuery project name that is not a plain identifier (422).
+
 ### Paradigm transformation refuses two cases
 
 `POST /api/v1/model/{id}/transform-paradigm` now returns **409** when the

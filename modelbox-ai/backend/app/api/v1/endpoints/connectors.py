@@ -31,6 +31,7 @@ from app.services.graph_repository import GraphRepository
 from app.services.introspection import (
     IntrospectionDriverError,
     IntrospectionService,
+    InvalidIdentifierError,
 )
 
 router = APIRouter(prefix="/connectors", tags=["connectors"])
@@ -157,6 +158,10 @@ async def introspect_connection(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
                 detail=f"Introspection for {engine} is not yet supported.",
             )
+    except InvalidIdentifierError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
     except IntrospectionDriverError as exc:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)

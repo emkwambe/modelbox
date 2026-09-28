@@ -73,7 +73,7 @@ Layered FastAPI: `api/v1/endpoints` → `services` → `models` (SQLAlchemy) wit
 | `schemas/data_model.py` | 866 | **The IR.** `EntitySchema` / `ColumnSchema` / relationships — the file to read first |
 | `services/introspection.py` | 841 | Reverse-engineering: Postgres, MySQL, Snowflake, BigQuery, Databricks, DuckDB |
 | `models/metadata_store.py` | 659 | 13 tables — users, workspaces, models/entities/columns/relationships, jobs, connections, api keys, trainer, `egress_audit` |
-| `services/graph_engine.py` | 595 | NetworkX linter — **13 codes** — plus topological ordering |
+| `services/graph_engine.py` | 595 | NetworkX linter — **13 codes** (15 since Sprint 7) — plus topological ordering |
 | `services/llm_gateway.py` | 570 | The single egress choke point: routing, residency, failover classification, ledger writes |
 | `services/seed_generator.py` | 497 | Synthetic rows that must satisfy the contract exported from the same model |
 | `services/diff_engine.py` | 292 | Version-to-version breaking-change detection |
@@ -83,6 +83,9 @@ The linter's thirteen codes, all in `graph_engine.py`: `CYCLIC_FK`,
 `MISSING_PK`, `DANGLING_REF`, `NAMING_CONVENTION`, `MISSING_GRAIN`,
 `MISSING_DESCRIPTION`, `PII_EXPOSURE`, `FAN_OUT_RISK`, `MISSING_SLA`,
 `INVALID_RANGE`, `INVALID_REGEX`, `PATTERN_EXCEEDS_LENGTH`, `ORPHAN_ENTITY`.
+Sprint 7 added two errors, `INVALID_DATA_TYPE` and `INVALID_DEFAULT`, for a
+column type or default that does not parse as exactly one SQL type or
+expression (`services/sql_fragments.py`).
 
 Seven API routers (`api/v1/router.py`): auth, jobs, models, transform,
 workspaces, trainer, connectors. Fifteen Alembic migrations, `0001` → `0015`,

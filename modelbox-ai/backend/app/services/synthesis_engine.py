@@ -120,6 +120,11 @@ primary keys and the whole invented-constraint family are *warnings*, so
 severity would have excluded the most mechanically fixable defects there are
 while including nothing else.
 
+(Sprint 7 added two error codes, `INVALID_DATA_TYPE` and `INVALID_DEFAULT`.
+They are deliberately not in this set: they guard what reaches SQL, and
+widening what the repair pass asks a model to fix is a change to the pass,
+not to the guard.)
+
 So the partition is drawn where it actually lies: **a code is repairable when a
 correct answer is objectively checkable from the graph alone.** A cycle either
 exists or does not. A reference either resolves or does not. A regex either fits

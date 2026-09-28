@@ -195,10 +195,28 @@ class ExporterService:
         out.extend(e for e in model.entities if e.entity_name not in seen)
         return out
 
+    def _require_valid_fragments(self, entity: EntitySchema) -> None:
+        """Refuse an entity whose data types or defaults are not exactly SQL.
+
+        They are interpolated into the script below, so one that does not parse
+        as a single type or expression is refused with its lint code and never
+        emitted verbatim (`app.services.sql_fragments`, Sprint 7 Step 2.4).
+        """
+        from app.services.sql_fragments import column_problems
+
+        for column in entity.columns:
+            problems = column_problems(column.data_type, column.default_value, self._source_dialect)
+            if problems:
+                code, reason = problems[0]
+                raise ExporterError(
+                    f"{code}: column '{entity.entity_name}.{column.name}': {reason}."
+                )
+
     def _entity_create_table(
         self, entity: EntitySchema, relationships: list[RelationshipSchema]
     ) -> str:
         """Build a single ANSI ``CREATE TABLE`` string for an entity."""
+        self._require_valid_fragments(entity)
         lines: list[str] = [
             # NOT NULL from the declared constraint (H4). Emitting nothing made
             # every column implicitly nullable, which is also why Databricks
@@ -334,6 +352,7 @@ class ExporterService:
         )
 
     def _dbt_staging_sql(self, entity: EntitySchema, source_name: str) -> str:
+        self._require_valid_fragments(entity)
         casts = ",\n".join(
             f"    cast({col.name} as {col.data_type}) as {col.name}"
             for col in entity.columns

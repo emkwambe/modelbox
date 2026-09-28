@@ -8,6 +8,7 @@ transformation. The metadata->graph mapping is a pure function
 
 from __future__ import annotations
 
+import re
 import urllib.parse
 from typing import Any
 
@@ -17,6 +18,26 @@ from app.schemas.data_model import (
     RelationshipSchema,
     SynthesizedModel,
 )
+
+# Identifiers that reach introspection SQL (Sprint 7, Step 2.4). BigQuery and
+# Snowflake interpolate them into the statement; Postgres and MySQL bind them.
+# All four drivers check before use, so no driver relies on its caller.
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_$]{0,127}")
+_BIGQUERY_DATASET = re.compile(r"[A-Za-z0-9_]{1,1024}")
+# Project IDs: 6-30 lowercase letters, digits and hyphens, optionally
+# domain-scoped (``example.com:project``).
+_BIGQUERY_PROJECT = re.compile(r"(?:[a-z0-9][a-z0-9.-]*[a-z0-9]:)?[a-z][a-z0-9-]{4,28}[a-z0-9]")
+
+
+class InvalidIdentifierError(ValueError):
+    """An identifier did not match the strict pattern for where it is used."""
+
+
+def require_identifier(value: object, what: str, pattern: re.Pattern[str] = _IDENTIFIER) -> str:
+    """Return ``value`` if it fully matches ``pattern``; otherwise refuse."""
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        raise InvalidIdentifierError(f"{what} {value!r} is not a valid identifier.")
+    return value
 
 # information_schema.data_type -> normalized ModelBox/SQLGlot-friendly type.
 _PG_TYPE_MAP: dict[str, str] = {
@@ -291,6 +312,7 @@ class IntrospectionService:
         """Connect to Postgres and build a graph from INFORMATION_SCHEMA."""
         import asyncpg
 
+        require_identifier(schema_name, "schema")
         uri = connection_uri.replace("postgresql+asyncpg://", "postgresql://")
         conn = await asyncpg.connect(uri)
         try:
@@ -454,6 +476,8 @@ class IntrospectionService:
         """
         import asyncio
 
+        # Interpolated into SHOW ... IN SCHEMA below; check before use.
+        require_identifier(schema_name, "schema")
         try:
             import snowflake.connector as sf  # type: ignore[import-not-found]
         except ModuleNotFoundError as exc:
@@ -591,6 +615,12 @@ class IntrospectionService:
         """
         import asyncio
 
+        # Both are interpolated into the query text below; check before
+        # anything else, including loading the driver.
+        dataset = require_identifier(schema_name, "BigQuery dataset", _BIGQUERY_DATASET)
+        info, project = IntrospectionService._bigquery_config(connection_uri)
+        project = require_identifier(project, "BigQuery project", _BIGQUERY_PROJECT)
+
         try:
             from google.cloud import bigquery  # type: ignore[import-not-found]
             from google.oauth2 import service_account  # type: ignore[import-not-found]
@@ -598,9 +628,6 @@ class IntrospectionService:
             raise IntrospectionDriverError(
                 "google-cloud-bigquery is not installed on the appliance."
             ) from exc
-
-        info, project = IntrospectionService._bigquery_config(connection_uri)
-        dataset = schema_name
 
         def _run() -> tuple[
             list[str],
@@ -685,17 +712,18 @@ class IntrospectionService:
         connection_uri: str, schema_name: str = "public"
     ) -> SynthesizedModel:
         """Introspect a MySQL schema (database) into a graph. Driver lazy-imported."""
+        cfg = IntrospectionService._parse_mysql_uri(connection_uri)
+        db = cfg.get("db")
+        # In MySQL a "schema" is a database; prefer an explicit one, else the URI's.
+        schema = schema_name if schema_name and schema_name != "public" else db
+        require_identifier(schema, "schema")
+
         try:
             import aiomysql  # type: ignore[import-not-found]
         except ModuleNotFoundError as exc:
             raise IntrospectionDriverError(
                 "aiomysql is not installed on the appliance."
             ) from exc
-
-        cfg = IntrospectionService._parse_mysql_uri(connection_uri)
-        db = cfg.get("db")
-        # In MySQL a "schema" is a database; prefer an explicit one, else the URI's.
-        schema = schema_name if schema_name and schema_name != "public" else db
 
         def _lower(row: dict[str, Any]) -> dict[str, Any]:
             return {str(k).lower(): v for k, v in row.items()}
