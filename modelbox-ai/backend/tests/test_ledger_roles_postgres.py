@@ -39,6 +39,7 @@ from tests._docker_postgres import (
     POSTGRES_IMAGE,
     assert_reachable_from_host,
     published_port,
+    wait_for_queries,
 )
 from tests.test_migration_0013_populated import DOCKER, _need_docker
 
@@ -92,6 +93,7 @@ def database() -> Iterator[dict[str, str]]:
         else:
             pytest.fail("postgres container never became ready")
         assert_reachable_from_host(port)
+        wait_for_queries(port)
         owner = f"postgresql+asyncpg://verify:verify@localhost:{port}/verify"
         result = _bootstrap(owner, FIRST_PASSWORD)
         yield {

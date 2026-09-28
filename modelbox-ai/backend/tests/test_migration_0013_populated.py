@@ -40,9 +40,10 @@ from tests._docker_postgres import (
     POSTGRES_IMAGE,
     assert_reachable_from_host,
     published_port,
+    wait_for_queries,
 )
 
-BACKEND = Path(__file__).resolve().parents[1]
+BACKEND =Path(__file__).resolve().parents[1]
 REPO = BACKEND.parents[1]
 GOLD_DIR = BACKEND / "tests" / "fixtures" / "gold"
 
@@ -135,6 +136,7 @@ def postgres_dsn() -> str:
         else:
             pytest.fail("postgres container never became ready")
         assert_reachable_from_host(port)
+        wait_for_queries(port)
         yield f"postgresql+asyncpg://verify:verify@localhost:{port}/verify"
     finally:
         subprocess.run([DOCKER, "rm", "-f", name], capture_output=True)

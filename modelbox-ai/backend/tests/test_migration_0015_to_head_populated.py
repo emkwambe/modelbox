@@ -49,6 +49,7 @@ from tests._docker_postgres import (
     POSTGRES_IMAGE,
     assert_reachable_from_host,
     published_port,
+    wait_for_queries,
 )
 from tests.test_migration_0013_populated import (
     BACKEND,
@@ -94,9 +95,8 @@ def server() -> Iterator[str]:
         else:
             pytest.fail("postgres container never became ready")
         assert_reachable_from_host(port)
-        template = f"postgresql+asyncpg://verify:verify@localhost:{port}/{{db}}"
-        _wait_for_queries(template.format(db="verify"))
-        yield template
+        wait_for_queries(port)
+        yield f"postgresql+asyncpg://verify:verify@localhost:{port}/{{db}}"
     finally:
         subprocess.run([DOCKER, "rm", "-f", name], capture_output=True, check=False)
 
@@ -118,25 +118,6 @@ async def _execute(dsn: str, query: str, **params: object) -> None:
             await conn.execute(sa.text(query), params)
     finally:
         await engine.dispose()
-
-
-def _wait_for_queries(dsn: str, attempts: int = 30) -> None:
-    """Wait until a query succeeds over the host port.
-
-    The image's entrypoint initialises the cluster on a temporary server, stops
-    it, and starts the real one, so `pg_isready` and an open port can both
-    answer during that window and the next connection is reset. A completed
-    query is the readiness this module actually needs.
-    """
-    last: BaseException | None = None
-    for _ in range(attempts):
-        try:
-            asyncio.run(_fetch(dsn, "SELECT 1"))
-            return
-        except (OSError, sa.exc.DBAPIError) as error:
-            last = error
-            time.sleep(1)
-    pytest.fail(f"postgres never answered a query over the host port: {last!r}")
 
 
 async def _create_database(admin_dsn: str, name: str) -> None:

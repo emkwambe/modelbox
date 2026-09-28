@@ -27,6 +27,7 @@ and it is what let a broken publish read as a healthy database.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import socket
 import subprocess
@@ -100,4 +101,42 @@ def assert_reachable_from_host(port: str, timeout_seconds: int = 30) -> None:
     )
 
 
-__all__ = ["DOCKER", "POSTGRES_IMAGE", "assert_reachable_from_host", "published_port"]
+def wait_for_queries(port: str, attempts: int = 30) -> None:
+    """Wait until a query completes over the host port, as the fixtures' user.
+
+    The image's entrypoint initialises the cluster on a temporary server, stops
+    it, and starts the real one. `pg_isready` and an open port can both answer
+    during that window, and the next connection is then reset. A completed query
+    is the readiness every gate actually needs. Called by every fixture here:
+    fixed in one module first (Step 3.3), the same race then failed another.
+    """
+    import asyncpg
+
+    async def _query() -> None:
+        connection = await asyncpg.connect(
+            host="127.0.0.1", port=int(port), user="verify", password="verify",
+            database="verify", timeout=5,
+        )
+        try:
+            await connection.fetchval("SELECT 1")
+        finally:
+            await connection.close()
+
+    last: BaseException | None = None
+    for _ in range(attempts):
+        try:
+            asyncio.run(_query())
+            return
+        except (OSError, asyncpg.PostgresError, asyncio.TimeoutError) as exc:
+            last = exc
+            time.sleep(1)
+    pytest.fail(f"postgres never answered a query on 127.0.0.1:{port}: {last!r}")
+
+
+__all__ = [
+    "DOCKER",
+    "POSTGRES_IMAGE",
+    "assert_reachable_from_host",
+    "published_port",
+    "wait_for_queries",
+]
