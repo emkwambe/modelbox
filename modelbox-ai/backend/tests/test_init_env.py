@@ -23,8 +23,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = ROOT / ".env.example"
-GENERATED = ("JWT_SECRET", "ENCRYPTION_KEY", "POSTGRES_PASSWORD")
+GENERATED = ("JWT_SECRET", "ENCRYPTION_KEY", "POSTGRES_PASSWORD", "MODELBOX_APP_DB_PASSWORD")
 HEX64 = re.compile(r"[0-9a-f]{64}")
+ADD_MISSING = {"ps1": "-AddMissing", "sh": "--add-missing"}
+
+# The add-missing mode's "leave a present key alone" block. Its negative
+# control removes it, so a present key gets appended a second time.
+KEEP = re.compile(r"[ \t]*# keep:begin\n.*?# keep:end\n", re.DOTALL)
 
 # The guard block, and what the negative control puts in its place: the same
 # script with the refusal gone and the create-new write turned into a plain one.
@@ -56,12 +61,18 @@ def _interpreter(kind: str) -> list[str]:
     return command
 
 
-def _layout(tmp_path: Path, kind: str, *, unguarded: bool = False) -> Path:
+def _layout(
+    tmp_path: Path, kind: str, *, unguarded: bool = False, keepless: bool = False
+) -> Path:
     script = (ROOT / "scripts" / f"init-env.{kind}").read_text(encoding="utf-8")
     script = script.replace("\r\n", "\n")
     if unguarded:
         stripped, count = GUARD.subn(UNGUARDED[kind], script)
         assert count == 1, "fixture precondition: exactly one guard block"
+        script = stripped
+    if keepless:
+        stripped, count = KEEP.subn("", script)
+        assert count == 1, "fixture precondition: exactly one keep block"
         script = stripped
     (tmp_path / "scripts").mkdir()
     target = tmp_path / "scripts" / f"init-env.{kind}"
@@ -70,10 +81,10 @@ def _layout(tmp_path: Path, kind: str, *, unguarded: bool = False) -> Path:
     return target
 
 
-def _run(kind: str, script: Path) -> subprocess.CompletedProcess[str]:
+def _run(kind: str, script: Path, *args: str) -> subprocess.CompletedProcess[str]:
     # Forward slashes: Git Bash's `dirname` does not split on backslashes.
     return subprocess.run(
-        [*_interpreter(kind), script.as_posix()],
+        [*_interpreter(kind), script.as_posix(), *args],
         capture_output=True,
         text=True,
         timeout=60,
@@ -99,7 +110,7 @@ def test_the_example_declares_each_secret_once_and_empty() -> None:
 
 
 @pytest.mark.parametrize("kind", ["ps1", "sh"])
-def test_the_script_generates_the_three_secrets(kind: str, tmp_path: Path) -> None:
+def test_the_script_generates_the_four_secrets(kind: str, tmp_path: Path) -> None:
     script = _layout(tmp_path, kind)
     result = _run(kind, script)
     assert result.returncode == 0, result.stderr
@@ -144,6 +155,59 @@ def test_negative_control_without_the_guard_the_check_fails(
     script = _layout(tmp_path, kind, unguarded=True)
     with pytest.raises(AssertionError, match="overwrote an existing .env"):
         _check_refuses_to_overwrite(kind, script, tmp_path / ".env")
+
+
+# --- --add-missing / -AddMissing (upgrades) ---------------------------------
+
+UPGRADED_ENV = (
+    "JWT_SECRET=existing-jwt-secret-value-kept-as-is\n"
+    "ENCRYPTION_KEY=existing-encryption-key-kept-as-is\n"
+    "POSTGRES_PASSWORD=\n"
+    "KEEP=me"  # no trailing newline, on purpose
+)
+
+
+def _check_add_missing_never_overwrites(kind: str, script: Path, env: Path) -> None:
+    """The check, shared by the test and its negative control."""
+    env.write_bytes(UPGRADED_ENV.encode("utf-8"))
+    result = _run(kind, script, ADD_MISSING[kind])
+    assert result.returncode == 0, result.stderr
+    text = env.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    for original in UPGRADED_ENV.splitlines():
+        assert original in lines, f"an existing line changed: {original!r}"
+    for name in ("JWT_SECRET", "ENCRYPTION_KEY", "POSTGRES_PASSWORD"):
+        count = sum(1 for line in lines if line.startswith(f"{name}="))
+        assert count == 1, f"--add-missing wrote a second {name}"
+    added = [line for line in lines if line.startswith("MODELBOX_APP_DB_PASSWORD=")]
+    assert len(added) == 1 and HEX64.fullmatch(added[0].partition("=")[2])
+    output = result.stdout + result.stderr
+    assert "MODELBOX_APP_DB_PASSWORD" in output
+    assert added[0].partition("=")[2][:8] not in output, "printed secret material"
+
+
+@pytest.mark.parametrize("kind", ["ps1", "sh"])
+def test_add_missing_adds_only_what_is_absent(kind: str, tmp_path: Path) -> None:
+    """Present keys, even an empty POSTGRES_PASSWORD, are left exactly as they are."""
+    script = _layout(tmp_path, kind)
+    _check_add_missing_never_overwrites(kind, script, tmp_path / ".env")
+
+
+@pytest.mark.parametrize("kind", ["ps1", "sh"])
+def test_add_missing_refuses_to_create_the_file(kind: str, tmp_path: Path) -> None:
+    script = _layout(tmp_path, kind)
+    result = _run(kind, script, ADD_MISSING[kind])
+    assert result.returncode != 0
+    assert not (tmp_path / ".env").exists()
+
+
+@pytest.mark.parametrize("kind", ["ps1", "sh"])
+def test_negative_control_without_the_keep_block_a_present_key_is_rewritten(
+    kind: str, tmp_path: Path
+) -> None:
+    script = _layout(tmp_path, kind, keepless=True)
+    with pytest.raises(AssertionError, match="wrote a second"):
+        _check_add_missing_never_overwrites(kind, script, tmp_path / ".env")
 
 
 def test_the_powershell_script_is_saved_without_a_bom() -> None:

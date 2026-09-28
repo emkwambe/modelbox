@@ -211,7 +211,7 @@ def test_the_documented_install_passes_the_env_file() -> None:
 # and the operator after the name is the whole question. `:-` brings the
 # appliance up on whatever follows it; `:?` stops Compose and names the
 # variable before any container exists.
-REQUIRED_SECRETS = ("JWT_SECRET", "ENCRYPTION_KEY", "POSTGRES_PASSWORD")
+REQUIRED_SECRETS = ("JWT_SECRET", "ENCRYPTION_KEY", "POSTGRES_PASSWORD", "MODELBOX_APP_DB_PASSWORD")
 _REFERENCE = re.compile(r"\$\{(" + "|".join(REQUIRED_SECRETS) + r")(:\?|:-|\?|-|\})")
 
 
@@ -239,12 +239,82 @@ def test_the_app_services_receive_every_secret(service: str) -> None:
     env = _env(service)
     assert env.get("JWT_SECRET", "").startswith("${JWT_SECRET:?")
     assert env.get("ENCRYPTION_KEY", "").startswith("${ENCRYPTION_KEY:?")
-    assert "${POSTGRES_PASSWORD:?" in env.get("DATABASE_URL", "")
+    assert "${MODELBOX_APP_DB_PASSWORD:?" in env.get("DATABASE_URL", "")
 
 
 def test_the_database_receives_its_password() -> None:
     env = SPEC["services"]["postgres-db"]["environment"]
     assert str(env["POSTGRES_PASSWORD"]).startswith("${POSTGRES_PASSWORD:?")
+
+
+# ---------------------------------------------------------------------------
+# Only modelbox-migrate holds the owner credential (Sprint 7 Step 3)
+# ---------------------------------------------------------------------------
+MIGRATE = "modelbox-migrate"
+
+
+def _service_env(spec: dict, service: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for entry in spec["services"][service].get("environment") or []:
+        name, _, value = str(entry).partition("=")
+        out[name.strip()] = value
+    return out
+
+
+def _check_owner_credential_isolated(spec: dict) -> None:
+    """The check, shared by the test and its negative controls."""
+    for service in APP_SERVICES:
+        env = _service_env(spec, service)
+        url = env.get("DATABASE_URL", "")
+        assert url.startswith("postgresql+asyncpg://modelbox_app:${MODELBOX_APP_DB_PASSWORD:?"), (
+            f"{service} does not connect as modelbox_app"
+        )
+        assert "POSTGRES_PASSWORD" not in url, f"{service} connects with the owner password"
+        # env_file delivers all of .env; environment: wins, so it must blank this.
+        assert env.get("POSTGRES_PASSWORD") == "", f"{service} can read the owner password"
+        depends = spec["services"][service].get("depends_on") or {}
+        assert depends.get(MIGRATE, {}).get("condition") == "service_completed_successfully", (
+            f"{service} can start before migrations"
+        )
+    migrate = _service_env(spec, MIGRATE)
+    assert migrate["DATABASE_URL"].startswith("postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?")
+    assert spec["services"][MIGRATE]["command"] == ["python", "-m", "app.db_bootstrap"]
+
+
+def test_only_the_migrate_service_holds_the_owner_credential() -> None:
+    _check_owner_credential_isolated(SPEC)
+
+
+def test_the_backend_image_does_not_migrate() -> None:
+    """It connects as a role that cannot change the schema."""
+    dockerfile = (COMPOSE.parent / "Dockerfile.backend").read_text(encoding="utf-8")
+    cmd = [line for line in dockerfile.splitlines() if line.startswith("CMD")]
+    assert cmd and "alembic" not in cmd[0]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda env: [
+                "DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?x}@db/m"
+                if e.startswith("DATABASE_URL=") else e
+                for e in env
+            ],
+            "does not connect as modelbox_app",
+        ),
+        (lambda env: [e for e in env if e != "POSTGRES_PASSWORD="], "can read the owner password"),
+    ],
+    ids=["owner-dsn", "owner-password-not-blanked"],
+)
+def test_negative_control_the_backend_holding_the_owner_credential_fails(mutate, message) -> None:
+    import copy
+
+    spec = copy.deepcopy(SPEC)
+    backend = spec["services"]["modelbox-backend"]
+    backend["environment"] = mutate([str(e) for e in backend["environment"]])
+    with pytest.raises(AssertionError, match=message):
+        _check_owner_credential_isolated(spec)
 
 
 @pytest.mark.parametrize("service", APP_SERVICES)

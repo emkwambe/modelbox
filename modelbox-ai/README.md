@@ -67,11 +67,22 @@ prompt. Set `MODELBOX_ALLOW_REGISTRATION=true` in `.env` only if you want open
 self-registration on this appliance.
 
 **Step 1 comes first.** The init script writes `.env` from `.env.example`
-with a generated 64-character hex value for `JWT_SECRET`, `ENCRYPTION_KEY` and
-`POSTGRES_PASSWORD`, and prints only their names. It never overwrites an
-existing `.env`: a new `ENCRYPTION_KEY` would make every stored connection
-secret unreadable, and a new `POSTGRES_PASSWORD` would lock the appliance out
-of its own database. Keep `.env` with your backups (see `docs/AVAILABILITY.md`).
+with a generated 64-character hex value for `JWT_SECRET`, `ENCRYPTION_KEY`,
+`POSTGRES_PASSWORD` and `MODELBOX_APP_DB_PASSWORD`, and prints only their
+names. It never overwrites an existing `.env`: a new `ENCRYPTION_KEY` would make
+every stored connection secret unreadable, and a new `POSTGRES_PASSWORD` would
+lock the appliance out of its own database. Keep `.env` with your backups (see
+`docs/AVAILABILITY.md`). When upgrading, `--add-missing` (`-AddMissing` in
+PowerShell) adds only the secrets an existing `.env` lacks, and never changes
+one already there.
+
+**Two database accounts.** `POSTGRES_PASSWORD` belongs to the database owner,
+used only by the one-shot `modelbox-migrate` service, which applies migrations
+and then sets the password of `modelbox_app` from `MODELBOX_APP_DB_PASSWORD`.
+The backend and worker connect as `modelbox_app`, which cannot change the
+schema and can only add to the audit trail and egress ledger, never change
+them. To rotate its password, change it in `.env` and start the appliance
+again.
 
 `.env` belongs here, beside this README, and **`--env-file .env` is not
 optional.** Two different mechanisms read that file and only one of them finds

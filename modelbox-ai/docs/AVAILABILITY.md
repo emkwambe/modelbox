@@ -104,24 +104,28 @@ docker compose -f docker/docker-compose.appliance.yml exec -T postgres-db \
 Nightly is the recommended cadence. **Store it off the host** — a backup on the
 volume you are protecting against is not a backup.
 
-Two things the dump does *not* contain, and both will stop a restore being a
-recovery:
+Three things the dump does *not* contain:
 
-- **`ENCRYPTION_KEY` from `.env`.** Connection secrets are encrypted with it. A
-  database restored without the original key gives you every row and no usable
-  warehouse connection.
+- **`.env`, and `ENCRYPTION_KEY` above all.** Connection secrets are encrypted
+  with it. A database restored without the original key gives you every row and
+  no usable warehouse connection. Back up `.env` with the dump.
 - **Ollama model weights**, in air-gapped installs. They are re-pullable on a
   connected host and are not re-pullable on the host that most needs them.
+- **The `modelbox_app` database role.** Roles belong to the Postgres cluster,
+  not the database, so a dump restored into a fresh volume has none, and the
+  dump's `GRANT ... TO modelbox_app` lines report errors during the restore.
+  That is expected: the `modelbox-migrate` service recreates the role and its
+  grants on the next start, before the backend connects.
 
 ### Restore
 
 ```bash
-docker compose -f docker/docker-compose.appliance.yml down
+docker compose --env-file .env -f docker/docker-compose.appliance.yml down
 docker volume rm modelbox_pgdata
-docker compose -f docker/docker-compose.appliance.yml up -d postgres-db
-docker compose -f docker/docker-compose.appliance.yml exec -T postgres-db \
+docker compose --env-file .env -f docker/docker-compose.appliance.yml up -d postgres-db
+docker compose --env-file .env -f docker/docker-compose.appliance.yml exec -T postgres-db \
   psql -U modelbox -d modelbox_metadata < modelbox-2026-09-02.sql
-docker compose -f docker/docker-compose.appliance.yml up -d
+docker compose --env-file .env -f docker/docker-compose.appliance.yml up -d
 ```
 
 Then verify the revision matches the release you are running:

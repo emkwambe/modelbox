@@ -255,7 +255,9 @@ jobs:
         run: |
           cd modelbox-ai/backend
           # Full history is needed: the "before" side is a worktree at the last tag.
-          pytest tests/test_migration_0013_populated.py -v --no-header
+          # test_ledger_roles_postgres.py proves the append-only ledgers and the
+          # least-privilege role by raw SQL against a real Postgres (Step 3.2).
+          pytest tests/test_migration_0013_populated.py tests/test_ledger_roles_postgres.py -v --no-header
 
   versions:
     name: Version Consistency

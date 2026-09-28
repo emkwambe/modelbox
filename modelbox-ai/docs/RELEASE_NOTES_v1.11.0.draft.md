@@ -10,8 +10,17 @@ v1.11.0 supersedes v1.10.0, which was never tagged.
 
 ## Upgrading an existing install
 
-1. **Keep your `.env`.** Its secrets protect your existing data (see the
-   breaking changes below for what the backend now refuses).
+1. **Keep your `.env`, and add the fourth secret.** Its secrets protect your
+   existing data (see the breaking changes below for what the backend now
+   refuses). v1.11.0 adds `MODELBOX_APP_DB_PASSWORD`, and Compose refuses to
+   start without it. Add only what is missing, without touching any key
+   already there:
+
+   ```bash
+   sh scripts/init-env.sh --add-missing      # Linux / macOS
+   pwsh scripts/init-env.ps1 -AddMissing     # Windows (PowerShell 7)
+   ```
+
 2. **Designate the appliance owner.** An upgraded install has workspace owners
    but no appliance owner, and appliance-wide audit events (sign-ins, SCIM)
    are readable only by one. After starting v1.11.0, choose one existing
@@ -115,6 +124,19 @@ A column's `data_type` must parse as exactly one SQL type and its
 **error** (`INVALID_DATA_TYPE`, `INVALID_DEFAULT`), and DDL and dbt export
 refuse the model (400) rather than emit it. Introspection refuses a schema,
 dataset or BigQuery project name that is not a plain identifier (422).
+
+### The application connects as a least-privilege database role
+
+The backend and worker now connect as `modelbox_app`, not as the database
+owner. It cannot change the schema, and on the audit trail and egress ledger it
+can only read and add rows. A new one-shot service, `modelbox-migrate`, runs
+migrations as the owner on every start and sets `modelbox_app`'s password from
+`MODELBOX_APP_DB_PASSWORD`; the backend and worker start after it succeeds. The
+backend image no longer runs migrations itself.
+
+Both ledgers are append-only at the database (migration `0022`): a trigger
+refuses updates, deletes and truncation for every role. Anything that edited or
+pruned `audit_event` or `egress_audit` rows directly will now be refused.
 
 ### The audit trail records every declared action, and says where each belongs
 

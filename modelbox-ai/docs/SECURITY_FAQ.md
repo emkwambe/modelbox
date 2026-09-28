@@ -164,6 +164,13 @@ security document.
 - **No host hardening claim.** The egress controls govern what the application
   does. An operator with shell access can make network calls the appliance did
   not, and nothing here is a sandbox.
+- **Root on the host is out of scope.** The audit trail and egress ledger are
+  append-only at the database: the application's own role cannot update or
+  delete their rows, and a trigger refuses it for the database owner too. That
+  protects the ledgers from the application and from anyone holding its
+  credentials. It does not protect them from someone with root on the host, who
+  can read `.env`, act as the database superuser, disable triggers, or edit the
+  data files directly. Protecting the host is the operator's responsibility.
 - **No transport-security claim beyond TLS to the provider.** These controls
   decide whether a request is made, not what an observer sees.
 - **No formal certification.** No SOC 2, ISO 27001 or comparable audit has been

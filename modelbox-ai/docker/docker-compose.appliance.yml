@@ -45,7 +45,13 @@ services:
       # container exists and names the variable, where a default would bring
       # the appliance up on a value published in this repository.
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
-      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}@postgres-db:5432/modelbox_metadata
+      # The least-privilege role (migration 0022): no DDL, and the two ledgers
+      # are SELECT/INSERT only. Only modelbox-migrate connects as the owner.
+      - DATABASE_URL=postgresql+asyncpg://modelbox_app:${MODELBOX_APP_DB_PASSWORD:?MODELBOX_APP_DB_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}@postgres-db:5432/modelbox_metadata
+      # env_file below carries all of .env, including the owner's password.
+      # `environment:` wins over `env_file:`, so it is blanked here: this
+      # container never holds the owner credential.
+      - POSTGRES_PASSWORD=
       - REDIS_URL=redis://redis-cache:6379/0
       - CELERY_BROKER_URL=redis://redis-cache:6379/1
       - CELERY_RESULT_BACKEND=redis://redis-cache:6379/1
@@ -96,8 +102,8 @@ services:
       # The task router the in-process gateway reads.
       - ../config/model_router.yaml:/app/config/model_router.yaml:ro
     depends_on:
-      postgres-db:
-        condition: service_healthy
+      modelbox-migrate:
+        condition: service_completed_successfully
       redis-cache:
         condition: service_healthy
     healthcheck:
@@ -116,10 +122,12 @@ services:
     image: modelbox/core-engine:v1.10.0
     command: ["celery", "-A", "app.worker", "worker", "--loglevel=info"]
     environment:
-      # As the backend: production, and no default for any of the three secrets.
+      # As the backend: production, no default for any secret, the
+      # least-privilege role, and the owner's password blanked.
       - ENVIRONMENT=production
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
-      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}@postgres-db:5432/modelbox_metadata
+      - DATABASE_URL=postgresql+asyncpg://modelbox_app:${MODELBOX_APP_DB_PASSWORD:?MODELBOX_APP_DB_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}@postgres-db:5432/modelbox_metadata
+      - POSTGRES_PASSWORD=
       - REDIS_URL=redis://redis-cache:6379/0
       - CELERY_BROKER_URL=redis://redis-cache:6379/1
       - CELERY_RESULT_BACKEND=redis://redis-cache:6379/1
@@ -150,11 +158,35 @@ services:
     healthcheck:
       disable: true
     depends_on:
-      postgres-db:
-        condition: service_healthy
+      modelbox-migrate:
+        condition: service_completed_successfully
       redis-cache:
         condition: service_healthy
     restart: unless-stopped
+
+  # One-shot, on every start: migrate as the owner, then set modelbox_app's
+  # password from .env (app/db_bootstrap.py). The only service that holds the
+  # owner's credentials; the backend and worker start after it succeeds.
+  modelbox-migrate:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.backend
+    image: modelbox/core-engine:v1.10.0
+    command: ["python", "-m", "app.db_bootstrap"]
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}@postgres-db:5432/modelbox_metadata
+      - MODELBOX_APP_DB_PASSWORD=${MODELBOX_APP_DB_PASSWORD:?MODELBOX_APP_DB_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+      # Settings refuse to start in production without these, and the
+      # migrations load Settings.
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    restart: "no"
 
   postgres-db:
     # Pinned by version and digest, like ollama-engine: the tag names the
