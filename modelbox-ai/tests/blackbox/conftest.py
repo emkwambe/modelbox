@@ -360,8 +360,6 @@ INSERT INTO data_models (model_id, workspace_id, title, current_paradigm, target
            (:'model_b', :'ws_b', 'Blackbox model B', 'KIMBALL', 'postgres', 1, now(), now());
 INSERT INTO users (user_id, email, hashed_password, is_active, created_at)
     VALUES (:'viewer_id', 'viewer@blackbox.test', :'viewer_hash', true, now());
-INSERT INTO workspace_members (membership_id, workspace_id, user_id, role)
-    VALUES (gen_random_uuid(), :'ws_a', :'viewer_id', 'VIEWER');
 """
 
 
@@ -369,9 +367,14 @@ INSERT INTO workspace_members (membership_id, workspace_id, user_id, role)
 def world(client: httpx.Client) -> World:
     """An owner of workspaces A and B, a VIEWER of A, and a model in each.
 
-    Production has no API for adding a member or a workspace (people arrive by
-    SCIM or OIDC), so those rows are written as the database owner, the way an
-    operator would repair an install. Every check then runs over HTTP.
+    **The VIEWER joins A through the members API**, as the owner, over HTTP
+    (Sprint 8 Step 6; owner decision). Written as the database owner, the way
+    an operator would repair an install, are only the rows no API creates:
+    workspace B and its first OWNER (there is no create-workspace endpoint,
+    and a workspace's first OWNER cannot be added by a member of it), the
+    viewer's user row (users come from OIDC, SCIM or create-owner, none of
+    which gives this suite a password login), and the two models. Every check
+    then runs over HTTP.
     """
     owner = make_appliance_owner(client)
     workspaces = client.get(
@@ -389,5 +392,11 @@ def world(client: httpx.Client) -> World:
             "model_b": model_b, "viewer_id": viewer_id, "viewer_hash": viewer_hash,
         },
     )
+    joined = client.post(
+        f"/api/v1/workspaces/{ws_a}/members",
+        json={"email": "viewer@blackbox.test", "role": "VIEWER"},
+        headers=bearer(token(client, owner.email, owner.password)),
+    )
+    assert joined.status_code == 201, f"setup: the owner could not add the viewer: {joined.text[:300]}"
     viewer = Account("viewer@blackbox.test", viewer_password, viewer_id)
     return World(owner, viewer, ws_a, ws_b, model_a, model_b)
