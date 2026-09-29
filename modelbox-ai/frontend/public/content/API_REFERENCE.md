@@ -92,6 +92,37 @@ List the caller's workspaces and their role in each
 
 **Responses:** `200` Successful Response
 
+### `GET /api/v1/workspaces/{workspace_id}/members`
+
+The workspace's members, with their roles (VIEWER).
+
+**Responses:** `200` Successful Response, `403` Not a member, `404` No such workspace
+
+### `POST /api/v1/workspaces/{workspace_id}/members`
+
+Add an existing appliance user to the workspace (OWNER or ADMIN). **Request
+body:** `{"email": ..., "role": ...}`. Users are created by OIDC, SCIM or
+`create-owner`; an email with no user is refused.
+
+**Responses:** `201` Created (the member list), `403` A role above your own, or an ADMIN making an OWNER, `404` No such user, `409` Already a member
+
+### `PATCH /api/v1/workspaces/{workspace_id}/members/{user_id}`
+
+Change a member's role (OWNER or ADMIN). **Request body:** `{"role": ...}`.
+Refused for a role above the caller's own, for a member whose role is above
+the caller's own, and for the last OWNER. The role acted with is the
+effective one: an API key's is the lower of its cap and its creator's role.
+
+**Responses:** `200` The member list, `403` Above your own role, `404` No such member, `409` The last OWNER
+
+### `DELETE /api/v1/workspaces/{workspace_id}/members/{user_id}`
+
+Remove a member (OWNER or ADMIN). Refused for a member whose role is above
+the caller's own and for the last OWNER. The member's API keys lose this
+workspace at once.
+
+**Responses:** `204` Removed, `403` Above your own role, `404` No such member, `409` The last OWNER
+
 ### `GET /api/v1/workspaces/{workspace_id}/classification`
 
 The workspace's classification scale (VIEWER): its levels, least to most
@@ -138,6 +169,11 @@ List models in the caller's workspaces
 Diff two models into migration DDL + breaking changes
 
 **Request body:** `DiffRequest`
+
+Columns of two separately saved models are paired by name: a rename between
+them is a removal plus an addition, never guessed. Every statement that drops
+a column or table is headed by a `-- DATA LOSS:` comment, and `data_loss`
+lists the same text.
 
 **Responses:** `200` Successful Response, `422` Validation Error
 
