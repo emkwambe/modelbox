@@ -370,15 +370,31 @@ def test_backfill_assigns_ordinal_ranked_stable_ids(
                 assert column["is_nullable"] is False
 
 
+# The newest revision whose schema the v1.6.0 code can read. Its ORM selects
+# the key flag columns 0025 moved into constraint tables, so a database at
+# 0025 or later cannot be read by it. Until 0026 this gate downgraded one step
+# (`-1`), which from 0025 landed here; from 0026 one step lands on 0025, so
+# the gate names its target instead (owner decision, Sprint 8 Step 4b).
+BASELINE_READABLE_REVISION = "0024_column_source_type"
+
+
 @pytest.mark.slow
 def test_downgrade_restores_the_previous_schema(
     postgres_dsn: str, baseline_worktree: Path
 ) -> None:
-    """The downgrade path must work, and re-upgrading must be clean."""
+    """The downgrade path must work, and re-upgrading must be clean.
+
+    Down to the newest revision the v1.6.0 code reads, which takes every
+    migration after it down in one pass (0026's and 0025's today).
+    """
     _need_docker()
 
-    result = _alembic(BACKEND, postgres_dsn, "downgrade", "-1")
+    result = _alembic(BACKEND, postgres_dsn, "downgrade", BASELINE_READABLE_REVISION)
     assert result.returncode == 0, result.stderr[-3000:]
+    current = _alembic(BACKEND, postgres_dsn, "current")
+    assert BASELINE_READABLE_REVISION in current.stdout + current.stderr, (
+        f"the downgrade did not reach {BASELINE_READABLE_REVISION}:\n{current.stdout}{current.stderr}"
+    )
 
     # The old code must still be able to read the downgraded database.
     after_downgrade = _run_helper(baseline_worktree, postgres_dsn, "export-only")

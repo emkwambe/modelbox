@@ -47,6 +47,7 @@ deliberately this time rather than discovered.
 from __future__ import annotations
 
 import json
+import uuid
 
 import pytest
 import sqlglot
@@ -58,9 +59,15 @@ from app.schemas.data_model import (
     EntitySchema,
     Paradigm,
     SynthesizedModel,
+    SynthesizeRequest,
 )
 from app.services.exporter_service import ExporterService
-from app.services.synthesis_engine import _SYSTEM_PROMPT
+from app.services.synthesis_engine import (
+    _SYSTEM_PROMPT,
+    PERSON_SUPPLIED_COLUMN_FIELDS,
+    PERSON_SUPPLIED_ENTITY_FIELDS,
+    SynthesisEngine,
+)
 
 DATASET = "omission_ds"
 
@@ -212,6 +219,10 @@ def test_every_invented_constraint_field_is_covered() -> None:
         "is_nullable",  # has a safe default and is compared across artifacts
         "source_data_type",  # an imported column's provenance; no emitter reads it
         "source_default_value",  # likewise, for its DEFAULT
+        # Sprint 8 Step 4b: dictionary fields a person supplies. Synthesis clears
+        # them whatever the model returns (`clear_person_supplied`), so nothing a
+        # model invents reaches the model or a contract; proven below.
+        *PERSON_SUPPLIED_COLUMN_FIELDS,
     }
     uncovered = sorted(ir_optional - set(OPTIONAL_CONSTRAINTS) - excused)
     assert not uncovered, (
@@ -243,12 +254,50 @@ def test_every_invented_entity_field_is_covered() -> None:
         # before adding an IR field that defaults to 0.
         "canvas_position_x",
         "canvas_position_y",
+        # Sprint 8 Step 4b: cleared after synthesis, as for the column fields.
+        *PERSON_SUPPLIED_ENTITY_FIELDS,
     }
     uncovered = sorted(ir_optional - set(ENTITY_CONSTRAINTS) - excused)
     assert not uncovered, (
         f"optional entity fields a model could invent, neither covered by the "
         f"omission instruction nor excused: {uncovered}"
     )
+
+
+class _Inventing:
+    """A provider that fills every person-supplied dictionary field."""
+
+    async def structured_completion(self, *args: object, **kwargs: object) -> SynthesizedModel:
+        return SynthesizedModel.model_validate({
+            "paradigm": "3NF",
+            "entities": [{
+                "entity_name": "account", "business_name": "Customer account", "business_owner": "Sales",
+                "it_steward": "Platform", "authoritative_source": "CRM",
+                "columns": [{"name": "account_id", "data_type": "INTEGER", "is_primary_key": True,
+                             "business_name": "Account number", "permissible_values": [1, 2],
+                             "unit": "each", "critical_data_element": True,
+                             "authoritative_source": "CRM", "classification_level_id": str(uuid.uuid4())}],
+            }],
+        })
+
+
+def _person_supplied(model: SynthesizedModel) -> dict[str, object]:
+    entity = model.entities[0]
+    column = entity.columns[0]
+    return {**{f: getattr(entity, f) for f in PERSON_SUPPLIED_ENTITY_FIELDS},
+            **{f"column.{f}": getattr(column, f) for f in PERSON_SUPPLIED_COLUMN_FIELDS}}
+
+
+async def test_synthesis_keeps_no_person_supplied_field_a_model_invented() -> None:
+    engine = SynthesisEngine(session=None, gateway=_Inventing())  # type: ignore[arg-type]
+    model, _ = await engine.build_graph(SynthesizeRequest(content="accounts"))
+    assert {k: v for k, v in _person_supplied(model).items() if v is not None} == {}
+
+
+async def test_negative_control_the_provider_does_invent_them() -> None:
+    """Without this the test above could pass on a provider that sets nothing."""
+    invented = await _Inventing().structured_completion()
+    assert all(v is not None for v in _person_supplied(invented).values())
 
 
 # ---------------------------------------------------------------------------

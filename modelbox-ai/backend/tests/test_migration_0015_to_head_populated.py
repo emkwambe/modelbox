@@ -504,10 +504,14 @@ async def test_the_ledgers_refuse_rewrites_after_the_upgrade(upgraded) -> None:
 # --- 0026's downgrade ----------------------------------------------------------
 
 
-async def test_0026_downgrades_and_upgrades_again(server: str) -> None:
+def test_0026_downgrades_and_upgrades_again(server: str) -> None:
     """Down to 0025 drops what 0026 added and keeps every PII value and audit
-    row; up again maps the PII values across afresh."""
-    dsn = _database(server, "downgrade_0026")
+    row; up again maps the PII values across afresh. Synchronous: the database
+    is made with its own event loop, as the fixtures here do."""
+    asyncio.run(_check_0026_downgrade(_database(server, "downgrade_0026")))
+
+
+async def _check_0026_downgrade(dsn: str) -> None:
     _upgrade_to(BACKEND, dsn, "0025_keys_and_constraints")
     workspace = uuid.uuid4()
     await _execute(dsn, "INSERT INTO workspaces (workspace_id, name) VALUES (:w, 'W')", w=workspace)

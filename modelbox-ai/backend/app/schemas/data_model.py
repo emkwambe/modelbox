@@ -1205,6 +1205,8 @@ class SynthesizeResponse(BaseModel):
     validation: ValidationReport | None = None
     # What migration 0025 could not convert in this model, kept and listed.
     conversion_findings: list[ConversionFinding] = Field(default_factory=list)
+    # The model's workspace, whose classification scale its columns use (Step 4b).
+    workspace_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def _foreign_keys_have_one_source(self) -> SynthesizeResponse:

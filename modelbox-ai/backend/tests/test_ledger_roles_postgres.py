@@ -122,7 +122,7 @@ async def test_the_migrate_service_succeeds_and_prints_no_password(database) -> 
         version = await owner.fetchval("SELECT version_num FROM alembic_version")
     finally:
         await owner.close()
-    assert version == "0025_keys_and_constraints"
+    assert version == "0026_dictionary_fields"
 
 
 async def test_the_role_is_not_privileged(database) -> None:
