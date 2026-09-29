@@ -994,7 +994,8 @@ class EgressAudit(Base):
 #: Every member is emitted by a code path, and `test_audit_actions.py` drives
 #: each one. An action with no path is removed, not left declared: a declared
 #: action nothing emits tells a reviewer to look for events that cannot exist
-#: (Sprint 7 Step 3 removed AUTH_LOGOUT, MEMBER_ROLE_CHANGED and MEMBER_REMOVED).
+#: (Sprint 7 Step 3 removed AUTH_LOGOUT, MEMBER_ROLE_CHANGED and MEMBER_REMOVED;
+#: the last two came back in Sprint 8 Step 6 with an emitter each).
 AUDIT_ACTIONS: tuple[str, ...] = (
     "AUTH_LOGIN",
     "AUTH_LOGIN_FAILED",
@@ -1011,6 +1012,10 @@ AUDIT_ACTIONS: tuple[str, ...] = (
     "APPLIANCE_OWNER_DESIGNATED",
     "FIELD_STATUS_CHANGED",
     "CLASSIFICATION_CHANGED",
+    # Removed in Sprint 7 (nothing emitted them); back in Sprint 8 Step 6 with
+    # the members API as their emitter (migration 0027).
+    "MEMBER_ROLE_CHANGED",
+    "MEMBER_REMOVED",
 )
 
 #: Outcomes. `DENIED` is separate from `FAILURE` on purpose: a refused

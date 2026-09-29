@@ -280,6 +280,32 @@ class WorkspaceInfo(BaseModel):
     role: str
 
 
+WorkspaceRole = Literal["OWNER", "ADMIN", "APPROVER", "MEMBER", "VIEWER"]
+
+
+class MemberInfo(BaseModel):
+    """A member of a workspace (Sprint 8 Step 6)."""
+
+    user_id: uuid.UUID
+    email: str
+    role: WorkspaceRole
+
+
+class MemberAddRequest(BaseModel):
+    """Add an existing appliance user to a workspace, by email."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(..., min_length=3, max_length=255)
+    role: WorkspaceRole
+
+
+class MemberUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: WorkspaceRole
+
+
 class JobCreatedResponse(BaseModel):
     """202 response when an async synthesis job is enqueued (FR-1.1)."""
 

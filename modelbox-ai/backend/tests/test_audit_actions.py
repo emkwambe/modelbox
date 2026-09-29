@@ -131,8 +131,26 @@ async def _key_revoked(c: AsyncClient, w: dict[str, Any]) -> None:
 
 
 async def _member_added(c: AsyncClient, w: dict[str, Any]) -> None:
-    # create-owner already recorded one; registration records another.
-    await _ok(await c.post("/api/v1/auth/register", json={"email": "new@example.com", "password": PASSWORD}), 201)
+    """Through the members API (Sprint 8 Step 6): an ADMIN adds an existing user."""
+    if "joiner" not in w:
+        w["joiner"] = await make_user(w["session"], "joiner@example.com")
+        await w["session"].commit()
+    await _ok(await c.post(f"/api/v1/workspaces/{w['ws'].workspace_id}/members",
+                           json={"email": "joiner@example.com", "role": "MEMBER"}, headers=bearer(w["admin"])), 201)
+
+
+async def _member_role_changed(c: AsyncClient, w: dict[str, Any]) -> None:
+    if "joiner" not in w:
+        await _member_added(c, w)
+    await _ok(await c.patch(f"/api/v1/workspaces/{w['ws'].workspace_id}/members/{w['joiner'].user_id}",
+                            json={"role": "VIEWER"}, headers=bearer(w["admin"])), 200)
+
+
+async def _member_removed(c: AsyncClient, w: dict[str, Any]) -> None:
+    if "joiner" not in w:
+        await _member_added(c, w)
+    await _ok(await c.delete(f"/api/v1/workspaces/{w['ws'].workspace_id}/members/{w['joiner'].user_id}",
+                             headers=bearer(w["admin"])), 204)
 
 
 async def _model_created(c: AsyncClient, w: dict[str, Any]) -> None:
@@ -246,6 +264,8 @@ TRIGGERS: dict[str, Trigger] = {
     "APPLIANCE_OWNER_DESIGNATED": _appliance_owner_designated,
     "FIELD_STATUS_CHANGED": _field_status_changed,
     "CLASSIFICATION_CHANGED": _classification_changed,
+    "MEMBER_ROLE_CHANGED": _member_role_changed,
+    "MEMBER_REMOVED": _member_removed,
 }
 
 
@@ -285,7 +305,10 @@ async def test_every_event_carries_a_workspace_or_says_appliance(session, world)
 
 
 def test_the_removed_actions_are_gone() -> None:
-    assert not {"AUTH_LOGOUT", "MEMBER_ROLE_CHANGED", "MEMBER_REMOVED"} & set(AUDIT_ACTIONS)
+    """AUTH_LOGOUT stays out; the two member actions came back with emitters
+    (Sprint 8 Step 6) and are driven above."""
+    assert "AUTH_LOGOUT" not in AUDIT_ACTIONS
+    assert {"MEMBER_ROLE_CHANGED", "MEMBER_REMOVED"} <= set(TRIGGERS)
 
 
 # --- The appliance owner reads appliance events -----------------------------
