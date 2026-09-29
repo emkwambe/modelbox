@@ -66,7 +66,12 @@ beforeEach(() => {
 async function chooseFileAndSubmit() {
   const file = new File(['CREATE TABLE t (a int);'], 'hr.sql', { type: 'application/sql' });
   fireEvent.change(await screen.findByLabelText(/DDL file/), { target: { files: [file] } });
-  fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+  const button = screen.getByRole('button', { name: 'Import' });
+  // The page's own guard: nothing to submit until a file is chosen.
+  expect(button).toBeEnabled();
+  // Submitted directly: jsdom's constraint validation does not see a file set
+  // through fireEvent, so clicking would stop at the required file input.
+  fireEvent.submit(button.closest('form')!);
   return file;
 }
 
@@ -102,6 +107,11 @@ describe('ImportPage', () => {
     render(<ImportPage />);
     await chooseFileAndSubmit();
     expect(await screen.findByRole('alert')).toHaveTextContent('the file is larger than 10 MB');
+  });
+
+  it('offers no import until a file is chosen', async () => {
+    render(<ImportPage />);
+    expect(await screen.findByRole('button', { name: 'Import' })).toBeDisabled();
   });
 
   it('asks for nothing while signed out', () => {
