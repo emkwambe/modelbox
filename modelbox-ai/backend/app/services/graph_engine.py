@@ -119,7 +119,7 @@ class GraphEngine:
                 entity.entity_name,
                 entity_type=entity.entity_type,
                 column_count=len(entity.columns),
-                has_primary_key=any(col.is_primary_key for col in entity.columns),
+                has_primary_key=bool(entity.primary_key),
             )
 
         for rel in relationships:
@@ -192,7 +192,7 @@ class GraphEngine:
 
         # 2. Missing primary keys.
         for entity in entities:
-            if not any(col.is_primary_key for col in entity.columns):
+            if not entity.primary_key:
                 issues.append(
                     ValidationIssue(
                         severity="warning",
@@ -202,10 +202,42 @@ class GraphEngine:
                     )
                 )
 
-        # 3. Relationships pointing at unknown entities.
+        # 3. Relationships pointing at unknown entities or columns, and
+        # relationships whose columns were never chosen.
+        columns_of = {entity.entity_name: {c.name for c in entity.columns} for entity in entities}
         for rel in relationships:
-            from_entity, from_col = self._split_ref(rel.from_ref)
-            to_entity, _to_col = self._split_ref(rel.to_ref)
+            from_entity, to_entity = rel.from_ref, rel.to_ref
+            from_col = rel.from_columns[0] if rel.from_columns else ""
+
+            for side_entity, side_columns in ((from_entity, rel.from_columns), (to_entity, rel.to_columns)):
+                missing = [c for c in side_columns if side_entity in columns_of and c not in columns_of[side_entity]]
+                for column in missing:
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            code="DANGLING_REF",
+                            message=(
+                                f"Relationship {from_entity} -> {to_entity} names column "
+                                f"'{side_entity}.{column}', which does not exist."
+                            ),
+                            entities=[e for e in (from_entity, to_entity) if e],
+                            entity_name=side_entity,
+                            column_name=column,
+                        )
+                    )
+            if not rel.resolved:
+                issues.append(
+                    ValidationIssue(
+                        severity="warning",
+                        code="UNRESOLVED_RELATIONSHIP",
+                        message=(
+                            f"Relationship {from_entity} -> {to_entity} does not say which columns it "
+                            f"joins, so no foreign key can be emitted. Choose its columns."
+                        ),
+                        entities=[e for e in (from_entity, to_entity) if e],
+                        entity_name=from_entity or None,
+                    )
+                )
 
             # A foreign key on an existing entity pointing at a missing target.
             if to_entity not in entity_names:

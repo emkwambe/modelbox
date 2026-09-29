@@ -25,8 +25,26 @@ export default function ColumnSemanticEditor() {
   const updateColumn = useCanvasStore((s) => s.updateColumn);
   const renameColumn = useCanvasStore((s) => s.renameColumn);
   const selectColumn = useCanvasStore((s) => s.selectColumn);
+  const setColumnReference = useCanvasStore((s) => s.setColumnReference);
+  const edges = useCanvasStore((s) => s.edges);
 
   if (!selectedColumn) return null;
+
+  // What this column references, read from the relationships themselves.
+  const holding = edges.find(
+    (e) =>
+      e.data?.from_ref === selectedColumn.entityName &&
+      e.data.from_columns.includes(selectedColumn.columnName),
+  );
+  const at = holding?.data?.from_columns.indexOf(selectedColumn.columnName) ?? -1;
+  const composite =
+    holding?.data && holding.data.from_columns.length > 1
+      ? `${holding.data.to_ref}(${holding.data.to_columns.join(', ')})`
+      : null;
+  const reference =
+    holding?.data && at >= 0 && holding.data.to_columns[at]
+      ? `${holding.data.to_ref}.${holding.data.to_columns[at]}`
+      : null;
 
   const node = nodes.find((n) => n.id === selectedColumn.entityName);
   const column = node?.data.columns.find(
@@ -370,27 +388,42 @@ export default function ColumnSemanticEditor() {
           />
         </label>
 
-        <label style={fieldRow}>
-          <span style={qualityLabel}>References</span>
-          <select
-            value={column.references ?? ''}
-            onChange={(e) =>
-              updateColumn(
-                selectedColumn!.entityName,
-                selectedColumn!.columnName,
-                { references: e.target.value === '' ? null : e.target.value },
-              )
-            }
-            style={select}
-          >
-            <option value="">— none —</option>
-            {referenceTargets.map((target) => (
-              <option key={target} value={target}>
-                {target}
-              </option>
-            ))}
-          </select>
-        </label>
+        {/*
+          The foreign key is the relationship, not a field on the column
+          (Sprint 8 Step 3). Choosing a target here replaces this column's
+          one-column relationship; a column in a composite foreign key is
+          edited by clicking that relationship on the canvas.
+        */}
+        {composite ? (
+          <div style={fieldRow}>
+            <span style={qualityLabel}>References</span>
+            <span style={qualityLabel}>
+              Part of a composite foreign key to {composite}. Click the relationship to change it.
+            </span>
+          </div>
+        ) : (
+          <label style={fieldRow}>
+            <span style={qualityLabel}>References</span>
+            <select
+              value={reference ?? ''}
+              onChange={(e) =>
+                setColumnReference(
+                  selectedColumn!.entityName,
+                  selectedColumn!.columnName,
+                  e.target.value === '' ? null : e.target.value,
+                )
+              }
+              style={select}
+            >
+              <option value="">— none —</option>
+              {referenceTargets.map((target) => (
+                <option key={target} value={target}>
+                  {target}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       <p style={{ fontSize: 11, color: color.neutral[500], margin: '10px 0 0' }}>

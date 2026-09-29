@@ -150,12 +150,23 @@ async def project_models(session: AsyncSession) -> dict:
                 }
                 for e in sorted(response.entities, key=lambda e: e.entity_name)
             ],
+            # In the older "entity.column" form, which is how the previous
+            # release states a one-column relationship; from Sprint 8 Step 3
+            # the entity and its columns are separate fields. This file runs
+            # under both releases' code, so it reads whichever it is given.
             "relationships": sorted(
-                f"{r.from_ref}->{r.to_ref}:{r.cardinality}"
+                f"{_side(r.from_ref, getattr(r, 'from_columns', None))}->"
+                f"{_side(r.to_ref, getattr(r, 'to_columns', None))}:{r.cardinality}"
                 for r in response.relationships
             ),
         }
     return out
+
+
+def _side(ref: str, columns: list[str] | None) -> str:
+    if columns is None:  # the previous release: ref is already "entity.column"
+        return ref
+    return f"{ref}.{columns[0]}" if len(columns) == 1 else ref
 
 
 async def inspect_backfill(session: AsyncSession) -> dict:
@@ -163,8 +174,13 @@ async def inspect_backfill(session: AsyncSession) -> dict:
     rows = (await session.execute(text(
         """
         SELECT m.title, e.entity_id, e.entity_name, e.next_stable_id,
-               c.column_name, c.stable_id, c.is_primary_key, c.is_nullable,
-               c.ordinal_position
+               c.column_name, c.stable_id, c.is_nullable, c.ordinal_position,
+               EXISTS (
+                   SELECT 1 FROM entity_constraints k
+                   JOIN entity_constraint_columns kc ON kc.constraint_id = k.constraint_id
+                   WHERE k.entity_id = e.entity_id AND k.kind = 'PRIMARY KEY'
+                     AND kc.column_name = c.column_name
+               ) AS is_primary_key
         FROM model_entities e
         JOIN data_models m ON m.model_id = e.model_id
         JOIN entity_columns c ON c.entity_id = e.entity_id

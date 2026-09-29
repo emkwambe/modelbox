@@ -114,7 +114,7 @@ export default function ImportPage() {
   async function handleOpen(modelId: string) {
     try {
       loadModel(await getModel(modelId));
-      router.push('/canvas');
+      router.push(`/canvas/${modelId}`);
     } catch (err) {
       setError(errMessage(err, 'The model could not be opened.'));
     }

@@ -62,16 +62,16 @@ class SyntheticSeedGenerator:
         order = self._generation_order(model)
         by_name = {e.entity_name: e for e in model.entities}
 
-        # (child_entity, child_col) -> (parent_entity, parent_col)
-        fk_target: dict[tuple[str, str], tuple[str, str]] = {}
+        # Resolved relationships by child entity. A composite foreign key is
+        # one relationship, so a child row copies all its referenced columns
+        # from one parent row: columns drawn independently could combine into
+        # a key no parent has.
+        foreign_keys: dict[str, list[tuple[list[str], str, list[str]]]] = {}
         for rel in model.relationships:
-            fe, fc = self._split(rel.from_ref)
-            te, tc = self._split(rel.to_ref)
-            if fc and tc:
-                fk_target[(fe, fc)] = (te, tc)
-        referenced = set(fk_target.values())
+            if rel.resolved:
+                foreign_keys.setdefault(rel.from_ref, []).append(
+                    (rel.from_columns, rel.to_ref, rel.to_columns))
 
-        pools: dict[tuple[str, str], list[object]] = {}
         rows_by_entity: dict[str, list[dict[str, object]]] = {}
         # Values already used by a declared-unique column, per entity+column.
         taken: dict[tuple[str, str], set[object]] = {}
@@ -83,17 +83,20 @@ class SyntheticSeedGenerator:
             rows: list[dict[str, object]] = []
             for i in range(row_count):
                 row: dict[str, object] = {}
-                for col in entity.columns:
-                    key = (ename, col.name)
-                    target = fk_target.get(key)
-                    if target is not None and pools.get(target):
-                        # A foreign key must repeat a parent value, so it is
-                        # deliberately exempt from the distinctness pass below:
-                        # referential integrity outranks a declared UNIQUE.
-                        row[col.name] = self._rng(ename, col.name, i).choice(
-                            pools[target]
-                        )
+                for from_columns, parent, to_columns in foreign_keys.get(ename, []):
+                    parents = rows_by_entity.get(parent)
+                    if not parents:
                         continue
+                    # A foreign key must repeat a parent's values, so it is
+                    # deliberately exempt from the distinctness pass below:
+                    # referential integrity outranks a declared UNIQUE.
+                    chosen = self._rng(ename, ",".join(from_columns), i).choice(parents)
+                    for child_column, parent_column in zip(from_columns, to_columns, strict=True):
+                        row.setdefault(child_column, chosen[parent_column])
+                for col in entity.columns:
+                    if col.name in row:
+                        continue
+                    key = (ename, col.name)
                     if col.is_primary_key:
                         value = self._fit(self._pk_value(entity, col, i), col)
                     else:
@@ -103,10 +106,6 @@ class SyntheticSeedGenerator:
                         value = self._distinct(value, col, bucket)
                         bucket.add(value)
                     row[col.name] = value
-                # Cache any column another entity references (usually the PK).
-                for col in entity.columns:
-                    if (ename, col.name) in referenced:
-                        pools.setdefault((ename, col.name), []).append(row[col.name])
                 rows.append(row)
             rows_by_entity[ename] = rows
 
@@ -491,8 +490,3 @@ class SyntheticSeedGenerator:
         if isinstance(value, bool):
             return "true" if value else "false"
         return value
-
-    @staticmethod
-    def _split(ref: str) -> tuple[str, str]:
-        parts = ref.split(".", 1)
-        return (parts[0], parts[1] if len(parts) > 1 else "")

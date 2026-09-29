@@ -132,7 +132,7 @@ export default function ConnectorsPage() {
         schema_name: schema,
       });
       loadModel(model);
-      router.push('/canvas');
+      router.push(`/canvas/${model.model_id}`);
     } catch (e) {
       setError(errMessage(e));
       setIntrospectingId(null);

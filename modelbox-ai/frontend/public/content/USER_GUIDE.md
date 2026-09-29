@@ -26,6 +26,16 @@ and API keys.
 4. On the canvas: drag entities, edit columns, add relationships, and use
    **Auto-layout**. **Save** persists the graph and re-validates; **Rename** and
    **Delete** manage the model.
+   - **Relationships name their columns.** Drag from one entity to another and
+     a picker asks which columns the relationship joins: the target's primary
+     key is proposed, with source columns of the same name. Pairs can be
+     changed, added or removed, so a composite foreign key is one
+     relationship. Click a relationship to change its columns. A relationship
+     saved before columns could be chosen is drawn dashed until they are.
+   - **Leaving with unsaved changes asks first,** whether by a link in the app
+     or by closing or reloading the page.
+5. Every saved model has its own address, `/canvas/<id>`, and **Models**
+   (`/models`) lists them all. A model reopens exactly as it was saved.
 
 > New to the tool? Click **📚 Explore Requirements Library** for 6 gold-standard
 > starter scenarios — load one onto the canvas instantly (no LLM call) or use it
@@ -51,6 +61,42 @@ Reverse-engineer an existing schema onto the canvas.
 
 **API:** `POST /api/v1/connectors` then `POST /api/v1/connectors/introspect`.
 
+### Workflow 2b — Import an exported DDL file
+
+Build a model from a schema file, with no connection to the database it came
+from: the file is read on the appliance.
+
+1. Go to **Import** (`/import`).
+2. Choose the workspace, the file's dialect and the file. The dialect list says
+   what each import has been tested against: Oracle (`DBMS_METADATA.GET_DDL`
+   output), PostgreSQL (`pg_dump --schema-only`) and SQL Server (SSMS or SMO
+   scripting, split at `GO`) against genuine exports; Snowflake only against a
+   fixture written from its documentation. Files may be UTF-8 or UTF-16 (as
+   SSMS saves them), with or without a byte-order mark.
+3. Click **Import**. The result says whether the import **reconciled**: the
+   file's own counts of tables, columns, keys, constraints and descriptions
+   beside what was imported, with partitions counted apart from tables. A
+   difference, or a statement the parser did not understand, is listed with
+   its statement number and line, and the model is saved **unreconciled**.
+4. **Open on the canvas**, or download the report as Markdown or JSON.
+
+Not imported, and listed in the report: indexes, sequences, views, procedures,
+functions, triggers, ownership, privileges, session settings and `USE`. A
+partition is kept as metadata of its parent table. Composite primary and
+foreign keys, and UNIQUE and CHECK constraints over several columns, are in
+the model; a computed column is kept in the report because the model holds no
+expression for it.
+
+Each column keeps its type and its DEFAULT exactly as the file declared them,
+beside their normalized forms, which exports and comparisons use. From SQL
+Server: constraints added by `ALTER TABLE`, with `WITH CHECK` or
+`WITH NOCHECK`, are in the model (a `NOCHECK` constraint is listed as not
+validated against existing rows); `MS_Description` properties on tables and
+columns become descriptions, and other extended properties are listed; a
+user-defined type resolves to the base type its `CREATE TYPE … FROM` names.
+
+**API:** `POST /api/v1/import/ddl`, then `GET /api/v1/model/{id}/import-report`.
+
 ## Workflow 3 — Governance linting & PII classification
 
 Every validation run includes the **governance lint pack** (advisory warnings —
@@ -58,9 +104,11 @@ they never block a model). On the canvas, affected nodes show an amber badge +
 tooltip, and unclassified-PII columns get a `🔓` highlight.
 
 Rules: `NAMING_CONVENTION`, `MISSING_GRAIN`, `MISSING_DESCRIPTION`,
-`PII_EXPOSURE` (columns that look like PII but aren't classified), and
-`ORPHAN_ENTITY`. Structural errors (`CYCLIC_FK`, `MISSING_PK`, `DANGLING_REF`)
-still invalidate a model.
+`PII_EXPOSURE` (columns that look like PII but aren't classified),
+`ORPHAN_ENTITY`, and `UNRESOLVED_RELATIONSHIP` (a relationship that does not
+say which columns it joins). Structural errors (`CYCLIC_FK`, `MISSING_PK`,
+`DANGLING_REF`, which also covers a relationship naming a column that does not
+exist) still invalidate a model.
 
 Fix findings by adding descriptions, declaring FACT grains, renaming to
 conventions (`dim_`/`fact_`/… prefixes, `_id`/`_sk` key suffixes), and tagging
@@ -87,6 +135,11 @@ Open **Export artifacts** on the canvas. Tabs:
 - **Artifacts** — multi-dialect SQL DDL, a **dbt** project (staging models +
   `schema.yml` with `unique`/`not_null`/`relationships` and `accepted_values`
   tests), and Cube.js. Download individual files or the dbt/Cube project `.zip`.
+  DDL states composite keys, composite foreign keys, UNIQUE and CHECK
+  constraints and, where the dialect has `COMMENT ON`, descriptions. Whatever
+  a dialect cannot express is listed as an **export gap** at the top of the
+  file, by table and reason — for example a CHECK in Snowflake, which has no
+  CHECK constraints, or a relationship whose columns were never chosen.
 - **Contracts** — **OpenDataContract** YAML, **Apache Avro**, **Protobuf**.
 - **Semantic** — Cube.js, **LookML**, **dbt MetricFlow**.
 

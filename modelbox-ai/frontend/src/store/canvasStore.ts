@@ -9,7 +9,6 @@
 
 import { create } from 'zustand';
 import {
-  addEdge,
   applyEdgeChanges,
   applyNodeChanges,
   type Connection,
@@ -19,6 +18,14 @@ import {
 import dagre from 'dagre';
 
 import { validateModel as apiValidateModel } from '@/lib/api';
+import {
+  entityPayload,
+  isResolved,
+  relationshipPayload,
+  relationshipToEdgeData,
+  renameInLists,
+} from '@/store/graphPayload';
+import { semantic } from '@/styles/tokens';
 
 import type {
   CanvasSnapshot,
@@ -30,9 +37,20 @@ import type {
   Paradigm,
   Relationship,
   RelationshipEdge,
+  RelationshipEdgeData,
   SynthesizeResponse,
   ValidationReport,
 } from '@/types/schema';
+
+/**
+ * A relationship being drawn or edited: the two entities, and the edge it
+ * replaces when an existing one is being given its columns.
+ */
+export interface PendingConnection {
+  source: string;
+  target: string;
+  edgeId: string | null;
+}
 
 const HISTORY_LIMIT = 50;
 export const NODE_WIDTH = 240;
@@ -103,10 +121,23 @@ interface CanvasState {
   past: CanvasSnapshot[];
   future: CanvasSnapshot[];
 
+  /** Whether the graph has changed since it was loaded or last saved. */
+  dirty: boolean;
+  /** A relationship waiting for its columns to be chosen. */
+  pendingConnection: PendingConnection | null;
+
   // --- React Flow event handlers ---
   onNodesChange: (changes: NodeChange<EntityNode>[]) => void;
   onEdgesChange: (changes: EdgeChange<RelationshipEdge>[]) => void;
+  /** Connecting two entities asks for columns; nothing is added until they are chosen. */
   onConnect: (connection: Connection) => void;
+  /** Open the column picker for an existing edge. */
+  editEdgeColumns: (edgeId: string) => void;
+  /** Add (or replace) the pending relationship with its chosen columns. */
+  connectColumns: (fromColumns: string[], toColumns: string[], cardinality?: Cardinality) => void;
+  cancelConnection: () => void;
+  /** Record that the current graph is what the server holds. */
+  markSaved: () => void;
 
   // --- mutations ---
   addEntity: (entity: Entity) => void;
@@ -125,6 +156,11 @@ interface CanvasState {
     newColumn: string,
   ) => void;
   selectColumn: (entityName: string, columnName: string | null) => void;
+  /**
+   * Point a column's one-column foreign key at `entity.column`, or remove it
+   * (null): the relationship is replaced, since the relationship is the key.
+   */
+  setColumnReference: (entityName: string, columnName: string, target: string | null) => void;
   removeEntity: (nodeId: string) => void;
   getGraphPayload: () => { entities: Entity[]; relationships: Relationship[] };
   loadGraph: (
@@ -161,47 +197,38 @@ function entityToNode(entity: Entity): EntityNode {
       grain: entity.grain,
       tier: entity.tier,
       freshness_sla: entity.freshness_sla,
+      // Dropped here until Sprint 8 Step 3, so every canvas save cleared it.
+      agg_time_column: entity.agg_time_column ?? null,
       columns: entity.columns,
+      primary_key: entity.primary_key ?? entity.columns.filter((c) => c.is_primary_key).map((c) => c.name),
+      unique_constraints: entity.unique_constraints ?? [],
+      check_constraints: entity.check_constraints ?? [],
     },
   };
 }
+
+/**
+ * An unresolved relationship — saved before its columns could be chosen — is
+ * drawn dashed in the caution tone, so it is visibly not a foreign key yet.
+ */
+const UNRESOLVED_EDGE_STYLE = { stroke: semantic.preview.onLight, strokeDasharray: '6 4' };
 
 /** Build a canvas edge from a backend relationship. */
 function relationshipToEdge(rel: Relationship, index: number): RelationshipEdge {
-  const source = rel.from.split('.', 1)[0] ?? rel.from;
-  const target = rel.to.split('.', 1)[0] ?? rel.to;
+  const data = relationshipToEdgeData(rel);
+  return edgeFor(data, `rel-${index}-${data.from_ref}-${data.to_ref}`);
+}
+
+function edgeFor(data: RelationshipEdgeData, id: string): RelationshipEdge {
+  const resolved = isResolved(data);
   return {
-    id: `rel-${index}-${source}-${target}`,
-    source,
-    target,
-    label: rel.cardinality,
-    data: {
-      cardinality: rel.cardinality as Cardinality,
-      from_ref: rel.from,
-      to_ref: rel.to,
-    },
+    id,
+    source: data.from_ref,
+    target: data.to_ref,
+    label: resolved ? data.cardinality : `${data.cardinality} · columns not chosen`,
+    data,
+    ...(resolved ? {} : { style: UNRESOLVED_EDGE_STYLE }),
   };
-}
-
-/** Rewrite the entity part of an `entity.column` (or bare `entity`) ref. */
-function rewriteRefEntity(ref: string, oldName: string, newName: string): string {
-  const dot = ref.indexOf('.');
-  if (dot === -1) return ref === oldName ? newName : ref;
-  return ref.slice(0, dot) === oldName ? `${newName}${ref.slice(dot)}` : ref;
-}
-
-/** Rewrite the column part of an `entity.column` ref for one entity. */
-function rewriteRefColumn(
-  ref: string,
-  entityName: string,
-  oldColumn: string,
-  newColumn: string,
-): string {
-  const dot = ref.indexOf('.');
-  if (dot === -1) return ref;
-  return ref.slice(0, dot) === entityName && ref.slice(dot + 1) === oldColumn
-    ? `${entityName}.${newColumn}`
-    : ref;
 }
 
 /** Run a dagre layout pass, returning repositioned nodes. */
@@ -251,7 +278,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       edges: structuredClone(edges),
     };
     const trimmed = [...past, snapshot].slice(-HISTORY_LIMIT);
-    set({ past: trimmed, future: [] });
+    // Every mutation commits first, so this is also where the graph becomes
+    // unsaved. A load clears it again after its own commit.
+    set({ past: trimmed, future: [], dirty: true });
   };
 
   return {
@@ -268,32 +297,60 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     selectedColumn: null,
     past: [],
     future: [],
+    dirty: false,
+    pendingConnection: null,
 
     onNodesChange: (changes) => {
-      set({ nodes: applyNodeChanges(changes, get().nodes) });
+      // A moved or removed node changes what is saved; a selection does not.
+      const edits = changes.some((c) => c.type === 'position' || c.type === 'remove');
+      set({ nodes: applyNodeChanges(changes, get().nodes), ...(edits ? { dirty: true } : {}) });
     },
 
     onEdgesChange: (changes) => {
-      set({ edges: applyEdgeChanges(changes, get().edges) });
+      const edits = changes.some((c) => c.type === 'remove');
+      set({ edges: applyEdgeChanges(changes, get().edges), ...(edits ? { dirty: true } : {}) });
     },
 
     onConnect: (connection) => {
-      commit();
-      const edge: RelationshipEdge = {
-        id: `rel-${connection.source}-${connection.target}-${get().edges.length}`,
-        source: connection.source,
-        target: connection.target,
-        sourceHandle: connection.sourceHandle ?? undefined,
-        targetHandle: connection.targetHandle ?? undefined,
-        label: '1:N',
-        data: {
-          cardinality: '1:N',
-          from_ref: connection.source,
-          to_ref: connection.target,
-        },
-      };
-      set({ edges: addEdge(edge, get().edges) });
+      set({ pendingConnection: { source: connection.source, target: connection.target, edgeId: null } });
     },
+
+    editEdgeColumns: (edgeId) => {
+      const edge = get().edges.find((e) => e.id === edgeId);
+      if (!edge) return;
+      set({ pendingConnection: { source: edge.source, target: edge.target, edgeId } });
+    },
+
+    connectColumns: (fromColumns, toColumns, cardinality) => {
+      const pending = get().pendingConnection;
+      if (!pending || fromColumns.length === 0 || fromColumns.length !== toColumns.length) return;
+      commit();
+      const existing = pending.edgeId ? get().edges.find((e) => e.id === pending.edgeId) : undefined;
+      const data: RelationshipEdgeData = {
+        cardinality: cardinality ?? existing?.data?.cardinality ?? 'N:1',
+        from_ref: pending.source,
+        to_ref: pending.target,
+        from_columns: fromColumns,
+        to_columns: toColumns,
+        name: existing?.data?.name ?? null,
+      };
+      if (existing) {
+        set({
+          edges: get().edges.map((e) => (e.id === existing.id ? edgeFor(data, e.id) : e)),
+          pendingConnection: null,
+        });
+        return;
+      }
+      // Appended, not addEdge: React Flow's addEdge drops an edge between two
+      // nodes that already have one, and two foreign keys between the same
+      // tables (a role-playing dimension) are two relationships.
+      const id = `rel-${pending.source}-${pending.target}-${get().edges.length}`;
+      set({ edges: [...get().edges, edgeFor(data, id)], pendingConnection: null });
+    },
+
+    cancelConnection: () => set({ pendingConnection: null }),
+
+    markSaved: () => set({ dirty: false }),
 
     addEntity: (entity) => {
       commit();
@@ -354,8 +411,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           data: edge.data
             ? {
                 ...edge.data,
-                from_ref: rewriteRefEntity(edge.data.from_ref, oldName, trimmed),
-                to_ref: rewriteRefEntity(edge.data.to_ref, oldName, trimmed),
+                from_ref: edge.data.from_ref === oldName ? trimmed : edge.data.from_ref,
+                to_ref: edge.data.to_ref === oldName ? trimmed : edge.data.to_ref,
               }
             : edge.data,
         })),
@@ -384,6 +441,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
                 ...n,
                 data: {
                   ...n.data,
+                  ...renameInLists(n.data, oldColumn, trimmed),
                   columns: n.data.columns.map((c) =>
                     c.name === oldColumn ? { ...c, name: trimmed } : c,
                   ),
@@ -391,28 +449,19 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
               }
             : n,
         ),
-        edges: get().edges.map((edge) =>
-          edge.data
-            ? {
-                ...edge,
-                data: {
-                  ...edge.data,
-                  from_ref: rewriteRefColumn(
-                    edge.data.from_ref,
-                    entityName,
-                    oldColumn,
-                    trimmed,
-                  ),
-                  to_ref: rewriteRefColumn(
-                    edge.data.to_ref,
-                    entityName,
-                    oldColumn,
-                    trimmed,
-                  ),
-                },
-              }
-            : edge,
-        ),
+        edges: get().edges.map((edge) => {
+          if (!edge.data) return edge;
+          const swap = (entity: string, columns: string[]) =>
+            entity === entityName ? columns.map((c) => (c === oldColumn ? trimmed : c)) : columns;
+          return {
+            ...edge,
+            data: {
+              ...edge.data,
+              from_columns: swap(edge.data.from_ref, edge.data.from_columns),
+              to_columns: swap(edge.data.to_ref, edge.data.to_columns),
+            },
+          };
+        }),
         selectedColumn:
           sel?.entityName === entityName && sel.columnName === oldColumn
             ? { entityName, columnName: trimmed }
@@ -424,6 +473,32 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       set({
         selectedColumn: columnName ? { entityName, columnName } : null,
       }),
+
+    setColumnReference: (entityName, columnName, target) => {
+      commit();
+      const kept = get().edges.filter(
+        (e) =>
+          !(
+            e.data?.from_ref === entityName &&
+            e.data.from_columns.length === 1 &&
+            e.data.from_columns[0] === columnName
+          ),
+      );
+      if (target === null) {
+        set({ edges: kept });
+        return;
+      }
+      const dot = target.indexOf('.');
+      const data: RelationshipEdgeData = {
+        cardinality: 'N:1',
+        from_ref: entityName,
+        to_ref: target.slice(0, dot),
+        from_columns: [columnName],
+        to_columns: [target.slice(dot + 1)],
+        name: null,
+      };
+      set({ edges: [...kept, edgeFor(data, `rel-${entityName}-${data.to_ref}-${kept.length}`)] });
+    },
 
     removeEntity: (nodeId) => {
       commit();
@@ -439,22 +514,18 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
 
     getGraphPayload: () => {
       const { nodes, edges } = get();
-      const entities: Entity[] = nodes.map((node) => ({
-        entity_name: node.data.entity_name,
-        entity_type: node.data.entity_type,
-        description: node.data.description ?? null,
-        grain: node.data.grain ?? null,
-        tier: node.data.tier ?? null,
-        freshness_sla: node.data.freshness_sla ?? null,
-        canvas_position_x: node.position.x,
-        canvas_position_y: node.position.y,
-        columns: node.data.columns,
-      }));
-      const relationships: Relationship[] = edges.map((edge) => ({
-        from: edge.data?.from_ref ?? edge.source,
-        to: edge.data?.to_ref ?? edge.target,
-        cardinality: edge.data?.cardinality ?? '1:N',
-      }));
+      const entities: Entity[] = nodes.map((node) => entityPayload(node.data, node.position));
+      const relationships: Relationship[] = edges.map((edge) =>
+        relationshipPayload(
+          edge.data ?? {
+            cardinality: '1:N',
+            from_ref: edge.source,
+            to_ref: edge.target,
+            from_columns: [],
+            to_columns: [],
+          },
+        ),
+      );
       return { entities, relationships };
     },
 
@@ -469,6 +540,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         validation: null,
         selectedNodeId: null,
         selectedEdgeId: null,
+        pendingConnection: null,
+        dirty: false,
       });
     },
 
@@ -484,6 +557,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         validation: model.validation ?? null,
         selectedNodeId: null,
         selectedEdgeId: null,
+        pendingConnection: null,
+        dirty: false,
       });
     },
 
@@ -525,6 +600,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         edges: previous.edges,
         past: past.slice(0, -1),
         future: [current, ...future].slice(0, HISTORY_LIMIT),
+        dirty: true,
       });
     },
 
@@ -541,6 +617,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         edges: next.edges,
         past: [...past, current].slice(-HISTORY_LIMIT),
         future: future.slice(1),
+        dirty: true,
       });
     },
 
@@ -558,6 +635,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         selectedColumn: null,
         past: [],
         future: [],
+        dirty: false,
+        pendingConnection: null,
       }),
   };
 });

@@ -140,6 +140,19 @@ Retrieve a persisted data model
 |---|---|---|---|
 | `model_id` | path | string | yes |
 
+Entities and relationships come back in the order they were saved. Keys and
+constraints have one source: each entity's `primary_key` (columns in key
+order), `unique_constraints` and `check_constraints` (each with an optional
+`name`; a CHECK lists the columns its `expression` reads), and each
+relationship's `from_columns` and `to_columns`, paired by position, so a
+composite foreign key is one relationship. `from` and `to` name entities. The
+column flags `is_primary_key`, `is_unique`, `check_expression`,
+`is_foreign_key` and `references` are derived from those lists. A
+relationship with no complete column pairing is *unresolved*: kept, and
+reported by the linter as `UNRESOLVED_RELATIONSHIP`. `conversion_findings`
+lists what the keys-and-constraints migration (0025) kept but could not
+convert exactly for this model.
+
 **Responses:** `200` Successful Response, `422` Validation Error
 
 ### `PATCH /api/v1/model/{model_id}`
@@ -163,6 +176,15 @@ Export a model as SQL DDL, dbt, or Cube.js artifacts
 | `model_id` | path | string | yes |
 | `format` | query | ExportFormat | no |
 | `dialect` | query | string | no |
+
+DDL states each table's columns, primary key, UNIQUE and CHECK constraints,
+foreign keys (composite ones included) and, where the dialect has
+`COMMENT ON` (PostgreSQL, DuckDB, Snowflake, Redshift), table and column
+descriptions. Anything the model holds that the dialect cannot express, or
+that the model does not state completely, is returned in `gaps` (each with a
+`kind`, `entity` and `detail`) and listed as comments at the top of the SQL
+file; nothing is left out without a gap. A model imported from a DDL file is
+exported from the dialect it was imported from.
 
 **Responses:** `200` Successful Response, `422` Validation Error
 
@@ -232,6 +254,11 @@ Persist canvas edits (replace the model graph)
 | `model_id` | path | string | yes |
 
 **Request body:** `GraphUpdateRequest`
+
+Send the keys and constraints as lists (see `GET /api/v1/model/{model_id}`).
+A payload that also sends a column flag contradicting its lists is refused
+with `422`. The older form, with keys only as column flags and relationships
+as `"entity.column"` strings, is still accepted and read from its flags.
 
 **Responses:** `200` Successful Response, `422` Validation Error
 
@@ -318,6 +345,63 @@ Delete a database connection (ADMIN+)
 | `connection_id` | path | string | yes |
 
 **Responses:** `204` Successful Response, `422` Validation Error
+
+---
+
+## Offline DDL Import
+
+An exported DDL file becomes a model without the appliance connecting to
+anything. Every import is reconciled against counts read from the file by a
+counter that shares no code with the parser; the model is stored with
+`reconciliation_status` `reconciled` or `unreconciled` and the full report.
+
+### `GET /api/v1/import/dialects`
+
+The dialects a file can be imported from, each with `evidence`: `genuine
+export` (tested on fixtures written by the database's own export tool) or
+`documentation-derived` (tested only on a fixture written from the vendor's
+documentation). Signed-in callers.
+
+**Responses:** `200` Successful Response
+
+### `POST /api/v1/import/ddl`
+
+Import an exported DDL file into a new model (MEMBER+). Multipart form.
+
+| Param | In | Type | Required |
+|---|---|---|---|
+| `workspace_id` | query | string | yes |
+| `file` | form | file (UTF-8 or UTF-16, with or without a BOM; at most 10 MB) | yes |
+| `dialect` | form | `oracle`, `postgres`, `tsql` (SQL Server) or `snowflake` | yes |
+| `title` | form | string | no |
+
+The response carries `model_id`, `status` (`reconciled` or `unreconciled`), the
+entity and relationship counts, and the report. A statement the parser does not
+understand is a named failure in the report, never skipped. Each imported
+column carries `source_data_type`, its type exactly as the file declared it
+(`VARCHAR2(255 CHAR)`, `[dbo].[Name]`), beside the normalized `data_type`, and
+`source_default_value`, its DEFAULT as declared (`now()`, `(getdate())`),
+beside the normalized `default_value`, which exports and comparisons use; a
+SQL Server user-defined type resolves to its base type from the file's
+`CREATE TYPE … FROM`. Composite keys, composite foreign keys, and UNIQUE and
+CHECK constraints over several columns are in the model.
+
+**Responses:** `201` Model created (reconciled or not), `403` Below MEMBER,
+`413` File too large, `422` Unknown dialect, or nothing in the file could be
+imported (the report is in `detail`)
+
+### `GET /api/v1/model/{model_id}/import-report`
+
+The import's reconciliation report (VIEWER+): counts from the file and counts
+imported, for tables and partitions separately; every gap and failure by
+statement; what was not imported and why; what the model cannot hold yet.
+
+| Param | In | Type | Required |
+|---|---|---|---|
+| `model_id` | path | string | yes |
+| `format` | query | `markdown` (default) or `json` | no |
+
+**Responses:** `200` Successful Response, `404` The model was not imported from a file
 
 ---
 

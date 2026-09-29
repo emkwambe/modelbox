@@ -4,7 +4,7 @@
   "edition": "quality",
   "title": "Spot the Flaw: Integration Review",
   "difficulty": "advanced",
-  "brief": "Two teams modelled the claims domain separately and someone merged the files the night before a review. The merge parses, loads and looks plausible on the canvas — which is the problem. Four faults survived it: a table nobody wired in, a foreign key pointing at a name that was refactored away, a pair of tables that reference each other in a loop, and a reference code whose format rule cannot fit the column it is declared on. That last one is real history: it is the contradiction that produced this appliance's PATTERN_EXCEEDS_LENGTH check, after a synthetic-data generator was asked to satisfy a VARCHAR(6) column and an eight-character pattern at the same time and could only choose which constraint to break. Find all four and re-validate.",
+  "brief": "Two teams modelled the claims domain separately and someone merged the files the night before a review. The merge parses, loads and looks plausible on the canvas — which is the problem. Five faults survived it: a table nobody wired in, a foreign key pointing at a name that was refactored away, a pair of tables that reference each other in a loop, a line drawn between two tables without saying which columns it joins, and a reference code whose format rule cannot fit the column it is declared on. That last one is real history: it is the contradiction that produced this appliance's PATTERN_EXCEEDS_LENGTH check, after a synthetic-data generator was asked to satisfy a VARCHAR(6) column and an eight-character pattern at the same time and could only choose which constraint to break. Find all five and re-validate.",
   "graph": {
     "entities": [
       {
@@ -139,9 +139,40 @@
             "description": "Seniority grade used to route complex claims."
           }
         ]
+      },
+      {
+        "entity_name": "dim_region",
+        "entity_type": "DIMENSION",
+        "grain": null,
+        "description": "Regions claims are reported from.",
+        "columns": [
+          {
+            "name": "region_sk",
+            "data_type": "INTEGER",
+            "is_primary_key": true,
+            "is_foreign_key": false,
+            "is_pii": false,
+            "is_metric": false,
+            "description": "Surrogate key for the region."
+          },
+          {
+            "name": "region_name",
+            "data_type": "VARCHAR(64)",
+            "is_primary_key": false,
+            "is_foreign_key": false,
+            "is_pii": false,
+            "is_metric": false,
+            "description": "Region name."
+          }
+        ]
       }
     ],
     "relationships": [
+      {
+        "from": "fact_claim",
+        "to": "dim_region",
+        "cardinality": "N:1"
+      },
       {
         "from": "fact_claim.policy_contract_sk",
         "to": "dim_policy_contract.policy_sk",
@@ -183,7 +214,13 @@
       "target": "dim_policy -> dim_product",
       "hint": "Follow the arrows from dim_policy and see where you end up.",
       "fix": "dim_policy points at dim_product, and dim_product points back at dim_policy through flagship_policy_sk. There is no order in which these two tables can be loaded. Break the loop: the flagship policy is an attribute of the product's marketing, not a structural dependency, so drop that foreign key or move the association to a separate bridge table."
+    },
+    {
+      "code": "UNRESOLVED_RELATIONSHIP",
+      "target": "fact_claim -> dim_region",
+      "hint": "One line joins two tables without saying which columns it joins.",
+      "fix": "Someone drew fact_claim to dim_region on the canvas and never chose the columns, and fact_claim has no region column to choose. A relationship that names no columns cannot become a foreign key, so every export lists it as a gap. Add region_sk to fact_claim and click the relationship to pair it with dim_region.region_sk, or remove the line if claims are not reported by region."
     }
   ],
-  "solution_notes": "The lesson is that a merged model can be syntactically perfect and structurally impossible. Three of these four faults are invisible in any single file — they exist only in the relationships between files, which is exactly what a review of merged work has to look at.\n\nOn the reference code: this is the appliance's own history. The synthetic-data generator clamps a value it generated to a declared VARCHAR(n), but refuses to clamp one produced from a regex, because truncating that value breaks the pattern it was generated to satisfy. That refusal is correct, and it leaves a contradiction with nowhere to go — the generator can only pick which constraint to violate. The check exists because a generator is the wrong place to discover a modelling error.\n\nExpected end state: the claims relationship repointed at dim_policy, the product-to-policy loop broken, dim_adjuster either joined to fact_claim or removed, and policy_reference either widened to VARCHAR(8) or stripped of a pattern nobody asked for. Re-validate and the model is clean."
+  "solution_notes": "The lesson is that a merged model can be syntactically perfect and structurally impossible. Four of these five faults are invisible in any single file — they exist only in the relationships between files, which is exactly what a review of merged work has to look at.\n\nOn the reference code: this is the appliance's own history. The synthetic-data generator clamps a value it generated to a declared VARCHAR(n), but refuses to clamp one produced from a regex, because truncating that value breaks the pattern it was generated to satisfy. That refusal is correct, and it leaves a contradiction with nowhere to go — the generator can only pick which constraint to violate. The check exists because a generator is the wrong place to discover a modelling error.\n\nExpected end state: the claims relationship repointed at dim_policy, the product-to-policy loop broken, dim_adjuster either joined to fact_claim or removed, the region line given its columns or removed, and policy_reference either widened to VARCHAR(8) or stripped of a pattern nobody asked for. Re-validate and the model is clean."
 }

@@ -231,6 +231,13 @@ async def test_negative_control_without_the_identifier_check_bigquery_passes_it(
 def test_negative_control_without_the_fragment_check_the_drop_is_emitted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """From Sprint 8 Step 3 the DDL builder parses each table as exactly one
+    statement, so a smuggled statement is refused even without the fragment
+    check. What the check alone provides is the refusal naming its lint code:
+    without it the export still fails, emits no DROP, and cannot say why."""
     monkeypatch.setattr(sql_fragments, "column_problems", lambda *args, **kw: [])
-    with pytest.raises(AssertionError, match="DROP emitted: True"):
+    with pytest.raises(ExporterError) as refused:
+        ExporterService().export(_model(SMUGGLED_TYPE), "ddl", "postgres")
+    assert "INVALID_D" not in str(refused.value)
+    with pytest.raises(AssertionError):
         _check_ddl_refused(_model(SMUGGLED_TYPE))

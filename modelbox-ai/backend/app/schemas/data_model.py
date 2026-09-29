@@ -18,10 +18,19 @@ from __future__ import annotations
 import datetime
 import enum
 import logging
+import re
 import uuid
+from collections.abc import Mapping
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -601,7 +610,7 @@ class ColumnSchema(BaseModel):
     )
     check_expression: str | None = Field(
         default=None,
-        max_length=512,
+        max_length=4000,
         description="Boolean SQL expression the column's values must satisfy.",
     )
     # The type exactly as an imported DDL file declared it (Sprint 8, owner
@@ -612,6 +621,14 @@ class ColumnSchema(BaseModel):
         default=None,
         max_length=128,
         description="The column's type exactly as the imported file declared it.",
+    )
+    # The DEFAULT exactly as an imported file declared it (Sprint 8 Step 3):
+    # `nextval('public.actor_actor_id_seq'::regclass)`, `(getdate())`.
+    # `default_value` holds the normalized form, which comparisons use.
+    source_default_value: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="The column's DEFAULT exactly as the imported file declared it.",
     )
 
     @model_validator(mode="after")
@@ -647,13 +664,83 @@ class ColumnSchema(BaseModel):
         return value
 
 
+class UniqueConstraintSchema(BaseModel):
+    """A UNIQUE constraint over one or more of an entity's columns, in order."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, max_length=128)
+    columns: list[str] = Field(..., min_length=1)
+
+
+class CheckConstraintSchema(BaseModel):
+    """A CHECK constraint: a boolean expression over the entity's columns.
+
+    ``columns`` names the columns the expression reads. A constraint over
+    exactly one column is also that column's ``check_expression``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, max_length=128)
+    expression: str = Field(..., min_length=1, max_length=4000)
+    columns: list[str] = Field(default_factory=list)
+
+
+_IDENTIFIER = re.compile(r'"([^"]+)"|\[([^\]]+)\]|`([^`]+)`|([A-Za-z_][\w$#]*)')
+
+
+def columns_read_by(expression: str, names: list[str]) -> list[str]:
+    """The entity columns an expression mentions, in the entity's column order.
+
+    Matched exactly first; an unquoted identifier also matches a column that
+    differs only in case, as SQL folds unquoted names.
+    """
+    mentioned: set[str] = set()
+    folded: set[str] = set()
+    for quoted, bracketed, backticked, bare in _IDENTIFIER.findall(expression):
+        exact = quoted or bracketed or backticked
+        if exact:
+            mentioned.add(exact)
+        else:
+            mentioned.add(bare)
+            folded.add(bare.lower())
+    return [n for n in names if n in mentioned or n.lower() in folded]
+
+
+_ENTITY_DERIVED = frozenset({"is_primary_key", "is_unique", "check_expression"})
+_MODEL_DERIVED = frozenset({"is_foreign_key", "references"})
+
+
+def _joined(expressions: list[str]) -> str | None:
+    """One column's check_expression: its single-column CHECKs, conjoined."""
+    if not expressions:
+        return None
+    if len(expressions) == 1:
+        return expressions[0]
+    return " AND ".join(f"({e})" for e in expressions)
+
+
 class EntitySchema(BaseModel):
-    """An entity node (table / fact / dimension / hub / link / satellite)."""
+    """An entity node (table / fact / dimension / hub / link / satellite).
+
+    Keys and constraints have one source: ``primary_key``,
+    ``unique_constraints`` and ``check_constraints`` here, and the model's
+    relationships for foreign keys. The column flags ``is_primary_key``,
+    ``is_unique`` and ``check_expression`` are derived from these lists. A
+    payload that omits a list is read the older way, from its column flags
+    (LLM responses, the gold graphs, trainer labs); a payload that supplies a
+    list and a flag contradicting it is refused.
+    """
 
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
     entity_name: str = Field(..., max_length=128)
-    entity_type: EntityType = EntityType.TABLE
+    # validate_default: an omitted entity_type (a provider may leave it out)
+    # must become the value 'TABLE' as a supplied one does. Unvalidated, the
+    # default stayed the enum member, str() of which is 'EntityType.TABLE',
+    # and a model saved that way could not be reopened (Sprint 8 Step 3).
+    entity_type: EntityType = Field(default=EntityType.TABLE, validate_default=True)
     description: str | None = None
     grain: str | None = Field(
         default=None, description="Grain statement for FACT entities."
@@ -683,6 +770,11 @@ class EntitySchema(BaseModel):
     canvas_position_x: float = 0.0
     canvas_position_y: float = 0.0
     columns: list[ColumnSchema] = Field(default_factory=list)
+    primary_key: list[str] = Field(
+        default_factory=list, description="The primary key's columns, in key order."
+    )
+    unique_constraints: list[UniqueConstraintSchema] = Field(default_factory=list)
+    check_constraints: list[CheckConstraintSchema] = Field(default_factory=list)
 
     @field_validator("columns")
     @classmethod
@@ -693,6 +785,66 @@ class EntitySchema(BaseModel):
         if not value:
             raise ValueError("Entity must declare at least one column.")
         return value
+
+    @model_validator(mode="after")
+    def _keys_and_constraints_have_one_source(self) -> EntitySchema:
+        """Read the lists, or build them from the flags; then derive the flags."""
+        names = [c.name for c in self.columns]
+        known = set(names)
+        supplied = self.model_fields_set
+
+        def require_known(columns: list[str], what: str) -> None:
+            unknown = [c for c in columns if c not in known]
+            if unknown:
+                raise ValueError(f"{self.entity_name}: {what} names columns it does not have: {unknown}")
+            if len(set(columns)) != len(columns):
+                raise ValueError(f"{self.entity_name}: {what} repeats a column: {columns}")
+
+        def contradicts(flag: str, derived: Mapping[str, object]) -> None:
+            for column in self.columns:
+                if flag in column.model_fields_set and getattr(column, flag) != derived[column.name]:
+                    raise ValueError(
+                        f"{self.entity_name}.{column.name}: {flag}={getattr(column, flag)!r} contradicts "
+                        f"the entity's constraints, which give {derived[column.name]!r}")
+
+        if "primary_key" in supplied:
+            require_known(self.primary_key, "primary_key")
+            contradicts("is_primary_key", {n: n in self.primary_key for n in names})
+        else:
+            self.primary_key = [c.name for c in self.columns if c.is_primary_key]
+
+        if "unique_constraints" in supplied:
+            for unique in self.unique_constraints:
+                require_known(unique.columns, "a UNIQUE constraint")
+        else:
+            self.unique_constraints = [UniqueConstraintSchema(columns=[c.name]) for c in self.columns if c.is_unique]
+        single_unique = {u.columns[0] for u in self.unique_constraints if len(u.columns) == 1}
+        if "unique_constraints" in supplied:
+            contradicts("is_unique", {n: n in single_unique for n in names})
+
+        if "check_constraints" in supplied:
+            for check in self.check_constraints:
+                if check.columns:
+                    require_known(check.columns, "a CHECK constraint")
+                else:
+                    check.columns = columns_read_by(check.expression, names)
+        else:
+            self.check_constraints = [CheckConstraintSchema(expression=c.check_expression, columns=[c.name])
+                                      for c in self.columns if c.check_expression]
+        per_column = {n: _joined([k.expression for k in self.check_constraints if k.columns == [n]]) for n in names}
+        if "check_constraints" in supplied:
+            contradicts("check_expression", per_column)
+
+        for column in self.columns:
+            column.is_primary_key = column.name in self.primary_key
+            if column.is_primary_key:
+                column.is_nullable = False
+            column.is_unique = column.name in single_unique
+            column.check_expression = per_column[column.name]
+            # Derived, not supplied: a later reading of this object must not
+            # take them for input (assignment would otherwise mark them set).
+            column.__pydantic_fields_set__.difference_update(_ENTITY_DERIVED)
+        return self
 
     @model_validator(mode="after")
     def _agg_time_column_is_a_temporal_column(self) -> EntitySchema:
@@ -741,7 +893,17 @@ class EntitySchema(BaseModel):
 
 
 class RelationshipSchema(BaseModel):
-    """A directed relationship edge between two entities.
+    """A directed relationship: a foreign key from one entity's columns to another's.
+
+    ``from`` and ``to`` name the entities; ``from_columns`` and ``to_columns``
+    pair up position by position, so a composite foreign key is one
+    relationship. The older form, ``"entity.column"`` in ``from`` / ``to``, is
+    still accepted and read as a one-column pair.
+
+    A relationship without a complete column pairing is **unresolved**: it
+    records that two entities are related without saying by which columns
+    (every edge drawn on the canvas before Sprint 8 Step 3). It is kept, the
+    linter reports it, and exporters list it as an export gap.
 
     Accepts the LLM's ``from``/``to`` JSON keys (reserved words) via aliases,
     while still allowing construction by field name in Python.
@@ -754,12 +916,125 @@ class RelationshipSchema(BaseModel):
     )
 
     from_ref: str = Field(
-        ..., alias="from", description="Source, e.g. 'fact_orders.customer_hk'."
+        ..., alias="from", description="Source entity, e.g. 'fact_orders'."
     )
     to_ref: str = Field(
-        ..., alias="to", description="Target, e.g. 'dim_customer.customer_hk'."
+        ..., alias="to", description="Target entity, e.g. 'dim_customer'."
     )
+    from_columns: list[str] = Field(
+        default_factory=list, description="The referencing columns, in key order."
+    )
+    to_columns: list[str] = Field(
+        default_factory=list, description="The referenced columns, paired by position."
+    )
+    name: str | None = Field(default=None, max_length=128)
     cardinality: Cardinality
+    # True when the columns came from an older "entity.column" ref, or there
+    # are none: the payload stated no column lists of its own.
+    _stated_no_columns: bool = PrivateAttr(default=False)
+
+    @model_validator(mode="after")
+    def _entity_refs_and_column_lists(self) -> RelationshipSchema:
+        stated = {"from_columns", "to_columns"} & self.model_fields_set
+        for side in ("from", "to"):
+            ref: str = getattr(self, f"{side}_ref")
+            if "." not in ref:
+                continue
+            entity, column = ref.split(".", 1)
+            columns: list[str] = getattr(self, f"{side}_columns")
+            if f"{side}_columns" in stated and columns != [column]:
+                raise ValueError(f"{side} {ref!r} contradicts {side}_columns {columns}")
+            setattr(self, f"{side}_ref", entity)
+            setattr(self, f"{side}_columns", [column])
+            # Derived from the ref, not supplied. Pydantic runs this validator
+            # again when the instance is placed in a parent model, and must
+            # still see an older-form relationship there.
+            self.__pydantic_fields_set__.discard(f"{side}_columns")
+        if self.from_columns and self.to_columns and len(self.from_columns) != len(self.to_columns):
+            raise ValueError(
+                f"{self.from_ref} -> {self.to_ref}: {len(self.from_columns)} referencing columns "
+                f"but {len(self.to_columns)} referenced")
+        self._stated_no_columns = not stated
+        return self
+
+    @classmethod
+    def between(
+        cls,
+        from_entity: str,
+        from_columns: list[str],
+        to_entity: str,
+        to_columns: list[str],
+        cardinality: Cardinality | str,
+        name: str | None = None,
+    ) -> RelationshipSchema:
+        """A relationship stated with its column lists (validated, by alias)."""
+        return cls.model_validate({
+            "from": from_entity, "from_columns": list(from_columns),
+            "to": to_entity, "to_columns": list(to_columns),
+            "cardinality": getattr(cardinality, "value", cardinality), "name": name,
+        })
+
+    @property
+    def resolved(self) -> bool:
+        """Whether every referencing column is paired with a referenced one."""
+        return bool(self.from_columns) and len(self.from_columns) == len(self.to_columns)
+
+    @property
+    def pairs(self) -> list[tuple[str, str]]:
+        return list(zip(self.from_columns, self.to_columns, strict=False))
+
+
+def unify_foreign_keys(
+    entities: list[EntitySchema], relationships: list[RelationshipSchema]
+) -> list[RelationshipSchema]:
+    """Make the relationships the one source of foreign keys; derive the column flags.
+
+    Read the older way when no relationship states column lists of its own:
+    a column's ``references`` that no relationship backs becomes an N:1
+    relationship (the linter reports it if its target does not exist), and an
+    ``is_foreign_key`` with no target at all is dropped with a warning, as
+    ``agg_time_column`` is. When the payload states column lists, a flag that
+    disagrees with them is refused.
+    """
+    relationships = list(relationships)
+    older_form = all(r._stated_no_columns for r in relationships)
+
+    def backed_by(entity: str, column: str) -> list[tuple[RelationshipSchema, int]]:
+        return [(r, i) for r in relationships if r.from_ref == entity
+                for i, c in enumerate(r.from_columns) if c == column]
+
+    if older_form:
+        for entity in entities:
+            for column in entity.columns:
+                supplied = "references" in column.model_fields_set
+                if supplied and column.references and not backed_by(entity.entity_name, column.name):
+                    target = column.references.split(".", 1)
+                    relationships.append(RelationshipSchema.between(
+                        entity.entity_name, [column.name], target[0], target[1:], Cardinality.MANY_TO_ONE))
+                elif ("is_foreign_key" in column.model_fields_set and column.is_foreign_key
+                      and not backed_by(entity.entity_name, column.name)):
+                    logger.warning("Dropping is_foreign_key on %s.%s: no relationship or reference "
+                                   "names its target.", entity.entity_name, column.name)
+
+    derived: dict[tuple[str, str], str | None] = {}
+    for relationship in relationships:
+        for i, from_column in enumerate(relationship.from_columns):
+            to_column = relationship.to_columns[i] if i < len(relationship.to_columns) else None
+            derived[(relationship.from_ref, from_column)] = (
+                f"{relationship.to_ref}.{to_column}" if to_column else None)
+    for entity in entities:
+        for column in entity.columns:
+            key = (entity.entity_name, column.name)
+            is_fk, references = key in derived, derived.get(key)
+            if not older_form:
+                for flag, value in (("is_foreign_key", is_fk), ("references", references)):
+                    if flag in column.model_fields_set and getattr(column, flag) != value:
+                        raise ValueError(
+                            f"{entity.entity_name}.{column.name}: {flag}={getattr(column, flag)!r} "
+                            f"contradicts the relationships, which give {value!r}")
+            column.is_foreign_key, column.references = is_fk, references
+            column.__pydantic_fields_set__.difference_update(_MODEL_DERIVED)
+    return relationships
 
 
 class SuggestedMetric(BaseModel):
@@ -795,6 +1070,11 @@ class SynthesizedModel(BaseModel):
         if not value:
             raise ValueError("Synthesized model must contain at least one entity.")
         return value
+
+    @model_validator(mode="after")
+    def _foreign_keys_have_one_source(self) -> SynthesizedModel:
+        self.relationships = unify_foreign_keys(self.entities, self.relationships)
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -838,6 +1118,11 @@ class GraphUpdateRequest(BaseModel):
     entities: list[EntitySchema] = Field(default_factory=list)
     relationships: list[RelationshipSchema] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _foreign_keys_have_one_source(self) -> GraphUpdateRequest:
+        self.relationships = unify_foreign_keys(self.entities, self.relationships)
+        return self
+
 
 class SynthesizeRequest(BaseModel):
     """POST /api/v1/model/synthesize request body (Blueprint §6)."""
@@ -854,6 +1139,16 @@ class SynthesizeRequest(BaseModel):
     llm_override: str | None = None
 
 
+class ConversionFinding(BaseModel):
+    """Something migration 0025 could not convert exactly; the model keeps it."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    kind: str
+    entity_name: str | None = None
+    detail: str
+
+
 class SynthesizeResponse(BaseModel):
     """POST /api/v1/model/synthesize response body."""
 
@@ -866,6 +1161,13 @@ class SynthesizeResponse(BaseModel):
     suggested_metrics: list[SuggestedMetric] = Field(default_factory=list)
     # Topological/structural lint report for the graph (FR-2.3).
     validation: ValidationReport | None = None
+    # What migration 0025 could not convert in this model, kept and listed.
+    conversion_findings: list[ConversionFinding] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _foreign_keys_have_one_source(self) -> SynthesizeResponse:
+        self.relationships = unify_foreign_keys(self.entities, self.relationships)
+        return self
 
 
 class TransformOptions(BaseModel):
@@ -903,6 +1205,14 @@ class TransformParadigmResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Artifact export contract
 # ---------------------------------------------------------------------------
+class ExportGapSchema(BaseModel):
+    """One thing an export could not state: its kind, entity and reason."""
+
+    kind: str
+    entity: str | None = None
+    detail: str
+
+
 class ExportResponse(BaseModel):
     """GET /api/v1/model/{model_id}/export response body (FR-4)."""
 
@@ -914,6 +1224,9 @@ class ExportResponse(BaseModel):
     dialect: str | None = None
     # Map of artifact file path -> file contents.
     files: dict[str, str] = Field(default_factory=dict)
+    # What the model holds that the DDL does not state, and why (Sprint 8
+    # Step 3). The same list heads the SQL file as comments.
+    gaps: list[ExportGapSchema] = Field(default_factory=list)
 
 
 __all__ = [

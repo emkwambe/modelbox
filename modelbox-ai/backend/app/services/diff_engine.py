@@ -201,12 +201,17 @@ class DiffEngine:
         test while crying wolf on each added join, which is how a diff earns
         being ignored.
         """
-        def key(rel: RelationshipSchema) -> tuple[str, str]:
-            return (rel.from_ref, rel.to_ref)
+        def key(rel: RelationshipSchema) -> tuple[str, tuple[str, ...], str, tuple[str, ...]]:
+            return (rel.from_ref, tuple(rel.from_columns), rel.to_ref, tuple(rel.to_columns))
+
+        def label(entity: str, columns: list[str]) -> str:
+            if len(columns) == 1:
+                return f"{entity}.{columns[0]}"
+            return f"{entity}({', '.join(columns)})" if columns else entity
 
         target_keys = {key(r) for r in target.relationships}
         return [
-            f"Removed foreign key: {rel.from_ref} -> {rel.to_ref}"
+            f"Removed foreign key: {label(rel.from_ref, rel.from_columns)} -> {label(rel.to_ref, rel.to_columns)}"
             for rel in source.relationships
             if key(rel) not in target_keys
         ]

@@ -261,6 +261,7 @@ EXEMPT: dict[str, str] = {
     "default_value": "DDL only; no contract format carries a default expression",
     "check_expression": "DDL CHECK and the seed generator; compared by dbt build (H11)",
     "source_data_type": "provenance of an imported column; no artifact emits it, each renders data_type",
+    "source_default_value": "provenance of an imported default; artifacts render default_value",
 }
 
 # Nullability is genuinely absent from Protobuf output, and that is a finding

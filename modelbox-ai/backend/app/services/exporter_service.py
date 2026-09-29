@@ -50,16 +50,15 @@ import re
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar
 
-import sqlglot
 import yaml
 
 from app.schemas.data_model import (
     ColumnSchema,
     EntitySchema,
-    RelationshipSchema,
     SynthesizedModel,
     _is_temporal_type,
 )
+from app.services.ddl_export import DdlExport, DdlExportError, build_ddl
 
 if TYPE_CHECKING:
     from app.services.seed_generator import SeedResult
@@ -94,6 +93,10 @@ _SQLGLOT_DIALECTS: dict[str, str] = {
     "redshift": "redshift",
     "clickhouse": "clickhouse",
 }
+# Dialects a model's fragments may be written in: every target, and the two
+# import dialects that are not export targets. An imported model's types,
+# defaults and CHECK expressions are in the dialect it was imported from.
+_SOURCE_DIALECTS: dict[str, str] = {**_SQLGLOT_DIALECTS, "oracle": "oracle", "tsql": "tsql"}
 
 
 # Open Data Contract Standard version this emitter targets. Bitol, verified via
@@ -113,7 +116,7 @@ class ExporterService:
     def __init__(self, source_dialect: str = "snowflake") -> None:
         # Column data types in synthesized models default to Snowflake-style
         # (e.g. NUMBER(18,2), TIMESTAMP_NTZ); parse them as such before writing.
-        self._source_dialect = _SQLGLOT_DIALECTS.get(
+        self._source_dialect = _SOURCE_DIALECTS.get(
             source_dialect.lower(), "snowflake"
         )
 
@@ -140,61 +143,22 @@ class ExporterService:
     # 1. Multi-dialect SQL DDL
     # ---------------------------------------------------------------------
     def generate_ddl(self, model: SynthesizedModel, dialect: str) -> str:
-        """Transpile the model's entities to ``CREATE TABLE`` DDL in ``dialect``."""
+        """``CREATE TABLE`` and ``COMMENT ON`` DDL for the model in ``dialect``.
+
+        Export gaps, if any, head the file as comments; see
+        :meth:`generate_ddl_export` for them as data.
+        """
+        return self.generate_ddl_export(model, dialect).sql
+
+    def generate_ddl_export(self, model: SynthesizedModel, dialect: str) -> DdlExport:
+        """The DDL and its export gaps (``app.services.ddl_export``)."""
         target = _SQLGLOT_DIALECTS.get(dialect.lower())
         if target is None:
             raise ExporterError(f"Unsupported target dialect: {dialect}")
-
-        # Separate statements with semicolons so SQLGlot parses each CREATE
-        # TABLE individually (otherwise it falls back to opaque passthrough).
-        script = ";\n".join(
-            self._entity_create_table(entity, model.relationships)
-            for entity in self._emission_order(model)
-        )
-        statements = sqlglot.transpile(
-            script,
-            read=self._source_dialect,
-            write=target,
-            pretty=True,
-        )
-        return ";\n\n".join(statements) + ";\n"
-
-    @staticmethod
-    def _emission_order(model: SynthesizedModel) -> list[EntitySchema]:
-        """Order entities so a referenced table is always created first (H5).
-
-        Emission previously followed declaration order, which is only correct
-        when the model happens to have been authored parent-first. A model that
-        was not — anything an LLM produced, or a canvas reordered — emitted a
-        child table whose ``FOREIGN KEY`` named a table that did not exist yet,
-        and psql aborted on the first statement.
-
-        ``GraphEngine.topological_order`` has always existed for this; the
-        module docstring claimed it was used here when it never was, which is
-        the reason the defect went unnoticed. A cyclic graph has no topological
-        order, so it falls back to declaration order — the same fallback the
-        seed generator uses, and the cycle itself is already reported as
-        ``CYCLIC_FK``.
-        """
-        from app.services.graph_engine import GraphEngine
-
-        by_name = {entity.entity_name: entity for entity in model.entities}
         try:
-            graph = GraphEngine.build_graph(model.entities, model.relationships)
-            ordered = GraphEngine.topological_order(graph)
-        except Exception:  # noqa: BLE001 - NetworkXUnfeasible on a cyclic graph
-            return list(model.entities)
-        # `ordered` covers only entities the graph knows about; anything else
-        # keeps its declared position rather than being dropped.
-        seen = set()
-        out: list[EntitySchema] = []
-        for name in ordered:
-            entity = by_name.get(name)
-            if entity is not None and name not in seen:
-                seen.add(name)
-                out.append(entity)
-        out.extend(e for e in model.entities if e.entity_name not in seen)
-        return out
+            return build_ddl(model, target, self._source_dialect)
+        except DdlExportError as exc:
+            raise ExporterError(str(exc)) from exc
 
     def _require_valid_fragments(self, entity: EntitySchema) -> None:
         """Refuse an entity whose data types or defaults are not exactly SQL.
@@ -212,45 +176,6 @@ class ExporterService:
                 raise ExporterError(
                     f"{code}: column '{entity.entity_name}.{column.name}': {reason}."
                 )
-
-    def _entity_create_table(
-        self, entity: EntitySchema, relationships: list[RelationshipSchema]
-    ) -> str:
-        """Build a single ANSI ``CREATE TABLE`` string for an entity."""
-        self._require_valid_fragments(entity)
-        lines: list[str] = [
-            # NOT NULL from the declared constraint (H4). Emitting nothing made
-            # every column implicitly nullable, which is also why Databricks
-            # rejected the emitted primary keys outright.
-            #
-            # DEFAULT from `default_value` (M13). Sprint 2 added the field and
-            # only persistence consumed it, so it round-tripped into a void:
-            # register C2 claimed all four constraints reach every consuming
-            # emitter, and this one reached none. The IR stores the value
-            # already quoted where quoting is needed, so it is emitted verbatim
-            # rather than re-quoted — a literal the model authored, not one
-            # this emitter invents.
-            f"    {col.name} {col.data_type}"
-            + (f" DEFAULT {col.default_value}" if col.default_value else "")
-            + ("" if col.is_nullable else " NOT NULL")
-            for col in entity.columns
-        ]
-
-        pk_cols = [c.name for c in entity.columns if c.is_primary_key]
-        if pk_cols:
-            lines.append(f"    PRIMARY KEY ({', '.join(pk_cols)})")
-
-        for rel in relationships:
-            from_entity, from_col = self._split_ref(rel.from_ref)
-            to_entity, to_col = self._split_ref(rel.to_ref)
-            if from_entity == entity.entity_name and from_col and to_col:
-                lines.append(
-                    f"    FOREIGN KEY ({from_col}) "
-                    f"REFERENCES {to_entity} ({to_col})"
-                )
-
-        body = ",\n".join(lines)
-        return f"CREATE TABLE {entity.entity_name} (\n{body}\n)"
 
     # ---------------------------------------------------------------------
     # 2. dbt staging models + schema.yml
@@ -282,6 +207,11 @@ class ExporterService:
         packages = self._dbt_packages_yml(model)
         if packages is not None:
             files["packages.yml"] = packages
+        gaps = self.dbt_export_gaps(model)
+        if gaps:
+            files["EXPORT_GAPS.md"] = (
+                "# Export gaps\n\nKeys this project does not test, and why.\n\n"
+                + "".join(f"- {gap}\n" for gap in gaps))
         return files
 
     def _dbt_sources_yml(self, model: SynthesizedModel, source_name: str) -> str:
@@ -336,7 +266,7 @@ class ExporterService:
             self._dbt_quality_tests(col)
             for entity in model.entities
             for col in entity.columns
-        )
+        ) or any(self._compound_uniques(entity) for entity in model.entities)
         if not needs_expectations:
             return None
         return yaml.safe_dump(
@@ -371,24 +301,36 @@ class ExporterService:
             "select * from renamed\n"
         )
 
-    def _dbt_schema_yml(self, model: SynthesizedModel) -> str:
-        # Map entity -> its primary-key column for relationship tests.
-        pk_by_entity: dict[str, str] = {}
-        for entity in model.entities:
-            pk = next((c.name for c in entity.columns if c.is_primary_key), None)
-            if pk:
-                pk_by_entity[entity.entity_name] = pk
+    @staticmethod
+    def _compound_uniques(entity: EntitySchema) -> list[list[str]]:
+        """Column sets that must be unique together: a composite key or a multi-column UNIQUE."""
+        sets = [entity.primary_key] if len(entity.primary_key) > 1 else []
+        return sets + [u.columns for u in entity.unique_constraints if len(u.columns) > 1]
 
-        # Map (entity, column) -> referenced "stg_<parent>" for FK relationship tests.
+    @staticmethod
+    def dbt_export_gaps(model: SynthesizedModel) -> list[str]:
+        """Keys the dbt project cannot test: dbt's relationships test is one column."""
+        gaps = []
+        for rel in model.relationships:
+            label = f"{rel.from_ref}({', '.join(rel.from_columns)}) -> {rel.to_ref}({', '.join(rel.to_columns)})"
+            if not rel.resolved:
+                gaps.append(f"{label}: unresolved, its columns are not chosen; no relationships test")
+            elif len(rel.from_columns) > 1:
+                gaps.append(f"{label}: composite foreign key; dbt's relationships test takes one column")
+        return gaps
+
+    def _dbt_schema_yml(self, model: SynthesizedModel) -> str:
+        # Map (entity, column) -> referenced "stg_<parent>" for FK relationship
+        # tests: one-column relationships only (see dbt_export_gaps).
         fk_refs: dict[tuple[str, str], tuple[str, str]] = {}
         for rel in model.relationships:
-            from_entity, from_col = self._split_ref(rel.from_ref)
-            to_entity, to_col = self._split_ref(rel.to_ref)
-            if from_col and to_col:
-                fk_refs[(from_entity, from_col)] = (to_entity, to_col)
+            if rel.resolved and len(rel.from_columns) == 1:
+                fk_refs[(rel.from_ref, rel.from_columns[0])] = (rel.to_ref, rel.to_columns[0])
 
         models: list[dict[str, object]] = []
         for entity in model.entities:
+            single_key = entity.primary_key if len(entity.primary_key) == 1 else []
+            single_unique = {u.columns[0] for u in entity.unique_constraints if len(u.columns) == 1}
             columns: list[dict[str, object]] = []
             for col in entity.columns:
                 col_doc: dict[str, object] = {"name": col.name}
@@ -399,8 +341,14 @@ class ExporterService:
                 # Passing them at the top level is deprecated in dbt 1.11 and
                 # warned on every parse.
                 tests: list[object] = []
-                if col.is_primary_key:
+                if col.name in single_key:
                     tests.extend(["unique", "not_null"])
+                elif col.is_primary_key:
+                    # A member of a composite key is not unique alone; the
+                    # combination is tested at the model level below.
+                    tests.append("not_null")
+                elif col.name in single_unique:
+                    tests.append("unique")
                 ref = fk_refs.get((entity.entity_name, col.name))
                 if ref:
                     parent_entity, parent_col = ref
@@ -428,6 +376,12 @@ class ExporterService:
                 "name": f"stg_{entity.entity_name}",
                 "columns": columns,
             }
+            compound = self._compound_uniques(entity)
+            if compound:
+                model_doc["data_tests"] = [
+                    {"dbt_expectations.expect_compound_columns_to_be_unique": {
+                        "arguments": {"column_list": columns_set}}}
+                    for columns_set in compound]
             if entity.description:
                 model_doc["description"] = entity.description
             meta = self._governance_meta(entity)
@@ -510,15 +464,14 @@ class ExporterService:
 
         joins: list[str] = []
         for rel in model.relationships:
-            from_entity, _ = self._split_ref(rel.from_ref)
-            to_entity, _ = self._split_ref(rel.to_ref)
-            if from_entity == entity.entity_name and to_entity != entity.entity_name:
-                target = self._to_pascal_case(to_entity)
-                from_col = self._split_ref(rel.from_ref)[1]
-                to_col = self._split_ref(rel.to_ref)[1]
+            # An unresolved relationship names no columns, so it has no join
+            # condition to state; a composite one joins on every pair.
+            if rel.from_ref == entity.entity_name and rel.to_ref != entity.entity_name and rel.resolved:
+                target = self._to_pascal_case(rel.to_ref)
+                condition = " AND ".join(f"${{CUBE}}.{f} = ${{{target}}}.{t}" for f, t in rel.pairs)
                 joins.append(
                     f"    {target}: {{\n"
-                    f"      sql: `${{CUBE}}.{from_col} = ${{{target}}}.{to_col}`,\n"
+                    f"      sql: `{condition}`,\n"
                     f"      relationship: `belongsTo`\n    }}"
                 )
 
@@ -578,6 +531,9 @@ class ExporterService:
           C7-a, after C3 named this wrongly.
         """
         schema: list[dict[str, object]] = []
+        # A composite foreign key is not a set of one-column relationships, so
+        # its columns carry none; it is stated whole as a custom property.
+        composite = {(r.from_ref, c) for r in model.relationships if len(r.from_columns) > 1 for c in r.from_columns}
         for entity in model.entities:
             properties: list[dict[str, object]] = []
             for col in entity.columns:
@@ -592,13 +548,15 @@ class ExporterService:
                     "required": not col.is_nullable,
                     "primaryKey": col.is_primary_key,
                 }
+                if col.is_primary_key and len(entity.primary_key) > 1:
+                    prop["primaryKeyPosition"] = entity.primary_key.index(col.name) + 1
                 if col.is_unique:
                     prop["unique"] = True
                 if col.description:
                     prop["description"] = col.description
                 if col.is_pii:
                     prop["classification"] = "PII"
-                if col.references:
+                if col.references and (entity.entity_name, col.name) not in composite:
                     # Shorthand notation, <object>.<property>, which is exactly
                     # the shape ColumnSchema.references already stores.
                     prop["relationships"] = [{"to": col.references}]
@@ -626,6 +584,13 @@ class ExporterService:
                 custom.append({"property": "tier", "value": tier})
             if entity.grain:
                 custom.append({"property": "grain", "value": entity.grain})
+            keys = [f"({', '.join(r.from_columns)}) -> {r.to_ref}({', '.join(r.to_columns)})"
+                    for r in model.relationships if r.from_ref == entity.entity_name and len(r.from_columns) > 1]
+            if keys:
+                custom.append({"property": "compositeForeignKeys", "value": keys})
+            multi_unique = [u.columns for u in entity.unique_constraints if len(u.columns) > 1]
+            if multi_unique:
+                custom.append({"property": "uniqueColumnSets", "value": multi_unique})
             if custom:
                 table_doc["customProperties"] = custom
             if entity.freshness_sla:
@@ -787,12 +752,11 @@ class ExporterService:
           silently reintroduce another.
         """
         # (child entity, child column) -> parent entity, for foreign entities.
+        # One-column foreign keys only: a MetricFlow entity is one expression.
         fk_parent: dict[tuple[str, str], str] = {}
         for rel in model.relationships:
-            from_entity, from_col = self._split_ref(rel.from_ref)
-            to_entity, _ = self._split_ref(rel.to_ref)
-            if from_col:
-                fk_parent[(from_entity, from_col)] = to_entity
+            if len(rel.from_columns) == 1:
+                fk_parent[(rel.from_ref, rel.from_columns[0])] = rel.to_ref
 
         # Each entity's primary-entity name, which is its primary-key column.
         # A foreign entity must reuse the parent's, or the join does not exist.
@@ -985,10 +949,17 @@ class ExporterService:
     def _fk_targets(self, model: SynthesizedModel) -> dict[tuple[str, str], str]:
         targets: dict[tuple[str, str], str] = {}
         for rel in model.relationships:
-            from_entity, from_col = self._split_ref(rel.from_ref)
-            if from_col:
-                targets[(from_entity, from_col)] = rel.to_ref
+            for i, from_col in enumerate(rel.from_columns):
+                to_col = rel.to_columns[i] if i < len(rel.to_columns) else None
+                targets[(rel.from_ref, from_col)] = f"{rel.to_ref}.{to_col}" if to_col else rel.to_ref
         return targets
+
+    @staticmethod
+    def _side(entity: str, columns: list[str]) -> str:
+        """One end of a relationship as a reader sees it: entity.column, or entity(a, b)."""
+        if len(columns) == 1:
+            return f"{entity}.{columns[0]}"
+        return f"{entity}({', '.join(columns)})" if columns else entity
 
     @staticmethod
     def _key_label(col: ColumnSchema, fk_ref: str | None) -> str:
@@ -1055,8 +1026,8 @@ class ExporterService:
                 card = rel.cardinality
                 card_value = card.value if hasattr(card, "value") else str(card)
                 lines.append(
-                    f"| {self._md_cell(rel.from_ref)} "
-                    f"| {self._md_cell(rel.to_ref)} | {card_value} |"
+                    f"| {self._md_cell(self._side(rel.from_ref, rel.from_columns))} "
+                    f"| {self._md_cell(self._side(rel.to_ref, rel.to_columns))} | {card_value} |"
                 )
             lines.append("")
 
@@ -1148,8 +1119,8 @@ class ExporterService:
                 card = rel.cardinality
                 card_value = card.value if hasattr(card, "value") else str(card)
                 parts.append(
-                    f"<tr><td><code>{esc(rel.from_ref)}</code></td>"
-                    f"<td><code>{esc(rel.to_ref)}</code></td>"
+                    f"<tr><td><code>{esc(self._side(rel.from_ref, rel.from_columns))}</code></td>"
+                    f"<td><code>{esc(self._side(rel.to_ref, rel.to_columns))}</code></td>"
                     f"<td>{esc(card_value)}</td></tr>"
                 )
             parts.append("</tbody></table>")
@@ -1195,7 +1166,9 @@ class ExporterService:
             "relationships": [
                 {
                     "from": rel.from_ref,
+                    "from_columns": rel.from_columns,
                     "to": rel.to_ref,
+                    "to_columns": rel.to_columns,
                     "cardinality": rel.cardinality.value
                     if hasattr(rel.cardinality, "value")
                     else str(rel.cardinality),
@@ -1312,11 +1285,6 @@ class ExporterService:
     # ---------------------------------------------------------------------
     # Helpers
     # ---------------------------------------------------------------------
-    @staticmethod
-    def _split_ref(ref: str) -> tuple[str, str]:
-        parts = ref.split(".", 1)
-        return (parts[0], parts[1] if len(parts) > 1 else "")
-
     @staticmethod
     def _is_numeric(col: ColumnSchema) -> bool:
         upper = col.data_type.upper()

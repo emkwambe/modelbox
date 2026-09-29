@@ -11,6 +11,8 @@ SQL, never through the ORM (register standard 1):
   own code from a worktree at its tag, and egress-ledger rows;
 * at 0019, audit rows with and without a workspace (no ``scope`` column yet),
   a user, and an API key (no ``role_cap`` column yet);
+* at 0024, a model in the shape keys had before 0025 (column flags and
+  relationship column ids), covering every case 0025 converts or lists;
 * then head, confirmed by reading ``alembic_version`` back (`_upgrade_to`).
 
 After it: every model and ledger row is still there, ``scope`` was backfilled
@@ -154,7 +156,8 @@ def upgraded(server: str, release_worktree: Path) -> dict:
     dsn = _database(server, "populated")
     seeded: dict = {"release_worktree": release_worktree}
     asyncio.run(_populate_and_upgrade(dsn, seeded))
-    return {"dsn": dsn, "models": len(seeded["models"])}
+    # The gold models, plus the one written in the pre-0025 shape at 0024.
+    return {"dsn": dsn, "models": len(seeded["models"]) + 1, "legacy_model": seeded["legacy_model"]}
 
 
 async def _populate_and_upgrade(dsn: str, seeded: dict) -> None:
@@ -191,12 +194,149 @@ async def _populate_and_upgrade(dsn: str, seeded: dict) -> None:
         a1=uuid.uuid4(), a2=uuid.uuid4(), w=workspace_id,
     )
 
+    _upgrade_to(BACKEND, dsn, "0024_column_source_type")
+    seeded["legacy_model"] = await _seed_legacy_keys(dsn, workspace_id)
+
     _upgrade_to(BACKEND, dsn, "head")
+
+
+async def _seed_legacy_keys(dsn: str, workspace_id: uuid.UUID) -> uuid.UUID:
+    """A model in the shape keys had before 0025: column flags and column ids.
+
+    Every case 0025 converts, and every case it can only list:
+    customer  id PK; email UNIQUE with a CHECK             -> exact
+    invoice   customer_id: a relationship with no columns   -> kept unresolved, listed
+    note      customer_ref: reference_target, no relationship -> becomes a relationship, listed
+              ghost_ref: reference_target to a missing entity -> listed
+              loose_fk: is_foreign_key, no target at all      -> listed
+    shipment  half_id: a relationship with only its from column -> kept with that column, listed
+              wrong_ref: reference_target contradicting its relationship -> relationship kept, listed
+    """
+    model_id = uuid.uuid4()
+    await _execute(dsn, "INSERT INTO data_models (model_id, workspace_id, title, target_dialect) "
+                        "VALUES (:m, :w, 'legacy keys', 'postgres')", m=model_id, w=workspace_id)
+    entities = {name: uuid.uuid4() for name in ("customer", "invoice", "note", "shipment")}
+    for name, entity_id in entities.items():
+        # shipment as a provider that omitted entity_type left it before this step.
+        stored = "EntityType.TABLE" if name == "shipment" else "TABLE"
+        await _execute(dsn, "INSERT INTO model_entities (entity_id, model_id, entity_name, entity_type) "
+                            "VALUES (:e, :m, :n, :t)", e=entity_id, m=model_id, n=name, t=stored)
+    columns: dict[tuple[str, str], uuid.UUID] = {}
+    spec = [  # (entity, column, is_pk, is_fk, is_unique, check, reference)
+        ("customer", "id", True, False, False, None, None),
+        ("customer", "email", False, False, True, "email LIKE '%@%'", None),
+        ("invoice", "id", True, False, False, None, None),
+        ("invoice", "customer_id", False, True, False, None, None),
+        ("note", "id", True, False, False, None, None),
+        ("note", "customer_ref", False, True, False, None, "customer.id"),
+        ("note", "ghost_ref", False, True, False, None, "ghost.id"),
+        ("note", "loose_fk", False, True, False, None, None),
+        ("shipment", "id", True, False, False, None, None),
+        ("shipment", "half_id", False, True, False, None, None),
+        ("shipment", "wrong_ref", False, True, False, None, "invoice.id"),
+    ]
+    for position, (entity, column, pk, fk, unique, check, reference) in enumerate(spec):
+        column_id = columns[(entity, column)] = uuid.uuid4()
+        await _execute(
+            dsn,
+            "INSERT INTO entity_columns (column_id, entity_id, column_name, data_type, is_primary_key, "
+            "is_foreign_key, is_unique, check_expression, reference_target, is_nullable, ordinal_position, "
+            "stable_id) VALUES (:c, :e, :n, 'INTEGER', :pk, :fk, :u, :ck, :ref, :nullable, :pos, :sid)",
+            c=column_id, e=entities[entity], n=column, pk=pk, fk=fk, u=unique, ck=check, ref=reference,
+            nullable=not pk, pos=position, sid=position + 1)
+    relationships = [  # (from entity, from column, to entity, to column)
+        ("invoice", None, "customer", None),
+        ("shipment", "half_id", "invoice", None),
+        ("shipment", "wrong_ref", "customer", "id"),
+    ]
+    for from_entity, from_column, to_entity, to_column in relationships:
+        await _execute(
+            dsn,
+            "INSERT INTO entity_relationships (relationship_id, model_id, from_entity_id, from_column_id, "
+            "to_entity_id, to_column_id, cardinality) VALUES (:r, :m, :fe, :fc, :te, :tc, 'N:1')",
+            r=uuid.uuid4(), m=model_id, fe=entities[from_entity],
+            fc=columns.get((from_entity, from_column or "")), te=entities[to_entity],
+            tc=columns.get((to_entity, to_column or "")))
+    return model_id
+
+
+async def test_0025_converts_flags_into_constraints_exactly(upgraded) -> None:
+    rows = await _fetch(
+        upgraded["dsn"],
+        "SELECT e.entity_name, k.kind, k.expression, "
+        "  (SELECT string_agg(column_name, ',' ORDER BY position) FROM entity_constraint_columns "
+        "   WHERE constraint_id = k.constraint_id) AS columns "
+        "FROM entity_constraints k JOIN model_entities e ON e.entity_id = k.entity_id "
+        "WHERE e.model_id = :m ORDER BY e.entity_name, k.position",
+        m=upgraded["legacy_model"])
+    assert [(r["entity_name"], r["kind"], r["expression"], r["columns"]) for r in rows] == [
+        ("customer", "PRIMARY KEY", None, "id"),
+        ("customer", "UNIQUE", None, "email"),
+        ("customer", "CHECK", "email LIKE '%@%'", "email"),
+        ("invoice", "PRIMARY KEY", None, "id"),
+        ("note", "PRIMARY KEY", None, "id"),
+        ("shipment", "PRIMARY KEY", None, "id"),
+    ]
+
+
+async def test_0025_keeps_every_relationship_and_lists_what_it_could_not_convert(upgraded) -> None:
+    dsn, model = upgraded["dsn"], upgraded["legacy_model"]
+    relationships = await _fetch(
+        dsn,
+        "SELECT f.entity_name AS from_entity, t.entity_name AS to_entity, "
+        "  (SELECT string_agg(coalesce(from_column_name, '?') || '>' || coalesce(to_column_name, '?'), ',' "
+        "   ORDER BY position) FROM relationship_columns WHERE relationship_id = r.relationship_id) AS pairs "
+        "FROM entity_relationships r JOIN model_entities f ON f.entity_id = r.from_entity_id "
+        "JOIN model_entities t ON t.entity_id = r.to_entity_id WHERE r.model_id = :m "
+        "ORDER BY f.entity_name, t.entity_name", m=model)
+    assert [(r["from_entity"], r["to_entity"], r["pairs"]) for r in relationships] == [
+        ("invoice", "customer", None),              # kept, unresolved
+        ("note", "customer", "customer_ref>id"),    # a reference that became a relationship
+        ("shipment", "customer", "wrong_ref>id"),   # the relationship wins over its reference
+        ("shipment", "invoice", "half_id>?"),       # kept with the one column it had
+    ]
+    findings = await _fetch(
+        dsn, "SELECT kind, entity_name, revision FROM model_conversion_findings WHERE model_id = :m "
+             "ORDER BY kind, entity_name", m=model)
+    assert [(f["kind"], f["entity_name"]) for f in findings] == [
+        ("enum_name_repaired", "shipment"),
+        # invoice.customer_id was flagged, but its relationship names no column.
+        ("foreign_key_without_target", "invoice"),
+        ("foreign_key_without_target", "note"),
+        ("partly_resolved_relationship", "shipment"),
+        ("reference_became_relationship", "note"),
+        ("reference_contradicts_relationship", "shipment"),
+        ("reference_target_missing", "note"),
+        ("unresolved_relationship", "invoice"),
+    ]
+    assert {f["revision"] for f in findings} == {"0025_keys_and_constraints"}
+    types = await _fetch(dsn, "SELECT DISTINCT entity_type FROM model_entities WHERE model_id = :m", m=model)
+    assert types == [{"entity_type": "TABLE"}]
+
+
+async def test_0025_converts_the_seeded_gold_models_with_nothing_to_list(upgraded) -> None:
+    """The models v1.11.1 wrote convert with nothing listed: no finding, and
+    every relationship has a complete column pair. (Key order and whole-graph
+    equality across a release boundary are test_migration_0013_populated's.)"""
+    dsn = upgraded["dsn"]
+    findings = await _fetch(dsn, "SELECT count(*) AS n FROM model_conversion_findings WHERE model_id <> :m",
+                            m=upgraded["legacy_model"])
+    assert findings[0]["n"] == 0
+    unpaired = await _fetch(
+        dsn, "SELECT count(*) AS n FROM entity_relationships r WHERE r.model_id <> :m AND NOT EXISTS "
+             "(SELECT 1 FROM relationship_columns p WHERE p.relationship_id = r.relationship_id "
+             " AND p.from_column_name IS NOT NULL AND p.to_column_name IS NOT NULL)",
+        m=upgraded["legacy_model"])
+    assert unpaired[0]["n"] == 0
+    keys = await _fetch(
+        dsn, "SELECT count(*) AS n FROM entity_constraints k JOIN model_entities e ON e.entity_id = k.entity_id "
+             "WHERE k.kind = 'PRIMARY KEY' AND e.model_id <> :m", m=upgraded["legacy_model"])
+    assert keys[0]["n"] > 0, "fixture sanity: the seeded models have primary keys"
 
 
 async def test_the_database_reached_head(upgraded) -> None:
     rows = await _fetch(upgraded["dsn"], "SELECT version_num FROM alembic_version")
-    assert rows == [{"version_num": "0024_column_source_type"}]
+    assert rows == [{"version_num": "0025_keys_and_constraints"}]
 
 
 async def test_models_from_before_0023_are_not_marked_imported(upgraded) -> None:

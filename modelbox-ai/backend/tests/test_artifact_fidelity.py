@@ -1324,8 +1324,8 @@ def test_metricflow_foreign_entity_names_parent_primary() -> None:
         if any(e["type"] == "primary" for e in m["entities"])
     }
     for rel in fixture.model.relationships:
-        child_entity, child_column = rel.from_ref.split(".", 1)
-        parent_entity = rel.to_ref.split(".", 1)[0]
+        child_entity, child_column = rel.from_ref, rel.from_columns[0]
+        parent_entity = rel.to_ref
         expected = primary_names[parent_entity]
         foreign = [
             e["name"] for e in by_name[child_entity]["entities"]
@@ -1677,16 +1677,19 @@ def test_odcs_declares_foreign_keys_as_relationships(gid: str) -> None:
     expected: dict[tuple[str, str], str] = {}
     by_entity = {e.entity_name: e for e in model.entities}
     for rel in model.relationships:
-        child, child_col = rel.from_ref.split(".", 1)
-        if not child_col or child not in by_entity:
+        # One-column relationships; from Sprint 8 Step 3 the entity and its
+        # columns are separate fields, and `references` is derived from them.
+        if len(rel.from_columns) != 1 or not rel.resolved or rel.from_ref not in by_entity:
             continue
+        child, child_col = rel.from_ref, rel.from_columns[0]
         column = next(
             (c for c in by_entity[child].columns if c.name == child_col), None
         )
         if column is None:
             continue
-        column.references = rel.to_ref
-        expected[(child, child_col)] = rel.to_ref
+        target = f"{rel.to_ref}.{rel.to_columns[0]}"
+        column.references = target
+        expected[(child, child_col)] = target
     if not expected:
         pytest.skip("single-entity model declares no foreign keys")
 

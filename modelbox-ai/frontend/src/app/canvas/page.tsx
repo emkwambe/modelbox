@@ -18,6 +18,7 @@ import ExportPanel from '@/components/editor/ExportPanel';
 import { deleteModel, saveGraph, updateModel } from '@/lib/api';
 import { errMessage } from '@/lib/errors';
 import { StatusText, toneColor, toneTint } from '@/components/ui';
+import { useUnsavedChangesGuard } from '@/lib/useUnsavedChangesGuard';
 import { useCanvasStore } from '@/store/canvasStore';
 
 export default function CanvasPage() {
@@ -30,6 +31,9 @@ export default function CanvasPage() {
   const reset = useCanvasStore((s) => s.reset);
   const setValidation = useCanvasStore((s) => s.setValidation);
   const getGraphPayload = useCanvasStore((s) => s.getGraphPayload);
+  const markSaved = useCanvasStore((s) => s.markSaved);
+  const dirty = useCanvasStore((s) => s.dirty);
+  useUnsavedChangesGuard(dirty);
   const [showExport, setShowExport] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -72,6 +76,7 @@ export default function CanvasPage() {
     try {
       const report = await saveGraph(modelId, getGraphPayload());
       setValidation(report);
+      markSaved();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (e) {
@@ -152,7 +157,11 @@ export default function CanvasPage() {
           </Link>
           <span style={{ color: color.neutral[500], fontSize: 13 }}>
             {paradigm ?? 'No model'} · {entityCount} entities
+            {dirty && ' · unsaved changes'}
           </span>
+          <Link href="/models" style={{ color: color.neutral[700] }}>
+            Models
+          </Link>
           {validStatus && (
             <span
               style={{

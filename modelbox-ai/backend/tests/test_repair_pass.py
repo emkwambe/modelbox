@@ -158,6 +158,14 @@ def _issues(model: SynthesizedModel) -> list[str]:
     return [i.code for i in report.issues if i.code in _REPAIRABLE_CODES]
 
 
+def _drop_primary_key(entity) -> None:
+    """Give a built entity no primary key: the list is the key (Sprint 8 Step
+    3); the column flags follow it."""
+    entity.primary_key = []
+    for column in entity.columns:
+        column.is_primary_key = False
+
+
 # ---------------------------------------------------------------------------
 # Preconditions — the fixtures must actually exhibit what they claim
 # ---------------------------------------------------------------------------
@@ -278,8 +286,7 @@ async def test_a_repair_that_trades_one_defect_for_two_is_discarded() -> None:
     broken = _dangling()
     worse = _dangling_repaired()
     for entity in worse.entities:
-        for column in entity.columns:
-            column.is_primary_key = False
+        _drop_primary_key(entity)
 
     gateway = _ScriptedGateway(worse)
     model, _ = await _engine(gateway)._repair_once(
@@ -382,8 +389,7 @@ async def test_a_repair_that_deletes_the_offending_entity_is_discarded() -> None
     described and will not be told is gone.
     """
     broken = _dangling_repaired()
-    for column in broken.entities[1].columns:
-        column.is_primary_key = False  # customer now carries MISSING_PK
+    _drop_primary_key(broken.entities[1])  # customer now carries MISSING_PK
 
     gutted = _dangling_repaired()
     gutted.entities = [e for e in gutted.entities if e.entity_name != "customer"]
@@ -489,8 +495,7 @@ async def test_telemetry_records_a_rejected_repair() -> None:
     """
     worse = _dangling_repaired()
     for entity in worse.entities:
-        for column in entity.columns:
-            column.is_primary_key = False
+        _drop_primary_key(entity)
 
     engine = _engine(_ScriptedGateway(_dangling(), worse))
     telemetry: dict[str, Any] = {}

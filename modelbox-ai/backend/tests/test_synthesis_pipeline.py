@@ -977,8 +977,8 @@ def test_introspection_build_graph() -> None:
     assert fk_col.is_foreign_key
     assert len(model.relationships) == 1
     rel = model.relationships[0]
-    assert rel.from_ref == "orders.customer_id"
-    assert rel.to_ref == "customers.id"
+    assert (rel.from_ref, rel.from_columns) == ("orders", ["customer_id"])
+    assert (rel.to_ref, rel.to_columns) == ("customers", ["id"])
     assert rel.cardinality == "N:1"
 
 

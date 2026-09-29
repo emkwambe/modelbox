@@ -161,7 +161,7 @@ export default function HomePage() {
       });
       const model = await pollJob(job_id);
       loadModel(model);
-      router.push('/canvas');
+      router.push(`/canvas/${model.model_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Synthesis failed.');
     } finally {
@@ -190,6 +190,9 @@ export default function HomePage() {
         <div style={{ display: 'flex', gap: 18, fontSize: 14, flexWrap: 'wrap' }}>
           <Link href="/canvas" style={navLink}>
             Canvas
+          </Link>
+          <Link href="/models" style={navLink}>
+            Models
           </Link>
           <Link href="/trainer" style={navLink}>
             Trainer

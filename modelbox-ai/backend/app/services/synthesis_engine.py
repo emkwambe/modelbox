@@ -21,12 +21,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.metadata_store import (
     DataModel,
     EntityColumn,
+    EntityConstraint,
+    EntityConstraintColumn,
     EntityRelationship,
+    ModelConversionFinding,
     ModelEntity,
+    RelationshipColumn,
     Workspace,
 )
 from app.schemas.data_model import (
+    Cardinality,
+    CheckConstraintSchema,
     ColumnSchema,
+    ConversionFinding,
     EntitySchema,
     Paradigm,
     RelationshipSchema,
@@ -34,8 +41,10 @@ from app.schemas.data_model import (
     SynthesizedModel,
     SynthesizeRequest,
     SynthesizeResponse,
+    UniqueConstraintSchema,
     ValidationIssue,
     ValidationReport,
+    unify_foreign_keys,
 )
 from app.services.graph_engine import GraphEngine
 from app.services.graph_repository import GraphRepository
@@ -368,12 +377,13 @@ class SynthesisEngine:
 
         entities = (
             await self._session.execute(
-                select(ModelEntity).where(ModelEntity.model_id == model_id)
+                select(ModelEntity)
+                .where(ModelEntity.model_id == model_id)
+                .order_by(ModelEntity.position, ModelEntity.entity_name)
             )
         ).scalars().all()
 
         entity_by_id = {e.entity_id: e for e in entities}
-        column_ref: dict[uuid.UUID, str] = {}
         entity_schemas: list[EntitySchema] = []
 
         for entity in entities:
@@ -384,8 +394,8 @@ class SynthesisEngine:
                     .order_by(EntityColumn.ordinal_position)
                 )
             ).scalars().all()
-            for col in columns:
-                column_ref[col.column_id] = f"{entity.entity_name}.{col.column_name}"
+            constraints = await self._constraints(entity.entity_id)
+            primary = next((cols for kind, _, _, cols in constraints if kind == "PRIMARY KEY"), [])
             entity_schemas.append(
                 EntitySchema(
                     entity_name=entity.entity_name,
@@ -398,33 +408,50 @@ class SynthesisEngine:
                     canvas_position_x=entity.canvas_position_x,
                     canvas_position_y=entity.canvas_position_y,
                     columns=[self._column_to_schema(c) for c in columns],
+                    primary_key=primary,
+                    unique_constraints=[UniqueConstraintSchema(name=name, columns=cols)
+                                        for kind, name, _, cols in constraints if kind == "UNIQUE"],
+                    check_constraints=[CheckConstraintSchema(name=name, expression=expression or "", columns=cols)
+                                       for kind, name, expression, cols in constraints if kind == "CHECK"],
                 )
             )
 
         rels = (
             await self._session.execute(
-                select(EntityRelationship).where(
-                    EntityRelationship.model_id == model_id
-                )
+                select(EntityRelationship)
+                .where(EntityRelationship.model_id == model_id)
+                .order_by(EntityRelationship.position)
             )
         ).scalars().all()
 
         rel_schemas: list[RelationshipSchema] = []
         for rel in rels:
-            from_ref = column_ref.get(
-                rel.from_column_id,  # type: ignore[arg-type]
-                entity_by_id[rel.from_entity_id].entity_name,
-            )
-            to_ref = column_ref.get(
-                rel.to_column_id,  # type: ignore[arg-type]
-                entity_by_id[rel.to_entity_id].entity_name,
-            )
+            pairs = (
+                await self._session.execute(
+                    select(RelationshipColumn)
+                    .where(RelationshipColumn.relationship_id == rel.relationship_id)
+                    .order_by(RelationshipColumn.position)
+                )
+            ).scalars().all()
             rel_schemas.append(
-                RelationshipSchema.model_validate(
-                    {"from": from_ref, "to": to_ref, "cardinality": rel.cardinality}
+                RelationshipSchema.between(
+                    entity_by_id[rel.from_entity_id].entity_name,
+                    [p.from_column_name for p in pairs if p.from_column_name is not None],
+                    entity_by_id[rel.to_entity_id].entity_name,
+                    [p.to_column_name for p in pairs if p.to_column_name is not None],
+                    rel.cardinality,
+                    name=rel.name,
                 )
             )
+        findings = (
+            await self._session.execute(
+                select(ModelConversionFinding)
+                .where(ModelConversionFinding.model_id == model_id)
+                .order_by(ModelConversionFinding.entity_name, ModelConversionFinding.kind)
+            )
+        ).scalars().all()
 
+        rel_schemas = unify_foreign_keys(entity_schemas, rel_schemas)
         report = self._graph.validate(entity_schemas, rel_schemas)
         return SynthesizeResponse(
             model_id=model.model_id,
@@ -439,7 +466,31 @@ class SynthesisEngine:
                 for m in (model.suggested_metrics or [])
             ],
             validation=report,
+            conversion_findings=[ConversionFinding.model_validate(f) for f in findings],
         )
+
+    async def _constraints(
+        self, entity_id: uuid.UUID
+    ) -> list[tuple[str, str | None, str | None, list[str]]]:
+        """(kind, name, expression, columns) for each of an entity's constraints, in order."""
+        rows = (
+            await self._session.execute(
+                select(EntityConstraint)
+                .where(EntityConstraint.entity_id == entity_id)
+                .order_by(EntityConstraint.position)
+            )
+        ).scalars().all()
+        found = []
+        for row in rows:
+            members = (
+                await self._session.execute(
+                    select(EntityConstraintColumn.column_name)
+                    .where(EntityConstraintColumn.constraint_id == row.constraint_id)
+                    .order_by(EntityConstraintColumn.position)
+                )
+            ).scalars().all()
+            found.append((row.kind, row.name, row.expression, list(members)))
+        return found
 
     async def validate_model(
         self, model_id: uuid.UUID
@@ -650,11 +701,6 @@ class SynthesisEngine:
         return model
 
     @staticmethod
-    def _split_ref(ref: str) -> tuple[str, str]:
-        parts = ref.split(".", 1)
-        return (parts[0], parts[1] if len(parts) > 1 else "")
-
-    @staticmethod
     def _normalize_relationships(
         entities: list[EntitySchema],
         relationships: list[RelationshipSchema],
@@ -670,32 +716,21 @@ class SynthesisEngine:
         normalized: list[RelationshipSchema] = []
 
         for rel in relationships:
-            from_entity, _ = SynthesisEngine._split_ref(rel.from_ref)
-            to_entity, _ = SynthesisEngine._split_ref(rel.to_ref)
-            from_type = type_by_name.get(from_entity)
-            to_type = type_by_name.get(to_entity)
+            from_type = type_by_name.get(rel.from_ref)
+            to_type = type_by_name.get(rel.to_ref)
 
             if from_type == "FACT" and to_type == "DIMENSION":
-                normalized.append(
-                    RelationshipSchema.model_validate(
-                        {
-                            "from": rel.from_ref,
-                            "to": rel.to_ref,
-                            "cardinality": "N:1",
-                        }
-                    )
-                )
+                # model_copy does not validate, so the stored value is the
+                # enum's value, not the enum (whose str() is its name).
+                normalized.append(rel.model_copy(update={"cardinality": Cardinality.MANY_TO_ONE.value}))
             elif from_type == "DIMENSION" and to_type == "FACT":
-                # Flip so the Fact (FK holder) is the source.
-                normalized.append(
-                    RelationshipSchema.model_validate(
-                        {
-                            "from": rel.to_ref,
-                            "to": rel.from_ref,
-                            "cardinality": "N:1",
-                        }
-                    )
+                # Flip so the Fact (FK holder) is the source, columns and all.
+                flipped = RelationshipSchema.between(
+                    rel.to_ref, rel.to_columns, rel.from_ref, rel.from_columns,
+                    Cardinality.MANY_TO_ONE, name=rel.name,
                 )
+                flipped._stated_no_columns = rel._stated_no_columns
+                normalized.append(flipped)
             else:
                 normalized.append(rel)
 
@@ -706,8 +741,6 @@ class SynthesisEngine:
         return ColumnSchema(
             name=col.column_name,
             data_type=col.data_type,
-            is_primary_key=col.is_primary_key,
-            is_foreign_key=col.is_foreign_key,
             is_pii=col.is_pii,
             pii_type=col.pii_type,  # type: ignore[arg-type]
             description=col.description,
@@ -719,9 +752,7 @@ class SynthesisEngine:
             ordinal_position=col.ordinal_position,
             stable_id=col.stable_id,
             is_nullable=col.is_nullable,
-            is_unique=col.is_unique,
             default_value=col.default_value,
-            check_expression=col.check_expression,
-            references=col.reference_target,
             source_data_type=col.source_data_type,
+            source_default_value=col.source_default_value,
         )
