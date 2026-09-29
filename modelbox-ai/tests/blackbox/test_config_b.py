@@ -8,9 +8,6 @@ check marked `weakened_by_insecure` must then fail on its own check. The
 others cover weaknesses no configuration can put back, and each names the
 in-process negative control that shows it able to fail:
 
-* forged HS256 token: the profile keeps a generated JWT_SECRET. Refusing the
-  shipped secret outside development is `test_config_secrets.py`
-  (`test_negative_control_without_the_validator_the_check_fails`).
 * VIEWER cannot transform: authorisation is code, not configuration.
   `test_route_policy.py` (the fake unguarded route in a nested router) and
   `test_role_authorization.py`.
@@ -80,6 +77,7 @@ def test_b1_the_dev_account_cannot_sign_in(client: httpx.Client) -> None:
 # --- B2: a token signed with the shipped secret ------------------------------------------
 
 
+@weakened_by_insecure("JWT_SECRET is the shipped dev-secret-change-me")
 def test_b2_a_token_signed_with_the_shipped_secret_is_rejected(
     client: httpx.Client, world: World
 ) -> None:

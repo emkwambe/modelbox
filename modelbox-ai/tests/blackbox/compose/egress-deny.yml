@@ -14,13 +14,10 @@ networks:
   host-facing: {}
 
 services:
+  # The image listens on every interface (Dockerfile.frontend, HOSTNAME), so
+  # its published port answers on host-facing with nothing set here.
   modelbox-ui:
     networks: [egress-deny, host-facing]
-    environment:
-      # Next.js's standalone server listens on the address $HOSTNAME resolves
-      # to, which on two networks is only the first one's. Listening on every
-      # interface lets the published port reach it on host-facing.
-      - HOSTNAME=0.0.0.0
   modelbox-backend:
     networks: [egress-deny]
   modelbox-worker:

@@ -16,7 +16,8 @@ concurrency:
 
 jobs:
   backend-test:
-    name: Backend Pytest & Type Check
+    # Type checking is its own job (Backend Type Check (mypy)) since Sprint 7.
+    name: Backend Pytest
     runs-on: ubuntu-24.04
 
     steps:

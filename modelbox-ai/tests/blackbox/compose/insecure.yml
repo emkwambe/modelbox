@@ -6,6 +6,7 @@
 # weaknesses the hardened appliance removes:
 #
 #   * ENVIRONMENT=development (backend, worker, migrate)
+#   * JWT_SECRET set to the shipped dev-secret-change-me (backend, worker)
 #   * the dev account seeded (dev@modelbox.ai)
 #   * self-registration open
 #   * the backend (8000) and Ollama (11434) ports published to the host
@@ -23,6 +24,7 @@ services:
   modelbox-backend:
     environment:
       - ENVIRONMENT=development
+      - JWT_SECRET=dev-secret-change-me
       - MODELBOX_SEED_DEV_USER=true
       - MODELBOX_ALLOW_REGISTRATION=true
     ports:
@@ -31,6 +33,7 @@ services:
   modelbox-worker:
     environment:
       - ENVIRONMENT=development
+      - JWT_SECRET=dev-secret-change-me
 
   modelbox-migrate:
     environment:
