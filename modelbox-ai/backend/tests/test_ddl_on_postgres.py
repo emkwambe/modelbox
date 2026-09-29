@@ -137,10 +137,11 @@ async def test_negative_control_an_invalid_export_makes_the_check_fail(
     session: AsyncSession, target: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Without the TINYINT substitution, AdventureWorks' DDL names a type
-    PostgreSQL does not have, and applying it is refused."""
+    PostgreSQL does not have, and applying it is refused (the tables referring
+    to those are refused after them)."""
     monkeypatch.setitem(ddl_export._TYPE_GAPS, "postgres",
                         {k: v for k, v in ddl_export._TYPE_GAPS["postgres"].items() if k != "UTINYINT"})
     export, _ = await _export(session, "tsql", "adventureworks")
     refused = await _apply(target, export.statements)
     assert refused, "the invalid export was accepted"
-    assert all("utinyint" in r.lower() for r in refused), refused[:3]
+    assert any('type "utinyint" does not exist' in r.lower() for r in refused), refused[:3]

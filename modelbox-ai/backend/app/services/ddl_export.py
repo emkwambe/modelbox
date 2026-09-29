@@ -57,6 +57,7 @@ _RESERVED = frozenset({
     "WHERE", "WINDOW", "WITH",
 })
 _PLAIN = re.compile(r"[a-z_][a-z0-9_]*")
+_NEXTVAL = re.compile(r"\bNEXTVAL\s*\(", re.IGNORECASE)
 
 # A computed column declares no type the model holds (its expression is kept
 # in the import report), so it has no column definition to emit.
@@ -166,25 +167,64 @@ def translate_check(
 # Types a target has no exact equivalent for, after sqlglot's translation:
 # (type -> replacement, or None to keep it) and what the gap says. Each use is
 # an export gap; nothing is widened or dropped silently.
+#
+# Each was found by applying the export to PostgreSQL 16.15 (Step 4a): a type
+# sqlglot's own parser accepts can still be one PostgreSQL refuses, or one
+# whose operators do not match the CHECKs written against it.
 _TYPE_GAPS: dict[str, dict[str, tuple[str | None, str]]] = {  # keyed by sqlglot type name
     "postgres": {
         "UTINYINT": ("SMALLINT", "PostgreSQL has no one-byte integer; emitted as SMALLINT"),
-        "SMALLMONEY": ("MONEY", "PostgreSQL has no SMALLMONEY; emitted as MONEY"),
-        "GEOGRAPHY": (None, "GEOGRAPHY needs the PostGIS extension"),
+        # SQL Server's money is exact to four places; PostgreSQL's money is
+        # locale-formatted and has no operators against numeric, so a CHECK
+        # such as (Rate >= 0.00) is refused. NUMERIC keeps the exact value.
+        "MONEY": ("DECIMAL(19, 4)", "SQL Server money is exact to four places; emitted as NUMERIC(19, 4)"),
+        "SMALLMONEY": ("DECIMAL(10, 4)", "SQL Server smallmoney is exact to four places; emitted as NUMERIC(10, 4)"),
+        "GEOGRAPHY": ("TEXT", "GEOGRAPHY needs the PostGIS extension; emitted as TEXT, which holds its WKT form"),
     },
+}
+# SQL Server's bit is a 0/1 flag; PostgreSQL's BIT is a bit string, which
+# refuses an integer default. Read from T-SQL only, where the meaning is known.
+_SOURCE_TYPE_GAPS: dict[tuple[str, str], dict[str, tuple[str, str]]] = {
+    ("tsql", "postgres"): {"BIT": ("BOOLEAN", "SQL Server bit is a 0/1 flag; emitted as BOOLEAN")},
 }
 _USER_TYPE_GAPS: dict[str, dict[str, tuple[str, str]]] = {
     "postgres": {"HIERARCHYID": ("VARCHAR", ("PostgreSQL has no HIERARCHYID; emitted as VARCHAR, "
                                              "which holds its string form ('/1/3/')"))},
 }
+# A user-defined type the model does not define (a domain or enum the import
+# listed but did not bring in) cannot be created by this file.
+_UNDEFINED_USER_TYPE: dict[str, tuple[str, str]] = {
+    "postgres": ("TEXT", "is a user-defined type the model does not define; emitted as TEXT"),
+}
 _MAX_PRECISION: dict[str, int] = {"postgres": 6}
 _TEMPORAL = frozenset({"TIMESTAMP", "TIME", "TIMESTAMPTZ", "DATETIME2", "DATETIME", "TIMETZ"})
 
 
-def _fit_type(column: exp.ColumnDef, entity: str, target: str, gaps: list[ExportGap]) -> None:
+def _as_boolean_default(column: exp.ColumnDef) -> None:
+    """A 0/1 default on a column now BOOLEAN, as FALSE/TRUE (the same value)."""
+    for constraint in column.args.get("constraints") or []:
+        default = constraint.args.get("kind")
+        if not isinstance(default, exp.DefaultColumnConstraint):
+            continue
+        value = default.this
+        while isinstance(value, exp.Paren):
+            value = value.this
+        if isinstance(value, exp.Literal) and value.name in ("0", "1"):
+            default.set("this", exp.true() if value.name == "1" else exp.false())
+
+
+def _fit_type(column: exp.ColumnDef, entity: str, target: str, gaps: list[ExportGap],
+              source: str = "") -> None:
     """Replace or annotate a translated type the target cannot hold as written."""
     kind = column.args.get("kind")
     if not isinstance(kind, exp.DataType):
+        return
+    by_source = _SOURCE_TYPE_GAPS.get((source, target), {}).get(kind.this.name)
+    if by_source is not None:
+        written = kind.sql(dialect=target)
+        column.set("kind", exp.DataType.build(by_source[0], dialect=target))
+        _as_boolean_default(column)
+        gaps.append(ExportGap("data_type", entity, f"{column.name} {written}: {by_source[1]}"))
         return
     written = kind.sql(dialect=target)
     params = kind.expressions
@@ -205,12 +245,28 @@ def _fit_type(column: exp.ColumnDef, entity: str, target: str, gaps: list[Export
         if user is not None:
             column.set("kind", exp.DataType.build(user[0], dialect=target))
             gaps.append(ExportGap("data_type", entity, f"{column.name} {written}: {user[1]}"))
+        elif (undefined := _UNDEFINED_USER_TYPE.get(target)) is not None:
+            column.set("kind", exp.DataType.build(undefined[0], dialect=target))
+            gaps.append(ExportGap("data_type", entity, f"{column.name} {written} {undefined[1]}"))
     limit = _MAX_PRECISION.get(target)
     if limit is not None and kind.this.name in _TEMPORAL and len(params) == 1 and params[0].name.isdigit() \
             and int(params[0].name) > limit:
         kind.set("expressions", [exp.DataTypeParam(this=exp.Literal.number(limit))])
         gaps.append(ExportGap("data_type", entity,
                               f"{column.name} {written}: {target} keeps at most {limit} fractional digits"))
+
+
+# Targets that add a foreign key to an existing table with ALTER TABLE.
+_ALTER_ADDS_FOREIGN_KEYS = frozenset({"postgres", "snowflake", "redshift", "databricks"})
+
+
+def _alter_foreign_key(table: str, clause: str, target: str) -> str:
+    """ALTER TABLE … ADD <clause>, checked to parse as exactly that in ``target``."""
+    statement = f"ALTER TABLE {quote(table)} ADD {clause}"
+    tree = sqlglot.parse_one(statement, read=target)
+    if not isinstance(tree, exp.Alter):
+        raise DdlExportError(f"foreign key {statement!r} does not parse as {target}")
+    return tree.sql(dialect=target)
 
 
 def _constraint_node(text: str, target: str) -> exp.Expression:
@@ -246,6 +302,8 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
     can = _CAPABILITIES.get(target, frozenset())
     gaps: list[ExportGap] = []
     tables: list[str] = []
+    deferred: list[str] = []  # foreign keys closing a cycle, added after every table
+    created: set[str] = set()
     comments: list[str] = []
     entity_columns = {e.entity_name: {c.name for c in e.columns if c.data_type != COMPUTED} for e in model.entities}
 
@@ -266,8 +324,16 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
             # every column nullable, and Databricks rejected the primary keys.
             # DEFAULT verbatim (M13): the IR stores it already quoted where
             # quoting is needed, a literal the model authored.
+            default = column.default_value
+            if default and _NEXTVAL.search(default):
+                # The sequence is not part of the model (the import lists
+                # sequences, it does not bring them in), so this file cannot
+                # create it and PostgreSQL refuses a default that names it.
+                gaps.append(ExportGap("default", name, f"{column.name} DEFAULT {default} names a sequence "
+                                                       "the model does not hold; the default is not emitted"))
+                default = None
             lines.append(f"    {quote(column.name)} {column.data_type}"
-                         + (f" DEFAULT {column.default_value}" if column.default_value else "")
+                         + (f" DEFAULT {default}" if default else "")
                          + ("" if column.is_nullable else " NOT NULL"))
 
         # Columns are written in the source dialect and translated; every key
@@ -280,7 +346,7 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
         if not isinstance(tree, exp.Create) or not isinstance(tree.this, exp.Schema):
             raise DdlExportError(f"table '{name}' did not parse as one CREATE TABLE")
         for column_def in tree.this.expressions:
-            _fit_type(column_def, name, target, gaps)
+            _fit_type(column_def, name, target, gaps, source)
 
         clauses: list[str] = []
         if entity.primary_key:
@@ -310,11 +376,25 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
                 else:
                     clauses.append(f"{_named(check.name)}CHECK ({condition})")
         for rel in model.relationships:
-            if rel.from_ref == name and (clause := _foreign_key(rel, entity_columns, gaps)) is not None:
+            if rel.from_ref != name or (clause := _foreign_key(rel, entity_columns, gaps)) is None:
+                continue
+            if rel.to_ref in created or rel.to_ref == name:
                 clauses.append(f"{_named(rel.name)}{clause}")
+            elif target in _ALTER_ADDS_FOREIGN_KEYS:
+                # The referenced table is created later: the model has a
+                # foreign-key cycle (HR's DEPARTMENTS and EMPLOYEES), so no
+                # order creates every referenced table first. Added once every
+                # table exists.
+                deferred.append(_alter_foreign_key(name, f"{_named(rel.name)}{clause}", target))
+            else:
+                gaps.append(ExportGap("foreign_key", name, f"{rel.from_ref} -> {rel.to_ref}: the model has a "
+                                                           "foreign-key cycle, the referenced table is created "
+                                                           f"later, and {target} cannot add a foreign key once a "
+                                                           "table exists"))
         for clause in clauses:
             tree.this.append("expressions", _constraint_node(clause, target))
         tables.append(tree.sql(dialect=target, pretty=True))
+        created.add(name)
 
         descriptions = _descriptions(entity, emitted)
         if descriptions and "comment" not in can:
@@ -324,12 +404,12 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
             comments += [f"COMMENT ON {kind} {target_name} IS '{text.replace(chr(39), chr(39) * 2)}'"
                          for kind, target_name, text in descriptions]
 
-    body = ";\n\n".join(tables + comments) + ";\n"
+    body = ";\n\n".join(tables + deferred + comments) + ";\n"
     if gaps:
         header = [f"-- Export gaps ({len(gaps)}): what the model holds that this file does not state."]
         header += ["-- " + " ".join(f"{g.kind} [{g.entity}]: {g.detail}".split()) for g in gaps]
         body = "\n".join(header) + "\n\n" + body
-    return DdlExport(sql=body, gaps=gaps, statements=tables + comments)
+    return DdlExport(sql=body, gaps=gaps, statements=tables + deferred + comments)
 
 
 def _descriptions(entity: EntitySchema, emitted: set[str]) -> list[tuple[str, str, str]]:

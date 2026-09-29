@@ -141,10 +141,20 @@ async def test_the_round_trip_matches_the_catalog_or_names_each_difference(
     assert _differences(catalog, got) == _expected_shortfall(reopened, gaps)
 
 
-async def test_the_genuine_oracle_and_postgres_fixtures_round_trip_with_no_gap_at_all(session: AsyncSession) -> None:
+async def test_the_genuine_oracle_and_postgres_fixtures_round_trip_with_no_difference(session: AsyncSession) -> None:
+    """HR and CO export with no gap at all. Pagila's catalog counts match
+    exactly too, but its export names two kinds of gap that PostgreSQL itself
+    found (Step 4a, test_ddl_on_postgres): serial defaults calling sequences
+    the model does not hold, and user-defined types it does not define."""
     for dialect, stem in CERTIFIED[:3]:
         catalog, got, gaps, _ = await _round_trip(session, dialect, stem)
-        assert gaps == [], (stem, gaps[:3])
+        if stem == "pagila":
+            kinds = Counter(g.kind for g in gaps)
+            assert kinds == Counter({"default": 13, "data_type": 3}), kinds
+            assert all("sequence" in g.detail for g in gaps if g.kind == "default")
+            assert all("user-defined type" in g.detail for g in gaps if g.kind == "data_type")
+        else:
+            assert gaps == [], (stem, gaps[:3])
         assert got == catalog, stem
 
 

@@ -121,6 +121,73 @@ def test_export_reads_the_normalized_default_never_the_source_text() -> None:
     assert "now()" not in sql
 
 
+_CYCLE = {"entities": [
+    {"entity_name": "dept", "columns": [{"name": "dept_id", "data_type": "INTEGER"},
+                                        {"name": "manager_id", "data_type": "INTEGER"}], "primary_key": ["dept_id"]},
+    {"entity_name": "emp", "columns": [{"name": "emp_id", "data_type": "INTEGER"},
+                                       {"name": "dept_id", "data_type": "INTEGER"}], "primary_key": ["emp_id"]}],
+    "relationships": [
+        {"from": "dept", "to": "emp", "from_columns": ["manager_id"], "to_columns": ["emp_id"], "cardinality": "N:1"},
+        {"from": "emp", "to": "dept", "from_columns": ["dept_id"], "to_columns": ["dept_id"], "cardinality": "N:1"}]}
+
+
+def test_a_foreign_key_cycle_is_closed_by_alter_table_after_every_table() -> None:
+    """Step 4a: HR's DEPARTMENTS and EMPLOYEES reference each other, so no
+    order creates both first; PostgreSQL refused the forward reference."""
+    export = ExporterService(source_dialect="postgres").generate_ddl_export(_model(_CYCLE), "postgres")
+    trees = [sqlglot.parse_one(s, read="postgres") for s in export.statements]
+    created = [t.this.this.name for t in trees if isinstance(t, exp.Create)]
+    alters = [t for t in trees if isinstance(t, exp.Alter)]
+    assert len(created) == 2 and len(alters) == 1 and trees.index(alters[0]) == 2
+    first = created[0]
+    assert not list(next(t for t in trees if isinstance(t, exp.Create) and t.this.this.name == first)
+                    .find_all(exp.ForeignKey)), "the first table cannot name a table not yet created"
+    assert alters[0].this.name == first and alters[0].find(exp.ForeignKey) is not None
+    assert export.gaps == []
+
+
+def test_negative_control_a_target_without_alter_names_the_cycle_as_a_gap() -> None:
+    export = ExporterService(source_dialect="postgres").generate_ddl_export(_model(_CYCLE), "duckdb")
+    assert [g.kind for g in export.gaps] == ["foreign_key"] and "cycle" in export.gaps[0].detail
+    assert not any(isinstance(sqlglot.parse_one(s, read="duckdb"), exp.Alter) for s in export.statements)
+
+
+def _column(sql: str, table: str, name: str) -> exp.ColumnDef:
+    return next(c for c in _tables(sql)[table].expressions if isinstance(c, exp.ColumnDef) and c.name == name)
+
+
+def test_sql_server_types_postgresql_refused_are_named_substitutes() -> None:
+    """Step 4a, found by PostgreSQL: money has no operator against numeric (so
+    AdventureWorks' CHECKs were refused) and bit refuses an integer default."""
+    graph = {"entities": [{"entity_name": "t", "columns": [
+        {"name": "id", "data_type": "INT"},
+        {"name": "rate", "data_type": "MONEY"},
+        {"name": "flag", "data_type": "BIT", "default_value": "((1))"},
+        {"name": "off", "data_type": "BIT", "default_value": "((0))"}], "primary_key": ["id"]}],
+        "relationships": []}
+    export = ExporterService(source_dialect="tsql").generate_ddl_export(_model(graph), "postgres")
+    assert _column(export.sql, "t", "rate").args["kind"].sql("postgres") == "DECIMAL(19, 4)"
+    flag, off = _column(export.sql, "t", "flag"), _column(export.sql, "t", "off")
+    assert flag.args["kind"].sql("postgres") == "BOOLEAN"
+    assert flag.find(exp.DefaultColumnConstraint).this.sql("postgres") == "TRUE"
+    assert off.find(exp.DefaultColumnConstraint).this.sql("postgres") == "FALSE"
+    assert sorted(g.detail.split(":")[0] for g in export.gaps) == ["flag BIT", "off BIT", "rate MONEY"]
+
+
+def test_a_sequence_default_and_an_undefined_type_are_named_gaps() -> None:
+    """Pagila: serial defaults call sequences the model does not hold, and
+    columns use domains and enums it does not define."""
+    graph = {"entities": [{"entity_name": "film", "columns": [
+        {"name": "film_id", "data_type": "INTEGER",
+         "default_value": "NEXTVAL(CAST('public.film_film_id_seq' AS REGCLASS))"},
+        {"name": "rating", "data_type": "public.mpaa_rating"}], "primary_key": ["film_id"]}],
+        "relationships": []}
+    export = ExporterService(source_dialect="postgres").generate_ddl_export(_model(graph), "postgres")
+    assert _column(export.sql, "film", "film_id").find(exp.DefaultColumnConstraint) is None
+    assert _column(export.sql, "film", "rating").args["kind"].sql("postgres") == "TEXT"
+    assert sorted(g.kind for g in export.gaps) == ["data_type", "default"]
+
+
 def test_oracle_star_precision_is_written_as_38() -> None:
     graph = {"entities": [{"entity_name": "T", "columns": [{"name": "ID", "data_type": "NUMBER(*, 0)"}],
                            "primary_key": ["ID"]}], "relationships": []}
