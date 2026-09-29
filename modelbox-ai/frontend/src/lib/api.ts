@@ -36,6 +36,7 @@ import type {
   IntrospectRequest,
   JobCreatedResponse,
   JobStatus,
+  MemberInfo,
   ModelInfo,
   Relationship,
   SemanticEngine,
@@ -48,6 +49,7 @@ import type {
   TransformParadigmResponse,
   ValidationReport,
   WorkspaceInfo,
+  WorkspaceRole,
 } from '@/types/schema';
 
 // Same origin: the UI's server forwards /api/* to the backend (next.config.js),
@@ -172,6 +174,41 @@ export async function gradeSubmission(payload: {
 export async function listWorkspaces(): Promise<WorkspaceInfo[]> {
   const { data } = await apiClient.get<WorkspaceInfo[]>('/workspaces');
   return data;
+}
+
+// --- Workspace members (Sprint 8 Step 6) ---
+export async function listMembers(workspaceId: string): Promise<MemberInfo[]> {
+  const { data } = await apiClient.get<MemberInfo[]>(`/workspaces/${workspaceId}/members`);
+  return data;
+}
+
+/** Adds an existing appliance user; refused (404) when no user has the email. */
+export async function addMember(
+  workspaceId: string,
+  email: string,
+  role: WorkspaceRole,
+): Promise<MemberInfo[]> {
+  const { data } = await apiClient.post<MemberInfo[]>(`/workspaces/${workspaceId}/members`, {
+    email,
+    role,
+  });
+  return data;
+}
+
+export async function changeMemberRole(
+  workspaceId: string,
+  userId: string,
+  role: WorkspaceRole,
+): Promise<MemberInfo[]> {
+  const { data } = await apiClient.patch<MemberInfo[]>(
+    `/workspaces/${workspaceId}/members/${userId}`,
+    { role },
+  );
+  return data;
+}
+
+export async function removeMember(workspaceId: string, userId: string): Promise<void> {
+  await apiClient.delete(`/workspaces/${workspaceId}/members/${userId}`);
 }
 
 // --- Classification scale (Sprint 8 Step 4b) ---

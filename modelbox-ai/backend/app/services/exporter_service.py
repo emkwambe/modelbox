@@ -694,8 +694,55 @@ class ExporterService:
                 for entity in model.entities
             }
         if eng == "metricflow":
-            return {"semantic_models.yml": self._metricflow(model)}
+            files = {"semantic_models.yml": self._metricflow(model)}
+            gaps = self.metricflow_export_gaps(model)
+            if gaps:
+                # Stated twice: at the head of the YAML, which travels on its
+                # own, and as its own file, as the dbt project does.
+                header = [f"# Export gaps ({len(gaps)}): keys this semantic model does not state."]
+                header += [f"# - {gap}" for gap in gaps]
+                files["semantic_models.yml"] = "\n".join(header) + "\n" + files["semantic_models.yml"]
+                files["EXPORT_GAPS.md"] = (
+                    "# Export gaps\n\nKeys the MetricFlow semantic model does not state, and why.\n\n"
+                    + "".join(f"- {gap}\n" for gap in gaps))
+            return files
         raise ExporterError(f"Unsupported semantic engine: {engine}")
+
+    @staticmethod
+    def metricflow_export_gaps(model: SynthesizedModel) -> list[str]:
+        """Every key the MetricFlow semantic model cannot state, by name.
+
+        A MetricFlow entity is one expression, so a composite foreign key is
+        no join and a composite primary key no primary entity; and an entity
+        has one type, so a one-column key that is also a foreign key is the
+        primary entity and its join is not stated. Each was left out without a
+        word until Sprint 8 Step 6.
+        """
+        def label(entity: str, columns: list[str]) -> str:
+            return f"{entity}({', '.join(columns)})"
+
+        one_column_fk = {(r.from_ref, r.from_columns[0]): r.to_ref for r in model.relationships
+                         if len(r.from_columns) == 1}
+        gaps = []
+        for rel in model.relationships:
+            where = f"{label(rel.from_ref, rel.from_columns)} -> {label(rel.to_ref, rel.to_columns)}"
+            if not rel.resolved:
+                gaps.append(f"{where}: unresolved, its columns are not chosen; no join")
+            elif len(rel.from_columns) > 1:
+                gaps.append(f"{where}: composite foreign key; a MetricFlow entity is one expression, "
+                            "so this join is not in the semantic model")
+        for entity in model.entities:
+            key = entity.primary_key
+            if len(key) > 1:
+                gaps.append(f"{label(entity.entity_name, key)}: composite primary key; a MetricFlow entity is "
+                            f"one expression, so the semantic model declares primary_entity "
+                            f"'{entity.entity_name}' and nothing joins to it by this key")
+            elif len(key) == 1 and (entity.entity_name, key[0]) in one_column_fk:
+                parent = one_column_fk[(entity.entity_name, key[0])]
+                gaps.append(f"{entity.entity_name}.{key[0]} -> {parent}: the primary key is also a foreign key; "
+                            "an entity has one type, so it is the primary entity and this join is not in the "
+                            "semantic model")
+        return gaps
 
     def _lookml_view(self, entity: EntitySchema) -> str:
         lines = [f"view: {entity.entity_name} {{", f"  sql_table_name: {entity.entity_name} ;;", ""]
@@ -754,18 +801,23 @@ class ExporterService:
         """
         # (child entity, child column) -> parent entity, for foreign entities.
         # One-column foreign keys only: a MetricFlow entity is one expression.
+        # A composite one is not in the semantic model, and is a named gap
+        # (``metricflow_export_gaps``), never a silent omission.
         fk_parent: dict[tuple[str, str], str] = {}
         for rel in model.relationships:
             if len(rel.from_columns) == 1:
                 fk_parent[(rel.from_ref, rel.from_columns[0])] = rel.to_ref
 
-        # Each entity's primary-entity name, which is its primary-key column.
-        # A foreign entity must reuse the parent's, or the join does not exist.
+        # Each entity's primary-entity name, which is its primary-key column,
+        # for a one-column key only. A composite key is one identity over
+        # several columns, which an entity (one expression) cannot state: such
+        # a semantic model declares ``primary_entity`` instead, and its key
+        # columns are dimensions or foreign entities (Sprint 8 Step 6). Until
+        # then each key column was emitted as a primary entity.
         primary_entity_name: dict[str, str] = {}
         for entity in model.entities:
-            pk = next((c.name for c in entity.columns if c.is_primary_key), None)
-            if pk is not None:
-                primary_entity_name[entity.entity_name] = self._safe_semantic_name(pk)
+            if len(entity.primary_key) == 1:
+                primary_entity_name[entity.entity_name] = self._safe_semantic_name(entity.primary_key[0])
 
         semantic_models: list[dict[str, object]] = []
         metrics: list[dict[str, object]] = []
@@ -785,7 +837,7 @@ class ExporterService:
                 safe_name = self._safe_semantic_name(col.name)
                 parent = fk_parent.get((entity.entity_name, col.name))
 
-                if col.is_primary_key:
+                if entity.primary_key == [col.name]:
                     entities_block.append(
                         {"name": safe_name, "type": "primary", "expr": col.name}
                     )
@@ -806,6 +858,11 @@ class ExporterService:
                             "type_params": {"time_granularity": "day"},
                             "expr": col.name,
                         }
+                    )
+                elif col.is_primary_key:
+                    # A column of a composite key: an identifier, never summed.
+                    dimensions.append(
+                        {"name": safe_name, "type": "categorical", "expr": col.name}
                     )
                 elif col.is_metric or self._is_numeric(col):
                     if agg_time_dimension is None:

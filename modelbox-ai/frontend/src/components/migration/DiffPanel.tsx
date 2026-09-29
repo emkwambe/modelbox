@@ -130,6 +130,19 @@ export default function DiffPanel({ onClose }: { onClose: () => void }) {
 
         {result && (
           <>
+            {(result.data_loss ?? []).length > 0 && (
+              <div role="alert" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={labelStyle}>
+                  ⚠ This migration drops data ({(result.data_loss ?? []).length})
+                </span>
+                {(result.data_loss ?? []).map((loss) => (
+                  <span key={loss} style={breakingBadge}>
+                    {loss}
+                  </span>
+                ))}
+              </div>
+            )}
+
             {result.breaking_changes.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <span style={labelStyle}>

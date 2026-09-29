@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     egress,
     export_status,
     jobs,
+    members,
     models,
     scim,
     trainer,
@@ -31,6 +32,7 @@ api_router.include_router(models.router)
 api_router.include_router(transform.router)
 api_router.include_router(workspaces.router)
 api_router.include_router(classification.router)
+api_router.include_router(members.router)
 api_router.include_router(trainer.router)
 api_router.include_router(connectors.router)
 api_router.include_router(audit.router)

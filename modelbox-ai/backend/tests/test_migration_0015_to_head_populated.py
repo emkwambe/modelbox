@@ -367,7 +367,27 @@ async def test_0025_converts_the_seeded_gold_models_with_nothing_to_list(upgrade
 
 async def test_the_database_reached_head(upgraded) -> None:
     rows = await _fetch(upgraded["dsn"], "SELECT version_num FROM alembic_version")
-    assert rows == [{"version_num": "0026_dictionary_fields"}]
+    assert rows == [{"version_num": "0027_member_audit_actions"}]
+
+
+def test_0027_accepts_the_member_actions_it_restores(server: str) -> None:
+    """MEMBER_ROLE_CHANGED and MEMBER_REMOVED are writable again; one not in
+    the vocabulary is still refused (the negative control). On a database of
+    its own: the populated one's audit rows are counted by another test."""
+    asyncio.run(_check_0027(_database(server, "member_actions")))
+
+
+async def _check_0027(dsn: str) -> None:
+    _upgrade_to(BACKEND, dsn, "head")
+    workspace = uuid.uuid4()
+    await _execute(dsn, "INSERT INTO workspaces (workspace_id, name) VALUES (:w, 'W')", w=workspace)
+    for action in ("MEMBER_ROLE_CHANGED", "MEMBER_REMOVED"):
+        await _execute(dsn, "INSERT INTO audit_event (audit_id, action, outcome, scope, workspace_id) "
+                            "VALUES (:a, :action, 'SUCCESS', 'workspace', :w)",
+                       a=uuid.uuid4(), action=action, w=workspace)
+    with pytest.raises(sa.exc.IntegrityError, match="ck_audit_event_action"):
+        await _execute(dsn, "INSERT INTO audit_event (audit_id, action, outcome, scope, workspace_id) "
+                            "VALUES (:a, 'AUTH_LOGOUT', 'SUCCESS', 'workspace', :w)", a=uuid.uuid4(), w=workspace)
 
 
 # --- 0026: dictionary fields, the scale, PII mapped across ------------------------

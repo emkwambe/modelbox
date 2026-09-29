@@ -211,6 +211,9 @@ export default function HomePage() {
           <Link href="/settings/classification" style={navLink}>
             Classification
           </Link>
+          <Link href="/settings/members" style={navLink}>
+            Members
+          </Link>
           <Link href="/docs" style={navLink}>
             Docs
           </Link>

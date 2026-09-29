@@ -1,0 +1,90 @@
+{
+  "id": "composite-keys",
+  "title": "Composite Keys (defect fixture)",
+  "paradigm": "3NF",
+  "defect": "P2-F item 2",
+  "rationale": "A MetricFlow entity is one expression and has one type. A composite foreign key (order_line -> promotion_product) cannot be a join, a composite primary key (order_line, promotion_product) cannot be a primary entity, and a one-column key that is also a foreign key (product_detail.product_id) cannot be both primary and foreign. A correct emitter declares primary_entity for a composite key, emits the key's one-column foreign keys as foreign entities, and names every key it cannot state as an export gap instead of leaving it out silently.",
+  "entities": [
+    {
+      "entity_name": "order_header",
+      "entity_type": "TABLE",
+      "description": "One row per order.",
+      "agg_time_column": "placed_at",
+      "canvas_position_x": 0,
+      "canvas_position_y": 0,
+      "columns": [
+        {"name": "order_id", "data_type": "INTEGER", "is_nullable": false, "description": "Order number."},
+        {"name": "placed_at", "data_type": "TIMESTAMP", "description": "When the order was placed."},
+        {"name": "order_total", "data_type": "NUMERIC(18,2)", "is_metric": true, "aggregation": "sum",
+         "description": "Order value."}
+      ],
+      "primary_key": ["order_id"]
+    },
+    {
+      "entity_name": "product",
+      "entity_type": "TABLE",
+      "description": "One row per product.",
+      "canvas_position_x": 0,
+      "canvas_position_y": 200,
+      "columns": [
+        {"name": "product_id", "data_type": "INTEGER", "is_nullable": false, "description": "Product number."},
+        {"name": "product_name", "data_type": "VARCHAR(64)", "description": "Product name."}
+      ],
+      "primary_key": ["product_id"]
+    },
+    {
+      "entity_name": "product_detail",
+      "entity_type": "TABLE",
+      "description": "Optional detail for a product, one row per product at most.",
+      "canvas_position_x": 320,
+      "canvas_position_y": 200,
+      "columns": [
+        {"name": "product_id", "data_type": "INTEGER", "is_nullable": false,
+         "description": "The product this detail belongs to; its key and a foreign key."},
+        {"name": "weight_kg", "data_type": "VARCHAR(16)", "description": "Weight as recorded."}
+      ],
+      "primary_key": ["product_id"]
+    },
+    {
+      "entity_name": "promotion_product",
+      "entity_type": "TABLE",
+      "description": "The products each promotion covers.",
+      "canvas_position_x": 320,
+      "canvas_position_y": 400,
+      "columns": [
+        {"name": "promo_id", "data_type": "INTEGER", "is_nullable": false, "description": "Promotion number."},
+        {"name": "product_id", "data_type": "INTEGER", "is_nullable": false, "description": "Product covered."},
+        {"name": "promo_label", "data_type": "VARCHAR(32)", "description": "How the promotion is shown."}
+      ],
+      "primary_key": ["promo_id", "product_id"]
+    },
+    {
+      "entity_name": "order_line",
+      "entity_type": "TABLE",
+      "description": "One row per line of an order.",
+      "canvas_position_x": 320,
+      "canvas_position_y": 0,
+      "columns": [
+        {"name": "order_id", "data_type": "INTEGER", "is_nullable": false,
+         "description": "The order; part of the key and a foreign key."},
+        {"name": "line_no", "data_type": "INTEGER", "is_nullable": false, "description": "Line number."},
+        {"name": "product_id", "data_type": "INTEGER", "is_nullable": false, "description": "Product ordered."},
+        {"name": "promo_id", "data_type": "INTEGER", "description": "Promotion applied, if any."},
+        {"name": "line_note", "data_type": "VARCHAR(64)", "description": "Free-text note."}
+      ],
+      "primary_key": ["order_id", "line_no"]
+    }
+  ],
+  "relationships": [
+    {"from": "order_line", "from_columns": ["order_id"], "to": "order_header", "to_columns": ["order_id"],
+     "cardinality": "N:1"},
+    {"from": "order_line", "from_columns": ["product_id"], "to": "product", "to_columns": ["product_id"],
+     "cardinality": "N:1"},
+    {"from": "order_line", "from_columns": ["promo_id", "product_id"], "to": "promotion_product",
+     "to_columns": ["promo_id", "product_id"], "cardinality": "N:1"},
+    {"from": "product_detail", "from_columns": ["product_id"], "to": "product", "to_columns": ["product_id"],
+     "cardinality": "1:1"},
+    {"from": "promotion_product", "from_columns": ["product_id"], "to": "product", "to_columns": ["product_id"],
+     "cardinality": "N:1"}
+  ]
+}

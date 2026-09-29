@@ -126,7 +126,16 @@ Compare two model versions into migration DDL.
    list of **breaking changes** (dropped tables/columns, type alterations).
 4. **Copy** the DDL into your migration tool.
 
-**API:** `POST /api/v1/model/diff` with `{source_model_id, target_model_id, dialect}`.
+**Renames are never guessed between two saved models.** Columns of two
+separately saved models are matched by name, so a column renamed between them
+appears as a removal and an addition. Every statement that drops a column or
+a table is headed in the DDL by a `-- DATA LOSS:` comment naming what it
+drops, and the panel lists the same statements above the DDL under **This
+migration drops data**. If a dropped column was really renamed, replace its
+`DROP` and the matching `ADD` with a `RENAME` before you run the migration.
+
+**API:** `POST /api/v1/model/diff` with `{source_model_id, target_model_id, dialect}`;
+the response's `data_loss` lists the statements that drop data.
 
 ### Drift report: the design against the deployed schema
 
@@ -211,7 +220,14 @@ Open **Export artifacts** on the canvas. Tabs:
   `geography` are written as `NUMERIC(19, 4)`, `NUMERIC(10, 4)`, `BOOLEAN` and
   `TEXT`. Each of these is listed as an export gap.
 - **Contracts** — **OpenDataContract** YAML, **Apache Avro**, **Protobuf**.
-- **Semantic** — Cube.js, **LookML**, **dbt MetricFlow**.
+- **Semantic** — Cube.js, **LookML**, **dbt MetricFlow**. A MetricFlow entity
+  is one column and has one type, so a table with a composite primary key
+  declares a `primary_entity` instead (its key columns that are foreign keys
+  still join). What MetricFlow cannot state is an **export gap**, listed at the
+  head of `semantic_models.yml` and in `EXPORT_GAPS.md`: a composite foreign
+  key (no join), a composite primary key (nothing joins to it by that key), a
+  one-column key that is also a foreign key (its join is not stated), and a
+  relationship whose columns were never chosen.
 
 **API:** `GET /api/v1/model/{id}/export?format=…`,
 `…/export/contract?format=…`, `…/export/semantic?engine=…`.
@@ -297,6 +313,31 @@ relationship whose columns have not been chosen is shown as **unresolved**,
 so you can see which still need them.
 
 **API:** `GET /api/v1/model/{id}/export/dictionary?format=markdown|html|json|csv`.
+
+## Workspace members and roles
+
+A workspace OWNER or ADMIN manages its members at **Members**
+(`/settings/members`): add a person who already has an account on this
+appliance, by email; change a member's role; remove a member. Accounts are
+created by OIDC sign-in, SCIM provisioning or `create-owner`, never here: an
+email with no account is refused and the message says so.
+
+The rules, which the server enforces whatever the page offers:
+
+- **No one grants a role above their own.** An ADMIN can grant up to ADMIN and
+  cannot make an OWNER.
+- **No one changes or removes a member whose role is above their own.** An
+  ADMIN cannot demote or remove an OWNER.
+- **The last OWNER of a workspace can never be demoted or removed.** Make
+  someone else an OWNER first.
+- **A removed or demoted member's API keys lose that access at once**: a key
+  acts at its creator's role as it is at the moment of each request.
+
+Adding a member, changing a role and removing a member are each recorded in
+the audit log (`MEMBER_ADDED`, `MEMBER_ROLE_CHANGED`, `MEMBER_REMOVED`).
+
+**API:** `GET`/`POST /api/v1/workspaces/{id}/members`,
+`PATCH`/`DELETE /api/v1/workspaces/{id}/members/{user_id}`.
 
 ## Workflow 7 — CI/CD integration via API keys
 

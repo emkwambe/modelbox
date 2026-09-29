@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `sprint-8/step-5-drift-report`, branched from
-`main` at `3dde631`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-29 on `sprint-8/step-6-members-and-fixes`, branched
+from `main` at `90b375c`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,11 +9,11 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `3dde631` | dictionary fields, a classification scale and per-field verification (#21), on exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `90b375c` | the drift report (#22), on dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36516574170: gate, backend and frontend images all green) |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-8/step-5-drift-report` | this branch | the drift report and drifted fixtures (below) |
-| `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-8/step-6-members-and-fixes` | this branch | two silent-loss fixes and workspace members (below) |
+| `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
 ## Offline DDL import (on `main`)
 
@@ -28,7 +28,24 @@ import with zero gaps against their catalog manifests (Pagila as 15 tables and
 55 partitions); the Snowflake fixture fails by name on its HYBRID TABLE and is
 saved unreconciled.
 
-## In progress on this branch: the drift report
+## In progress on this branch: two silent-loss fixes, and workspace members
+
+The migration diff pairs columns by internal id only between versions of the
+same model, and by name between separately saved models; an uncertain rename
+is a removal plus an addition, and every statement that drops data says so in
+the DDL and in the diff panel. The MetricFlow export states a composite
+primary key as a `primary_entity`, keeps its members' one-column foreign keys
+as joins, and names every key it cannot state as an export gap (composite
+foreign keys, composite primary keys, a key that is also a foreign key).
+
+Workspace OWNERs and ADMINs add existing users, change roles and remove
+members (API and `/settings/members`): no role above your own, an ADMIN
+cannot make an OWNER, the last OWNER stays, and a removed member's keys stop
+at once. MEMBER_ROLE_CHANGED and MEMBER_REMOVED are back in the audit
+vocabulary (migration 0027). The black-box suite adds its VIEWER through the
+API.
+
+## The drift report (on `main`)
 
 A drift report compares a saved model (the documented design) with a fresh,
 unsaved import of a DDL export of the deployed schema, through the schema-diff
@@ -129,7 +146,7 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0026_dictionary_fields`, on `main` and this branch (no schema change on this branch).
+Migration head: `0027_member_audit_actions` on this branch (`0026_dictionary_fields` on `main`).
 
 ## Versions
 

@@ -162,16 +162,20 @@ async def diff_models(
     target_model = await engine.get_model(payload.target_model_id)
     assert source_model is not None and target_model is not None
 
-    statements, breaking, semantic = DiffEngine(payload.dialect).diff(
-        _to_synthesized(source_model), _to_synthesized(target_model)
+    # Column ids are shared only between versions of one model; two saved
+    # models number their columns independently (owner decision, Step 6).
+    result = DiffEngine(payload.dialect).diff_report(
+        _to_synthesized(source_model), _to_synthesized(target_model),
+        same_model=payload.source_model_id == payload.target_model_id,
     )
     return DiffResponse(
         source_model_id=payload.source_model_id,
         target_model_id=payload.target_model_id,
         dialect=payload.dialect,
-        alter_statements=statements,
-        breaking_changes=breaking,
-        semantic_breaks=semantic,
+        alter_statements=result.statements,
+        breaking_changes=result.breaking,
+        semantic_breaks=result.semantic,
+        data_loss=result.data_loss,
     )
 
 

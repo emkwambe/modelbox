@@ -80,6 +80,10 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("POST", f"{_V1}/workspaces/{{workspace_id}}/classification/levels"): "ADMIN",
     ("PATCH", f"{_V1}/workspaces/{{workspace_id}}/classification/levels/{{level_id}}"): "ADMIN",
     ("DELETE", f"{_V1}/workspaces/{{workspace_id}}/classification/levels/{{level_id}}"): "ADMIN",
+    ("GET", f"{_V1}/workspaces/{{workspace_id}}/members"): "VIEWER",
+    ("POST", f"{_V1}/workspaces/{{workspace_id}}/members"): "ADMIN",
+    ("PATCH", f"{_V1}/workspaces/{{workspace_id}}/members/{{user_id}}"): "ADMIN",
+    ("DELETE", f"{_V1}/workspaces/{{workspace_id}}/members/{{user_id}}"): "ADMIN",
     # --- trainer -----------------------------------------------------------
     ("POST", f"{_V1}/trainer/assignments"): "MEMBER",
     ("GET", f"{_V1}/trainer/assignments"): "VIEWER",

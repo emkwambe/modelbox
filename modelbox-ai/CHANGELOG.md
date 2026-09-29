@@ -3,6 +3,12 @@
 One entry per version. Each release's full notes, breaking changes and upgrade
 steps are in `docs/RELEASE_NOTES_v<version>.md`; this file is the index.
 
+## Unreleased (for v1.12.0)
+
+Recorded as changes land; the release notes are written from this list.
+
+- **Migration diff:** the migration diff no longer pairs columns across separately saved models by internal id.
+
 ## v1.11.1
 
 Tagged 2026-09-29 (UTC) at `e8d9ac1` on `main` (pull request #12), and

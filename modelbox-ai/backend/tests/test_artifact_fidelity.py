@@ -1197,6 +1197,19 @@ def test_metricflow_parses_in_dbt(
     assert result.success, f"{result.error} {detail}"
 
 
+def test_metricflow_with_composite_keys_parses_in_dbt(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Sprint 8 Step 6 (P2-F item 2): composite keys, stated as MetricFlow can.
+
+    A composite primary key is a ``primary_entity``, not one primary entity
+    per column; its one-column foreign key is a foreign entity; dbt accepts
+    the result. What cannot be stated is a named gap (test_metricflow_gaps).
+    """
+    _need(HAVE_DBT, "dbt-core")
+    result = dbt_parse(SYNTHETIC["composite-keys"], tmp_path_factory, with_semantic=True)
+    detail = "; ".join(result.messages("SemanticValidationFailure"))[:600]
+    assert result.success, f"{result.error} {detail}"
+
+
 @pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_metrics_have_label(gid: str) -> None:
     doc = _metricflow_doc(GOLD[gid])
