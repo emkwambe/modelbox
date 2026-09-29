@@ -1,6 +1,6 @@
 {
   "name": "modelbox-ui",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "private": true,
   "description": "ModelBox AI \u00e2\u20ac\u201d LLM-agnostic enterprise data modeling workspace (frontend)",
   "scripts": {

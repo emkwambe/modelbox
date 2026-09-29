@@ -47,6 +47,7 @@ from conftest import (
     check,
     login,
     psql,
+    remember_secret,
     token,
     weakened_by_insecure,
 )
@@ -123,7 +124,10 @@ def test_b3_only_the_ui_port_is_reachable(client: httpx.Client, port: int) -> No
 def test_b4_self_registration_is_refused(client: httpx.Client) -> None:
     response = client.post(
         "/api/v1/auth/register",
-        json={"email": f"walk-in-{uuid.uuid4().hex[:8]}@blackbox.test", "password": "walk-in-" + uuid.uuid4().hex},
+        json={
+            "email": f"walk-in-{uuid.uuid4().hex[:8]}@blackbox.test",
+            "password": remember_secret("walk-in-" + uuid.uuid4().hex),
+        },
     )
     check(response.status_code == 403, f"POST /auth/register got HTTP {response.status_code}")
 
@@ -154,7 +158,7 @@ def test_b6_a_key_minted_in_a_is_refused_in_b(client: httpx.Client, world: World
         json={"name": "blackbox", "workspace_id": world.workspace_a},
     )
     assert minted.status_code == 201, f"setup: minting a key got HTTP {minted.status_code}"
-    key = {"X-API-Key": minted.json()["api_key"]}
+    key = {"X-API-Key": remember_secret(minted.json()["api_key"])}
     assert client.get(f"/api/v1/model/{world.model_a}", headers=key).status_code == 200, (
         "fixture sanity: the key works in its own workspace"
     )
@@ -200,3 +204,36 @@ def test_b8_the_application_role_cannot_update_the_egress_ledger(client: httpx.C
         rewrite.returncode != 0 and "permission denied" in rewrite.stderr,
         f"modelbox_app's UPDATE on egress_audit: exit {rewrite.returncode}, {rewrite.stderr[-200:]!r}",
     )
+
+
+# --- B9: read your writes ---------------------------------------------------------------
+
+READ_YOUR_WRITES_ROUNDS = 50
+
+
+def test_b9_a_write_the_appliance_acknowledged_is_visible_to_the_next_request(
+    client: httpx.Client, world: World
+) -> None:
+    """Mint a key, then use it at once, fifty times.
+
+    A success response must describe committed work: a key the appliance has
+    just returned works on the very next request. One round can pass by luck
+    of timing, which is why there are fifty. Configuration cannot weaken this;
+    the in-process control is `test_session_commit_order.py`
+    (`test_negative_control_request_scope_responds_before_committing`).
+    """
+    owner = bearer(token(client, world.owner.email, world.owner.password))
+    for round_number in range(1, READ_YOUR_WRITES_ROUNDS + 1):
+        minted = client.post(
+            "/api/v1/auth/api-keys",
+            headers=owner,
+            json={"name": f"read-your-writes-{round_number}", "workspace_id": world.workspace_a},
+        )
+        assert minted.status_code == 201, f"setup: round {round_number} minting got {minted.status_code}"
+        key = remember_secret(minted.json()["api_key"])
+        status = client.get(f"/api/v1/model/{world.model_a}", headers={"X-API-Key": key}).status_code
+        check(
+            status == 200,
+            f"round {round_number} of {READ_YOUR_WRITES_ROUNDS}: a key the appliance had just "
+            f"returned got HTTP {status} on the next request",
+        )
