@@ -1,0 +1,22 @@
+{
+  "fixture": "ledger_schema.sql",
+  "dialect": "snowflake",
+  "schema": "LEDGER_SCHEMA",
+  "provenance": "documentation-derived",
+  "counts_from": "fixture text (documentation-derived: no Snowflake catalog was available, so these counts were read from the file itself and do not independently check it)",
+  "counts": {
+    "tables": 3,
+    "columns": 13,
+    "primary_keys": 1,
+    "foreign_keys": 0,
+    "unique_constraints": 0,
+    "check_constraints": 0,
+    "table_descriptions": 0,
+    "column_descriptions": 0
+  },
+  "tables": [
+    {"name": "ACCOUNTS", "columns": 5, "primary_keys": 1, "foreign_keys": 0, "unique_constraints": 0, "check_constraints": 0, "table_descriptions": 0, "column_descriptions": 0},
+    {"name": "BRANCHES", "columns": 3, "primary_keys": 0, "foreign_keys": 0, "unique_constraints": 0, "check_constraints": 0, "table_descriptions": 0, "column_descriptions": 0},
+    {"name": "TRANSACTIONS", "columns": 5, "primary_keys": 0, "foreign_keys": 0, "unique_constraints": 0, "check_constraints": 0, "table_descriptions": 0, "column_descriptions": 0}
+  ]
+}
