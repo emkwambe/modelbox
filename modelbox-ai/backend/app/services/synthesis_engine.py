@@ -434,13 +434,13 @@ class SynthesisEngine:
                 )
             ).scalars().all()
             rel_schemas.append(
-                RelationshipSchema(
-                    from_ref=entity_by_id[rel.from_entity_id].entity_name,
-                    to_ref=entity_by_id[rel.to_entity_id].entity_name,
-                    from_columns=[p.from_column_name for p in pairs if p.from_column_name is not None],
-                    to_columns=[p.to_column_name for p in pairs if p.to_column_name is not None],
+                RelationshipSchema.between(
+                    entity_by_id[rel.from_entity_id].entity_name,
+                    [p.from_column_name for p in pairs if p.from_column_name is not None],
+                    entity_by_id[rel.to_entity_id].entity_name,
+                    [p.to_column_name for p in pairs if p.to_column_name is not None],
+                    rel.cardinality,
                     name=rel.name,
-                    cardinality=rel.cardinality,  # type: ignore[arg-type]
                 )
             )
         findings = (
@@ -720,13 +720,14 @@ class SynthesisEngine:
             to_type = type_by_name.get(rel.to_ref)
 
             if from_type == "FACT" and to_type == "DIMENSION":
-                normalized.append(rel.model_copy(update={"cardinality": Cardinality.MANY_TO_ONE}))
+                # model_copy does not validate, so the stored value is the
+                # enum's value, not the enum (whose str() is its name).
+                normalized.append(rel.model_copy(update={"cardinality": Cardinality.MANY_TO_ONE.value}))
             elif from_type == "DIMENSION" and to_type == "FACT":
                 # Flip so the Fact (FK holder) is the source, columns and all.
-                flipped = RelationshipSchema(
-                    from_ref=rel.to_ref, from_columns=rel.to_columns,
-                    to_ref=rel.from_ref, to_columns=rel.from_columns,
-                    name=rel.name, cardinality=Cardinality.MANY_TO_ONE,
+                flipped = RelationshipSchema.between(
+                    rel.to_ref, rel.to_columns, rel.from_ref, rel.from_columns,
+                    Cardinality.MANY_TO_ONE, name=rel.name,
                 )
                 flipped._stated_no_columns = rel._stated_no_columns
                 normalized.append(flipped)
@@ -753,4 +754,5 @@ class SynthesisEngine:
             is_nullable=col.is_nullable,
             default_value=col.default_value,
             source_data_type=col.source_data_type,
+            source_default_value=col.source_default_value,
         )

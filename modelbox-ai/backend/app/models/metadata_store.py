@@ -382,6 +382,9 @@ class EntityColumn(Base):
     # ColumnSchema.source_data_type: the type as an imported file declared it
     # (migration 0024). NULL for a column that was not imported.
     source_data_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # ColumnSchema.source_default_value: the DEFAULT as an imported file
+    # declared it (migration 0025). NULL for a column that was not imported.
+    source_default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     entity: Mapped[ModelEntity] = relationship(back_populates="columns")
 

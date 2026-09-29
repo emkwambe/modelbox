@@ -92,12 +92,11 @@ _SQLGLOT_DIALECTS: dict[str, str] = {
     "duckdb": "duckdb",
     "redshift": "redshift",
     "clickhouse": "clickhouse",
-    # Source dialects only: an imported model's types, defaults and CHECK
-    # expressions are written in the dialect it was imported from.
-    "oracle": "oracle",
-    "tsql": "tsql",
 }
-_DDL_TARGETS = frozenset({"postgres", "snowflake", "databricks", "bigquery", "duckdb", "redshift", "clickhouse"})
+# Dialects a model's fragments may be written in: every target, and the two
+# import dialects that are not export targets. An imported model's types,
+# defaults and CHECK expressions are in the dialect it was imported from.
+_SOURCE_DIALECTS: dict[str, str] = {**_SQLGLOT_DIALECTS, "oracle": "oracle", "tsql": "tsql"}
 
 
 # Open Data Contract Standard version this emitter targets. Bitol, verified via
@@ -117,7 +116,7 @@ class ExporterService:
     def __init__(self, source_dialect: str = "snowflake") -> None:
         # Column data types in synthesized models default to Snowflake-style
         # (e.g. NUMBER(18,2), TIMESTAMP_NTZ); parse them as such before writing.
-        self._source_dialect = _SQLGLOT_DIALECTS.get(
+        self._source_dialect = _SOURCE_DIALECTS.get(
             source_dialect.lower(), "snowflake"
         )
 
@@ -154,7 +153,7 @@ class ExporterService:
     def generate_ddl_export(self, model: SynthesizedModel, dialect: str) -> DdlExport:
         """The DDL and its export gaps (``app.services.ddl_export``)."""
         target = _SQLGLOT_DIALECTS.get(dialect.lower())
-        if target is None or target not in _DDL_TARGETS:
+        if target is None:
             raise ExporterError(f"Unsupported target dialect: {dialect}")
         try:
             return build_ddl(model, target, self._source_dialect)

@@ -251,7 +251,8 @@ def test_constraints_added_with_check_and_with_nocheck_are_in_the_model() -> Non
     result = import_ddl(ALTERED, "tsql")
     assert result.status == "reconciled", result.report["failures"]
     assert result.model is not None
-    assert [(r.from_ref, r.to_ref) for r in result.model.relationships] == [("Order.CustomerID", "Customer.CustomerID")]
+    assert [(r.from_ref, r.from_columns, r.to_ref, r.to_columns) for r in result.model.relationships] == [
+        ("Order", ["CustomerID"], "Customer", ["CustomerID"])]
     qty = _column(result, "Order", "Qty")
     assert qty.check_expression is not None and "0" in qty.check_expression
     assert qty.default_value == "((1))"

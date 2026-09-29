@@ -32,6 +32,7 @@ from app.schemas.data_model import (
     DiffRequest,
     DiffResponse,
     ExportFormat,
+    ExportGapSchema,
     ExportResponse,
     GraphUpdateRequest,
     ModelInfo,
@@ -47,7 +48,7 @@ from app.schemas.data_model import (
 )
 from app.services import audit_log
 from app.services.diff_engine import DiffEngine
-from app.services.exporter_service import ExporterError
+from app.services.exporter_service import ExporterError, ExporterService
 from app.services.graph_engine import GraphEngine
 from app.services.graph_repository import GraphRepository
 
@@ -321,8 +322,15 @@ async def export_model(
     """Generate downloadable artifacts from a persisted model (FR-4)."""
     result = await engine.get_model(model.model_id)
     assert result is not None  # guaranteed by AuthorizedModelDep
+    exporter = _exporter_for(model, exporter)
+    gaps: list[ExportGapSchema] = []
     try:
-        files = exporter.export(_to_synthesized(result), export_format.value, dialect)
+        if export_format == ExportFormat.DDL:
+            ddl = exporter.generate_ddl_export(_to_synthesized(result), dialect)
+            files = {f"model_{dialect}.sql": ddl.sql}
+            gaps = [ExportGapSchema(**gap.as_dict()) for gap in ddl.gaps]
+        else:
+            files = exporter.export(_to_synthesized(result), export_format.value, dialect)
     except ExporterError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -334,7 +342,15 @@ async def export_model(
         format=export_format,
         dialect=dialect if export_format == ExportFormat.DDL else None,
         files=files,
+        gaps=gaps,
     )
+
+
+def _exporter_for(model: DataModel, exporter: ExporterService) -> ExporterService:
+    """An imported model's types, defaults and CHECKs are written in the dialect
+    it was imported from; anything else is read as the exporter's default."""
+    source = (model.import_report or {}).get("dialect")
+    return ExporterService(source_dialect=source) if source else exporter
 
 
 @router.post(
@@ -477,6 +493,7 @@ async def export_model_zip(
     """Pack a model's export artifacts into an in-memory zip archive (FR-4)."""
     result = await engine.get_model(model.model_id)
     assert result is not None  # guaranteed by AuthorizedModelDep
+    exporter = _exporter_for(model, exporter)
     try:
         files = exporter.export(_to_synthesized(result), export_format.value, dialect)
     except ExporterError as exc:

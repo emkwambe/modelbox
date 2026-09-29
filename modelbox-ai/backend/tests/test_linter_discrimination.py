@@ -88,6 +88,18 @@ CASES: list[Case] = [
         difference="the referenced entity exists",
     ),
     Case(
+        code="UNRESOLVED_RELATIONSHIP",
+        triggers=lambda: (
+            [entity("a", [_pk(), col("b_id")]), entity("b", [_pk()])],
+            [rel("a", "b")],
+        ),
+        silent=lambda: (
+            [entity("a", [_pk(), col("b_id", fk=True)]), entity("b", [_pk()])],
+            [rel("a.b_id", "b.id")],
+        ),
+        difference="the relationship names the columns it joins",
+    ),
+    Case(
         code="ORPHAN_ENTITY",
         triggers=lambda: (
             [

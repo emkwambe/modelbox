@@ -15,7 +15,10 @@ After this migration:
   column name; a relationship with none is unresolved;
 * `model_entities.position` and `entity_relationships.position` keep a model's
   order, and `entity_relationships.name` a foreign key's name;
-* the five column flags and the two relationship column ids are dropped.
+* the five column flags and the two relationship column ids are dropped;
+* `entity_columns.source_default_value` holds an imported column's DEFAULT
+  exactly as the file declared it, beside the normalized `default_value`, as
+  0024 did for types (nullable, no backfill).
 
 The conversion, per model:
 
@@ -107,6 +110,7 @@ def _create_tables() -> None:
     op.add_column("entity_relationships", sa.Column("position", sa.Integer(), nullable=False,
                                                     server_default=sa.text("0")))
     op.add_column("entity_relationships", sa.Column("name", sa.String(128), nullable=True))
+    op.add_column("entity_columns", sa.Column("source_default_value", sa.Text(), nullable=True))
 
 
 def upgrade() -> None:
@@ -293,6 +297,7 @@ def downgrade() -> None:
                 "UPDATE entity_columns SET is_foreign_key = true, reference_target = :x WHERE column_id = :c"),
                 {"c": source, "x": f"{p.to_entity}.{p.to_column_name}" if p.to_column_name else p.to_entity})
 
+    op.drop_column("entity_columns", "source_default_value")
     op.drop_column("entity_relationships", "name")
     op.drop_column("entity_relationships", "position")
     op.drop_column("model_entities", "position")

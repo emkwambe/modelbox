@@ -157,20 +157,26 @@ class GraphRepository:
                 model_id=model_id,
                 from_entity_id=entity_ids[rel.from_ref],
                 to_entity_id=entity_ids[rel.to_ref],
-                cardinality=str(rel.cardinality),
+                # The value, not str(): an enum that skipped validation would
+                # store its name, which the cardinality CHECK refuses.
+                cardinality=str(getattr(rel.cardinality, "value", rel.cardinality)),
                 name=rel.name,
                 position=rel_position,
             )
             self._session.add(rel_row)
             await self._session.flush()
-            for pair in range(max(len(rel.from_columns), len(rel.to_columns))):
-                self._session.add(RelationshipColumn(
-                    relationship_id=rel_row.relationship_id,
-                    position=pair,
-                    from_column_name=rel.from_columns[pair] if pair < len(rel.from_columns) else None,
-                    to_column_name=rel.to_columns[pair] if pair < len(rel.to_columns) else None,
-                ))
+            self._persist_pairs(rel_row, rel)
         await self._session.flush()
+
+    def _persist_pairs(self, rel_row: EntityRelationship, rel: RelationshipSchema) -> None:
+        """A relationship's column pairs, in key order; none for an unresolved one."""
+        for pair in range(max(len(rel.from_columns), len(rel.to_columns))):
+            self._session.add(RelationshipColumn(
+                relationship_id=rel_row.relationship_id,
+                position=pair,
+                from_column_name=rel.from_columns[pair] if pair < len(rel.from_columns) else None,
+                to_column_name=rel.to_columns[pair] if pair < len(rel.to_columns) else None,
+            ))
 
     async def _persist_constraints(self, entity_row: ModelEntity, entity: EntitySchema) -> None:
         """Write the entity's primary key, UNIQUE and CHECK constraints, in order."""
@@ -245,6 +251,7 @@ class GraphRepository:
             row.is_nullable = col.is_nullable
             row.default_value = col.default_value
             row.source_data_type = col.source_data_type
+            row.source_default_value = col.source_default_value
             # is_primary_key, is_unique, check_expression, is_foreign_key and
             # references are derived from the entity's constraints and the
             # model's relationships, and stored there (migration 0025).

@@ -20,6 +20,7 @@ import enum
 import logging
 import re
 import uuid
+from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import (
@@ -621,6 +622,14 @@ class ColumnSchema(BaseModel):
         max_length=128,
         description="The column's type exactly as the imported file declared it.",
     )
+    # The DEFAULT exactly as an imported file declared it (Sprint 8 Step 3):
+    # `nextval('public.actor_actor_id_seq'::regclass)`, `(getdate())`.
+    # `default_value` holds the normalized form, which comparisons use.
+    source_default_value: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="The column's DEFAULT exactly as the imported file declared it.",
+    )
 
     @model_validator(mode="after")
     def _primary_keys_are_never_nullable(self) -> ColumnSchema:
@@ -787,7 +796,7 @@ class EntitySchema(BaseModel):
             if len(set(columns)) != len(columns):
                 raise ValueError(f"{self.entity_name}: {what} repeats a column: {columns}")
 
-        def contradicts(flag: str, derived: dict[str, object]) -> None:
+        def contradicts(flag: str, derived: Mapping[str, object]) -> None:
             for column in self.columns:
                 if flag in column.model_fields_set and getattr(column, flag) != derived[column.name]:
                     raise ValueError(
@@ -933,12 +942,33 @@ class RelationshipSchema(BaseModel):
                 raise ValueError(f"{side} {ref!r} contradicts {side}_columns {columns}")
             setattr(self, f"{side}_ref", entity)
             setattr(self, f"{side}_columns", [column])
+            # Derived from the ref, not supplied. Pydantic runs this validator
+            # again when the instance is placed in a parent model, and must
+            # still see an older-form relationship there.
+            self.__pydantic_fields_set__.discard(f"{side}_columns")
         if self.from_columns and self.to_columns and len(self.from_columns) != len(self.to_columns):
             raise ValueError(
                 f"{self.from_ref} -> {self.to_ref}: {len(self.from_columns)} referencing columns "
                 f"but {len(self.to_columns)} referenced")
         self._stated_no_columns = not stated
         return self
+
+    @classmethod
+    def between(
+        cls,
+        from_entity: str,
+        from_columns: list[str],
+        to_entity: str,
+        to_columns: list[str],
+        cardinality: Cardinality | str,
+        name: str | None = None,
+    ) -> RelationshipSchema:
+        """A relationship stated with its column lists (validated, by alias)."""
+        return cls.model_validate({
+            "from": from_entity, "from_columns": list(from_columns),
+            "to": to_entity, "to_columns": list(to_columns),
+            "cardinality": getattr(cardinality, "value", cardinality), "name": name,
+        })
 
     @property
     def resolved(self) -> bool:
@@ -975,9 +1005,8 @@ def unify_foreign_keys(
                 supplied = "references" in column.model_fields_set
                 if supplied and column.references and not backed_by(entity.entity_name, column.name):
                     target = column.references.split(".", 1)
-                    relationships.append(RelationshipSchema(
-                        from_ref=entity.entity_name, from_columns=[column.name],
-                        to_ref=target[0], to_columns=target[1:], cardinality=Cardinality.MANY_TO_ONE))
+                    relationships.append(RelationshipSchema.between(
+                        entity.entity_name, [column.name], target[0], target[1:], Cardinality.MANY_TO_ONE))
                 elif ("is_foreign_key" in column.model_fields_set and column.is_foreign_key
                       and not backed_by(entity.entity_name, column.name)):
                     logger.warning("Dropping is_foreign_key on %s.%s: no relationship or reference "
@@ -985,9 +1014,10 @@ def unify_foreign_keys(
 
     derived: dict[tuple[str, str], str | None] = {}
     for relationship in relationships:
-        for i, column in enumerate(relationship.from_columns):
-            target = relationship.to_columns[i] if i < len(relationship.to_columns) else None
-            derived[(relationship.from_ref, column)] = f"{relationship.to_ref}.{target}" if target else None
+        for i, from_column in enumerate(relationship.from_columns):
+            to_column = relationship.to_columns[i] if i < len(relationship.to_columns) else None
+            derived[(relationship.from_ref, from_column)] = (
+                f"{relationship.to_ref}.{to_column}" if to_column else None)
     for entity in entities:
         for column in entity.columns:
             key = (entity.entity_name, column.name)
@@ -1171,6 +1201,14 @@ class TransformParadigmResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Artifact export contract
 # ---------------------------------------------------------------------------
+class ExportGapSchema(BaseModel):
+    """One thing an export could not state: its kind, entity and reason."""
+
+    kind: str
+    entity: str | None = None
+    detail: str
+
+
 class ExportResponse(BaseModel):
     """GET /api/v1/model/{model_id}/export response body (FR-4)."""
 
@@ -1182,6 +1220,9 @@ class ExportResponse(BaseModel):
     dialect: str | None = None
     # Map of artifact file path -> file contents.
     files: dict[str, str] = Field(default_factory=dict)
+    # What the model holds that the DDL does not state, and why (Sprint 8
+    # Step 3). The same list heads the SQL file as comments.
+    gaps: list[ExportGapSchema] = Field(default_factory=list)
 
 
 __all__ = [

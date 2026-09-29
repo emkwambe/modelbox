@@ -121,11 +121,33 @@ def _single_condition(sql: str, dialect: str) -> exp.Expression | None:
     return where.this
 
 
-def translate_check(expression: str, source: str, target: str) -> tuple[str | None, str | None]:
-    """(the CHECK condition written for ``target``, None) or (None, why it cannot be)."""
+def translate_check(
+    expression: str, source: str, target: str, columns: list[str] | None = None
+) -> tuple[str | None, str | None]:
+    """(the CHECK condition written for ``target``, None) or (None, why it cannot be).
+
+    A column the expression names is written as the entity's own column name,
+    quoted as the column definition is. Dialects fold unquoted names
+    differently (Oracle up, PostgreSQL down), so ``web_address`` in an Oracle
+    CHECK means ``"WEB_ADDRESS"``, and copied unquoted into PostgreSQL it would
+    name a column that does not exist.
+    """
     condition = _single_condition(f"SELECT 1 WHERE ({expression})", source)
     if condition is None:
         return None, f"is not a single {source} boolean expression"
+    if columns:
+        exact = set(columns)
+        folded = {c.lower(): c for c in columns}
+        for node in condition.find_all(exp.Column):
+            if node.table:
+                continue
+            identifier = node.this
+            if not isinstance(identifier, exp.Identifier):
+                continue
+            name = identifier.name if identifier.name in exact else (
+                None if identifier.args.get("quoted") else folded.get(identifier.name.lower()))
+            if name is not None:
+                node.set("this", exp.to_identifier(name, quoted=quote(name) != name))
     try:
         written = condition.sql(dialect=target)
     except sqlglot.errors.SqlglotError:
@@ -138,11 +160,11 @@ def translate_check(expression: str, source: str, target: str) -> tuple[str | No
 # Types a target has no exact equivalent for, after sqlglot's translation:
 # (type -> replacement, or None to keep it) and what the gap says. Each use is
 # an export gap; nothing is widened or dropped silently.
-_TYPE_GAPS: dict[str, dict[exp.DataType.Type, tuple[str | None, str]]] = {
+_TYPE_GAPS: dict[str, dict[str, tuple[str | None, str]]] = {  # keyed by sqlglot type name
     "postgres": {
-        exp.DataType.Type.UTINYINT: ("SMALLINT", "PostgreSQL has no one-byte integer; emitted as SMALLINT"),
-        exp.DataType.Type.SMALLMONEY: ("MONEY", "PostgreSQL has no SMALLMONEY; emitted as MONEY"),
-        exp.DataType.Type.GEOGRAPHY: (None, "GEOGRAPHY needs the PostGIS extension"),
+        "UTINYINT": ("SMALLINT", "PostgreSQL has no one-byte integer; emitted as SMALLINT"),
+        "SMALLMONEY": ("MONEY", "PostgreSQL has no SMALLMONEY; emitted as MONEY"),
+        "GEOGRAPHY": (None, "GEOGRAPHY needs the PostGIS extension"),
     },
 }
 _USER_TYPE_GAPS: dict[str, dict[str, tuple[str, str]]] = {
@@ -150,8 +172,7 @@ _USER_TYPE_GAPS: dict[str, dict[str, tuple[str, str]]] = {
                                              "which holds its string form ('/1/3/')"))},
 }
 _MAX_PRECISION: dict[str, int] = {"postgres": 6}
-_TEMPORAL = {exp.DataType.Type.TIMESTAMP, exp.DataType.Type.TIME, exp.DataType.Type.TIMESTAMPTZ,
-             exp.DataType.Type.DATETIME2, exp.DataType.Type.DATETIME, exp.DataType.Type.TIMETZ}
+_TEMPORAL = frozenset({"TIMESTAMP", "TIME", "TIMESTAMPTZ", "DATETIME2", "DATETIME", "TIMETZ"})
 
 
 def _fit_type(column: exp.ColumnDef, entity: str, target: str, gaps: list[ExportGap]) -> None:
@@ -164,7 +185,10 @@ def _fit_type(column: exp.ColumnDef, entity: str, target: str, gaps: list[Export
     if params and all(isinstance(p, exp.DataTypeParam) and p.name.upper() == "MAX" for p in params) \
             and target == "postgres":
         kind.set("expressions", [])  # unbounded is PostgreSQL's default: exact
-    substitute = _TYPE_GAPS.get(target, {}).get(kind.this)
+    if target == "postgres" and params and params[0].name == "*":
+        # Oracle's NUMBER(*, s): '*' is Oracle's maximum precision, 38. Exact.
+        params[0].set("this", exp.Literal.number(38))
+    substitute = _TYPE_GAPS.get(target, {}).get(kind.this.name)
     if substitute is not None:
         replacement, why = substitute
         if replacement is not None:
@@ -176,7 +200,7 @@ def _fit_type(column: exp.ColumnDef, entity: str, target: str, gaps: list[Export
             column.set("kind", exp.DataType.build(user[0], dialect=target))
             gaps.append(ExportGap("data_type", entity, f"{column.name} {written}: {user[1]}"))
     limit = _MAX_PRECISION.get(target)
-    if limit is not None and kind.this in _TEMPORAL and len(params) == 1 and params[0].name.isdigit() \
+    if limit is not None and kind.this.name in _TEMPORAL and len(params) == 1 and params[0].name.isdigit() \
             and int(params[0].name) > limit:
         kind.set("expressions", [exp.DataTypeParam(this=exp.Literal.number(limit))])
         gaps.append(ExportGap("data_type", entity,
@@ -273,7 +297,8 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
             elif missing := _missing(check.columns, emitted):
                 gaps.append(ExportGap("check_constraint", name, f"{label}: columns {missing} are not emitted"))
             else:
-                condition, problem = translate_check(check.expression, source, target)
+                condition, problem = translate_check(check.expression, source, target,
+                                                     [c.name for c in entity.columns])
                 if problem is not None:
                     gaps.append(ExportGap("check_constraint", name, f"{label} {problem}"))
                 else:
@@ -285,9 +310,7 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
             tree.this.append("expressions", _constraint_node(clause, target))
         tables.append(tree.sql(dialect=target, pretty=True))
 
-        descriptions = ([("TABLE", quote(name), entity.description)] if entity.description else []) + [
-            ("COLUMN", f"{quote(name)}.{quote(c.name)}", c.description)
-            for c in entity.columns if c.description and c.name in emitted]
+        descriptions = _descriptions(entity, emitted)
         if descriptions and "comment" not in can:
             gaps.append(ExportGap("description", name,
                                   f"{len(descriptions)} descriptions: {target} has no COMMENT ON"))
@@ -301,6 +324,14 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
         header += ["-- " + " ".join(f"{g.kind} [{g.entity}]: {g.detail}".split()) for g in gaps]
         body = "\n".join(header) + "\n\n" + body
     return DdlExport(sql=body, gaps=gaps)
+
+
+def _descriptions(entity: EntitySchema, emitted: set[str]) -> list[tuple[str, str, str]]:
+    """(TABLE or COLUMN, the quoted target, the text) for each description to emit."""
+    name = entity.entity_name
+    table = [("TABLE", quote(name), entity.description)] if entity.description else []
+    return table + [("COLUMN", f"{quote(name)}.{quote(c.name)}", c.description)
+                    for c in entity.columns if c.description and c.name in emitted]
 
 
 def _foreign_key(rel: RelationshipSchema, entity_columns: dict[str, set[str]],

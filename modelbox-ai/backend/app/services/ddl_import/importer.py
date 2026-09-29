@@ -160,6 +160,7 @@ class _Column:
     primary_key: bool = False
     description: str | None = None
     source_type: str | None = None  # the declaration exactly as the file wrote it
+    source_default: str | None = None  # the DEFAULT exactly as the file wrote it
     user_type: str | None = None  # a user-defined type name, resolved in _to_model
     computed: str | None = None  # a computed column's expression
 
@@ -226,37 +227,66 @@ def _top_level_items(body: str) -> list[str]:
     return [item.strip() for item in items if item.strip()]
 
 
-def _type_text(rest: str) -> str | None:
-    """A column's type as written: from after its name to the first constraint word."""
-    depth, i, n = 0, 0, len(rest)
+def _scan_to(rest: str, start: int, stop: re.Pattern[str]) -> int:
+    """Where ``stop`` first matches a word at depth 0 after ``start``, outside
+    quotes and brackets; the length of ``rest`` if nowhere."""
+    depth, i, n = 0, start, len(rest)
     while i < n:
         ch = rest[i]
         if ch in "'\"[":
             close = {"'": "'", '"': '"', "[": "]"}[ch]
             j = rest.find(close, i + 1)
+            while ch == "'" and j != -1 and j + 1 < n and rest[j + 1] == "'":
+                j = rest.find("'", j + 2)
             i = n if j == -1 else j + 1
             continue
         if ch == "(":
             depth += 1
         elif ch == ")":
             depth -= 1
-        elif depth == 0 and (i == 0 or rest[i - 1].isspace()) and _TYPE_END.match(rest, i):
-            break
+        elif depth == 0 and (i == 0 or (i > start and rest[i - 1].isspace())) and stop.match(rest, i):
+            return i
         i += 1
-    text = rest[:i].rstrip()
+    return n
+
+
+def _type_text(rest: str) -> str | None:
+    """A column's type as written: from after its name to the first constraint word."""
+    text = rest[:_scan_to(rest, 0, _TYPE_END)].rstrip()
     return text or None
 
 
-def declared_types(statement: str) -> dict[str, str | None]:
-    """Each column's type exactly as a CREATE TABLE statement declares it, by column name.
+_DEFAULT_WORD = re.compile(r"DEFAULT\b", re.IGNORECASE)
+# ALTER TABLE … ALTER COLUMN … SET DEFAULT <expr>, the one action pg_dump writes.
+_SET_DEFAULT = re.compile(r"\bSET\s+DEFAULT\s+(.+?)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
+_DEFAULT_END = re.compile(
+    r"(?:NOT|NULL|CONSTRAINT|PRIMARY|UNIQUE|CHECK|REFERENCES|COLLATE|GENERATED|ENABLE|DISABLE|IDENTITY"
+    r"|ROWGUIDCOL)\b",
+    re.IGNORECASE,
+)
 
-    Read from the statement's own text, before any normalizing, so what is
-    stored is what the file said: ``VARCHAR2(10 BYTE)``, ``[nvarchar](60)``,
-    ``integer``. A computed column declares no type, and maps to None.
+
+def _default_text(rest: str) -> str | None:
+    """A column's DEFAULT expression as written, or None.
+
+    The expression's first token is always its own (``DEFAULT NULL``); it ends
+    at the next constraint word outside parentheses and quotes.
     """
+    at = _scan_to(rest, 0, _DEFAULT_WORD)
+    if at >= len(rest):
+        return None
+    start = at + len("DEFAULT")
+    while start < len(rest) and rest[start].isspace():
+        start += 1
+    text = rest[start:_scan_to(rest, start, _DEFAULT_END)].rstrip()
+    return text or None
+
+
+def _column_items(statement: str) -> list[tuple[str, str]]:
+    """(bare column name, the text after it) for each column a CREATE TABLE declares."""
     open_at = statement.find("(")
     if open_at == -1:
-        return {}
+        return []
     depth, end = 0, len(statement)
     for i in range(open_at, len(statement)):
         if statement[i] == "(":
@@ -266,12 +296,27 @@ def declared_types(statement: str) -> dict[str, str | None]:
             if depth == 0:
                 end = i
                 break
-    found: dict[str, str | None] = {}
+    found: list[tuple[str, str]] = []
     for item in _top_level_items(statement[open_at + 1:end]):
         if _ITEM_IS_CONSTRAINT.match(item) or (name := _COLUMN_NAME.match(item)) is None:
             continue
-        found[_bare_text(name.group(1))] = _type_text(item[name.end():])
+        found.append((_bare_text(name.group(1)), item[name.end():]))
     return found
+
+
+def declared_types(statement: str) -> dict[str, str | None]:
+    """Each column's type exactly as a CREATE TABLE statement declares it, by column name.
+
+    Read from the statement's own text, before any normalizing, so what is
+    stored is what the file said: ``VARCHAR2(10 BYTE)``, ``[nvarchar](60)``,
+    ``integer``. A computed column declares no type, and maps to None.
+    """
+    return {name: _type_text(rest) for name, rest in _column_items(statement)}
+
+
+def declared_defaults(statement: str) -> dict[str, str | None]:
+    """Each column's DEFAULT exactly as a CREATE TABLE statement declares it, by column name."""
+    return {name: _default_text(rest) for name, rest in _column_items(statement)}
 
 
 def _extended_property(text: str) -> dict[str, str]:
@@ -402,10 +447,13 @@ class _Builder:
                 partitioning = "PARTITION BY " + self._sql(partitioned.this)
         table.partitioning = partitioning
         declared = declared_types(statement.text)
+        defaults = declared_defaults(statement.text)
         for item in schema.expressions:
             if isinstance(item, exp.ColumnDef):
                 self._column(table, item, statement)
                 table.columns[item.name].source_type = declared.get(item.name)
+                if table.columns[item.name].default is not None:
+                    table.columns[item.name].source_default = defaults.get(item.name)
             else:
                 self._constraint(table, item, statement)
         if not table.columns:
@@ -482,7 +530,19 @@ class _Builder:
         if column is None:
             raise ImportFailure(f"sets a default on {table.name}.{_bare_text(match.group('column'))}, "
                                 "which the table does not have")
-        column.default = match.group("expr").strip()
+        # Stored as written, and normalized the way an inline DEFAULT is, so
+        # comparisons read one form whichever way the file declared it.
+        written = match.group("expr").strip()
+        probe = parse_statement(f"CREATE TABLE _default (_c INT DEFAULT {written})", self.dialect, "create_table")
+        definition = probe.this.expressions[0] if isinstance(probe, exp.Create) and isinstance(
+            probe.this, exp.Schema) else None
+        normalized = next((c.args["kind"] for c in (definition.args.get("constraints") or [])
+                           if isinstance(c.args.get("kind"), exp.DefaultColumnConstraint)), None) if isinstance(
+            definition, exp.ColumnDef) else None
+        if normalized is None:
+            raise ImportFailure(f"the default {written!r} for {table.name}.{column.name} does not parse")
+        column.default = self._sql(normalized.this)
+        column.source_default = written
 
     def extended_property(self, statement: splitter.Statement) -> str | None:
         """Apply an MS_Description to its table or column; otherwise say why it is not imported."""
@@ -517,6 +577,8 @@ class _Builder:
                 if column is None:
                     raise ImportFailure(f"sets a default on {target}.{action.name}, which the table does not have")
                 column.default = self._sql(action.args["default"])
+                written = _SET_DEFAULT.search(statement.text)
+                column.source_default = written.group(1).strip() if written else None
                 owner.statements.append(statement.index)
             else:
                 raise ImportFailure(f"ALTER TABLE action not imported: {type(action).__name__}")
@@ -602,6 +664,7 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
                     ordinal_position=position,
                     is_nullable=column.nullable,
                     default_value=column.default,
+                    source_default_value=column.source_default,
                     description=column.description,
                 ))
             except ValueError as exc:
@@ -627,9 +690,8 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
                     {**fk, "reason": f"names {len(fk['columns'])} columns, but {target}'s primary key, which it "
                                      f"references implicitly, has {len(referenced)}"})
                 continue
-            relationships.append(RelationshipSchema(
-                from_ref=name, from_columns=fk["columns"], to_ref=target, to_columns=referenced,
-                name=fk.get("name"), cardinality=Cardinality.MANY_TO_ONE))
+            relationships.append(RelationshipSchema.between(
+                name, fk["columns"], target, referenced, Cardinality.MANY_TO_ONE, name=fk.get("name")))
         if table.partitioning:
             table_held["partitioning"] = table.partitioning
         partitions = [
