@@ -72,6 +72,7 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", f"{_V1}/model/{{model_id}}/export/zip"): "VIEWER",
     ("POST", f"{_V1}/model/{{model_id}}/transform-paradigm"): "MEMBER",
     ("GET", f"{_V1}/model/{{model_id}}/attestations"): "VIEWER",
+    ("POST", f"{_V1}/model/{{model_id}}/drift"): "VIEWER",
     ("POST", f"{_V1}/model/{{model_id}}/attestations/verify"): "APPROVER",
     # --- workspaces --------------------------------------------------------
     ("GET", f"{_V1}/workspaces"): AUTHENTICATED,

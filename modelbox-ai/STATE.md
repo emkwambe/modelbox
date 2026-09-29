@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `sprint-8/step-4b-dictionary-verification`,
-branched from `main` at `fe8dbd4`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-29 on `sprint-8/step-5-drift-report`, branched from
+`main` at `3dde631`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,11 +9,11 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `fe8dbd4` | exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), on keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `3dde631` | dictionary fields, a classification scale and per-field verification (#21), on exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36516574170: gate, backend and frontend images all green) |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-8/step-4b-dictionary-verification` | this branch | dictionary fields, a classification scale, per-field verification (below) |
-| `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-8/step-5-drift-report` | this branch | the drift report and drifted fixtures (below) |
+| `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
 ## Offline DDL import (on `main`)
 
@@ -28,7 +28,23 @@ import with zero gaps against their catalog manifests (Pagila as 15 tables and
 55 partitions); the Snowflake fixture fails by name on its HYBRID TABLE and is
 saved unreconciled.
 
-## In progress on this branch: dictionary fields and per-field verification
+## In progress on this branch: the drift report
+
+A drift report compares a saved model (the documented design) with a fresh,
+unsaved import of a DDL export of the deployed schema, through the schema-diff
+engine's one comparison core, pairing columns by name: a rename is a removal
+and an addition, with a "possible rename" hint only where type and position
+match. Each drift is classified by nineteen written rules (D1-D19) listed in
+the user guide; the header names both sources, the model's version, the
+import's time and both reconciliation statuses; a drift on a verified
+dictionary field is flagged. Markdown, HTML and JSON from
+`POST /model/{id}/drift`. The DDL Fixtures workflow applies committed ALTER
+scripts to the real Oracle, SQL Server and PostgreSQL databases and exports
+them again (`backend/tests/fixtures/ddl_drift/`); the report finds exactly the
+drifts each script's hand-written manifest expects. The first drifted Oracle
+export found an importer gap (a key declared inside CREATE TABLE), now fixed.
+
+## Dictionary fields and per-field verification (on `main`)
 
 Migration 0026 adds, additively, the dictionary fields a person supplies
 (on columns: business name, permissible values, unit, critical data element,
@@ -113,7 +129,7 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0026_dictionary_fields` on this branch (`0025_keys_and_constraints` on `main`).
+Migration head: `0026_dictionary_fields`, on `main` and this branch (no schema change on this branch).
 
 ## Versions
 
