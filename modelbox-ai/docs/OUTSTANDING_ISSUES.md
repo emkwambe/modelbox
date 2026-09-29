@@ -1,6 +1,7 @@
 # Outstanding issues
 
-**As of 2026-09-29, `main` at `70568f7`, release v1.11.1.** Companion to
+**As of 2026-09-29, `main` at `4ea57f7` (Sprint 8 merged through pull request
+#24), release v1.11.1; v1.12.0 in preparation.** Companion to
 `BUILD_EVIDENCE_REVIEW.md`, which argues the evidence; this one is the list.
 The previous edition was written on 2026-09-03 on `sprint/6-product-experience`;
 entries that have not been re-measured since say so rather than being carried
@@ -58,7 +59,7 @@ an answer. Unchanged since 2026-09-03 except where marked.
 |---|---|---|
 | **Type-ramp weights** | 253 F1 conversions | The ramp has to be settled before 20 files can be converted mechanically. |
 | **Violet palette entry** | the last 16 colour literals | They are a brand colour with no token. Either the palette gains an entry or the criterion narrows. |
-| **Playwright, or a narrowed F4** | all of F4 | A 500-table benchmark needs a browser harness; the alternative is stating the measured ceiling. |
+| **Playwright, or a narrowed F4** | all of F4 | A 500-table benchmark needs a browser harness; the alternative is stating the measured ceiling. **Changed 2026-09-29:** the harness now exists (`e2e/`, Playwright in the required Engagement Journey check), so the benchmark could be built on it; no benchmark is built, and the choice between the two remains open. |
 | ~~**SAML for G8**~~ | — | **Decided 2026-09-28** (decision 5): G8 is OIDC end to end; SAML on a pilot's demand. |
 | **Severity-ordered repair gate** | nothing; it is a live behaviour question | Ordering on `(errors, warnings)` would accept trading a `DANGLING_REF` for two `MISSING_PK`s. It also makes the gate **more permissive**, and `test_a_repair_that_trades_one_defect_for_two_is_discarded` exists because the opposite was decided deliberately. See `synthesis_engine.py`. |
 | **Normalising the lint gate** | nothing yet | `lint_delta_per_entity` is reported; the **gate still uses the raw count**. Switching it is a `THRESHOLD_VERSION` change, and it would move the score in the flattering direction, so it must be argued on its own terms. |
@@ -83,6 +84,9 @@ an answer. Unchanged since 2026-09-03 except where marked.
 | ~~**`EntitySchema.entity_type` defaults to the enum member, not its value.** A model whose entities omit the field is persisted as `"EntityType.TABLE"` and fails to reload.~~ | **Resolved in Sprint 8 Step 3** (PR #19): the default is validated into its value, the repository stores enum values, and migration 0025 repairs rows stored as enum names and lists each (`test_a_provider_response_without_entity_type_saves_and_reopens`). |
 | **`users.email` has a redundant index.** Migration 0002 created both `uq_users_email` and a plain `ix_users_email`. | Harmless but wasteful; removing it needs a new migration. |
 | ~~**The migration diff can report a rename that did not happen.** `POST /model/diff` paired columns by `stable_id` before name, but each saved model numbers its columns from 1, so two separately saved models of one table shared ids on different columns.~~ | **Resolved in Sprint 8 Step 6:** columns are paired by internal id only between versions of the same model and by name otherwise; an uncertain rename is a removal plus an addition, and the migration and the diff panel say what data each drop destroys (`test_the_diff_endpoint_never_renames_across_separately_saved_models`). |
+| **Snowflake import is not certified.** Its only fixture is written from Snowflake's `GET_DDL` documentation, and it fails by name on a HYBRID TABLE; a test fails if anything calls Snowflake import certified while that stands (`test_nothing_calls_snowflake_import_certified_while_its_fixture_is_documentation_derived`). | A client on Snowflake gets an import that is tested against documentation, not against the tool's real output. A genuine export is needed. |
+| **Conversion findings are not shown on the canvas.** Migration 0025 lists, per model, what it could not convert exactly, and the API returns it with the model (`conversion_findings`); the canvas does not display it. | An owner upgrading from v1.11.x must read it from the API or the database (the v1.12.0 notes give the query). |
+| **A rollback to v1.11.1 loses this release's data.** The downgrade is tested (`test_rollback.py`), and what it deletes is listed in the v1.12.0 notes: composite keys beyond the first pair, multi-column constraints, dictionary fields and every field status. | Stated so a rollback is a decision taken knowing the cost, after a backup. |
 | **Computed columns are not exported.** A PostgreSQL DDL export names each computed column as an export gap and leaves it out. Seven of AdventureWorks' ten are expressible as PostgreSQL generated columns (`GENERATED ALWAYS AS (...) STORED`): WorkOrder.StockedQty, PurchaseOrderDetail.LineTotal and .StockedQty, PurchaseOrderHeader.TotalDue, SalesOrderDetail.LineTotal, SalesOrderHeader.SalesOrderNumber and .TotalDue. PostgreSQL 16 has stored generated columns only, so a SQL Server column that is not `PERSISTED` (computed on read) would become stored. The other three call a `hierarchyid` method or a user function the model does not hold. | The export loses those columns' definitions, and the model does not yet hold the expression (the import report does). |
 
 ---
@@ -93,8 +97,12 @@ an answer. Unchanged since 2026-09-03 except where marked.
   inference.
 - **Relationship normalisation, measured.** Whether it moves relationship F1 is
   still unknown.
-- **The whole backend suite against PostgreSQL.** CI runs the full suite on
-  SQLite; only the migration and ledger modules run against a real PostgreSQL.
+- ~~**The whole backend suite against PostgreSQL.** CI runs the full suite on
+  SQLite; only the migration and ledger modules run against a real PostgreSQL.~~
+  **Struck 2026-09-29:** the required Backend Pytest (Postgres) job runs the whole
+  suite on a real PostgreSQL (`tests/_test_db.py`; `test_test_database.py` fails
+  on a module that builds its own SQLite engine). On `main` at `4ea57f7`, run
+  36644605175: 1,573 passed, 73 skipped, 24 xfailed.
 
 Struck on 2026-09-03, recorded rather than deleted:
 

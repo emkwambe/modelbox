@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `sprint-8/step-7-engagement-journey`, branched
-from `main` at `0f443e8`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-29 on `sprint-8/step-8a-claims-and-records`, branched
+from `main` at `4ea57f7`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,11 +9,11 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `0f443e8` | two silent-loss fixes and workspace members (#23), on the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `4ea57f7` | the engagement journey, the Verify control and the drift panel (#24), on two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36516574170: gate, backend and frontend images all green) |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-8/step-7-engagement-journey` | this branch | the engagement journey, the Verify control and the drift panel (below) |
-| `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-8/step-8a-claims-and-records` | this branch | claims, the rollback check and the records for v1.12.0 (below) |
+| `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
 ## Offline DDL import (on `main`)
 
@@ -28,7 +28,22 @@ import with zero gaps against their catalog manifests (Pagila as 15 tables and
 55 partitions); the Snowflake fixture fails by name on its HYBRID TABLE and is
 saved unreconciled.
 
-## In progress on this branch: the engagement journey
+## In progress on this branch: claims, rollback and records for v1.12.0
+
+The Proof Log gains PL-018 to PL-025, one per claim of the sprint (DDL import
+per dialect, reconciliation, DDL applied to PostgreSQL, what "verified" means,
+the drift report, the migration diff's data-loss labelling, member management,
+the engagement journey), each citing tests read as passed on `main` at
+`4ea57f7` (run 36644605175); PL-016's "no API or UI to manage members" is
+struck. A claims-guard test keeps barred wording off every public surface.
+The Black-box Acceptance job now downgrades this release's database to
+v1.11.1's migration head and runs v1.11.1's published images on it
+(`test_rollback.py`). The v1.12.0 release notes are drafted
+(`docs/RELEASE_NOTES_v1.12.0-draft.md`); the CHANGELOG, the register and
+`OUTSTANDING_ISSUES.md` are brought up to date. The version stamps stay
+1.11.1 until the release-preparation change.
+
+## The engagement journey (on `main`)
 
 The canvas gains two panels. **Dictionary** lists every field holding a value
 with its status and the verified count; an APPROVER, ADMIN or OWNER verifies
