@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints import ddl_import as endpoint
 from app.models.metadata_store import AuditEvent, DataModel
+from app.services.ddl_import.importer import import_ddl
 from tests._real_auth import (
     bearer,
     make_user,
@@ -114,7 +115,7 @@ async def test_only_a_member_or_above_can_import(session, world, who: str) -> No
 
 async def test_an_unknown_dialect_is_refused(session, world) -> None:
     async with real_client(session) as client:
-        response = await _upload(client, world, "member", HR, "tsql")
+        response = await _upload(client, world, "member", HR, "mysql")
     assert response.status_code == 422
     assert "not importable" in response.text
 
@@ -177,4 +178,44 @@ async def test_the_dialect_list_carries_each_dialects_evidence(session, world) -
     assert response.status_code == 200
     evidence = {d["dialect"]: d["evidence"] for d in response.json()}
     assert evidence == {"oracle": "genuine export", "postgres": "genuine export",
-                        "snowflake": "documentation-derived"}
+                        "tsql": "genuine export", "snowflake": "documentation-derived"}
+
+
+async def _source_types(session: AsyncSession) -> dict[tuple[str, str], str | None]:
+    """Each stored column's original type text, read by raw SQL."""
+    rows = (await session.execute(text(
+        "SELECT e.entity_name, c.column_name, c.source_data_type "
+        "FROM entity_columns c JOIN model_entities e ON e.entity_id = c.entity_id"
+    ))).all()
+    return {(entity, column): source for entity, column, source in rows}
+
+
+ROUND_TRIP = [("oracle", "hr"), ("oracle", "co"), ("postgres", "pagila"), ("tsql", "adventureworks")]
+
+
+@pytest.mark.parametrize(("dialect", "stem"), ROUND_TRIP, ids=[s for _, s in ROUND_TRIP])
+async def test_original_type_text_survives_save_and_reload(session, world, dialect: str, stem: str) -> None:
+    """The import stores each column's declared type; a canvas save of the
+    reloaded model writes it back unchanged."""
+    raw = (DDL / dialect / f"{stem}.sql").read_bytes()
+    model = import_ddl(raw, dialect).model
+    assert model is not None
+    expected = {(e.entity_name, c.name): c.source_data_type for e in model.entities for c in e.columns}
+    assert sum(1 for v in expected.values() if v) > 0, "fixture sanity: no column carries a source type"
+
+    async with real_client(session) as client:
+        uploaded = await _upload(client, world, "member", raw, dialect, f"{stem}.sql")
+        assert uploaded.status_code == 201, uploaded.text
+        model_id = uploaded.json()["model_id"]
+        assert await _source_types(session) == expected
+
+        reloaded = await client.get(f"/api/v1/model/{model_id}", headers=bearer(world["member"]))
+        assert reloaded.status_code == 200, reloaded.text
+        body = reloaded.json()
+        assert {(e["entity_name"], c["name"]): c["source_data_type"]
+                for e in body["entities"] for c in e["columns"]} == expected
+        saved = await client.put(f"/api/v1/model/{model_id}/graph",
+                                 json={"entities": body["entities"], "relationships": body["relationships"]},
+                                 headers=bearer(world["member"]))
+        assert saved.status_code == 200, saved.text
+    assert await _source_types(session) == expected

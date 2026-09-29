@@ -604,6 +604,15 @@ class ColumnSchema(BaseModel):
         max_length=512,
         description="Boolean SQL expression the column's values must satisfy.",
     )
+    # The type exactly as an imported DDL file declared it (Sprint 8, owner
+    # decision): `VARCHAR2(10 BYTE)`, `[nvarchar](60)`, `integer`. `data_type`
+    # holds the normalized form, which is what comparisons use; this is what a
+    # data dictionary shows. None for a column that was not imported.
+    source_data_type: str | None = Field(
+        default=None,
+        max_length=128,
+        description="The column's type exactly as the imported file declared it.",
+    )
 
     @model_validator(mode="after")
     def _primary_keys_are_never_nullable(self) -> ColumnSchema:

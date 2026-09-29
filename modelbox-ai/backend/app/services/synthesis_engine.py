@@ -723,4 +723,5 @@ class SynthesisEngine:
             default_value=col.default_value,
             check_expression=col.check_expression,
             references=col.reference_target,
+            source_data_type=col.source_data_type,
         )

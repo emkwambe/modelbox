@@ -210,6 +210,7 @@ def test_every_invented_constraint_field_is_covered() -> None:
         "is_metric",
         "aggregation",  # semantic-layer concerns, not contract constraints
         "is_nullable",  # has a safe default and is compared across artifacts
+        "source_data_type",  # an imported column's provenance; no emitter reads it
     }
     uncovered = sorted(ir_optional - set(OPTIONAL_CONSTRAINTS) - excused)
     assert not uncovered, (

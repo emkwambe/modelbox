@@ -45,14 +45,23 @@ from app.schemas.data_model import (
     RelationshipSchema,
     SynthesizedModel,
 )
-from app.services.ddl_import import counter, oracle_normalizer, splitter
+from app.services.ddl_import import (
+    counter,
+    oracle_normalizer,
+    splitter,
+    sqlserver_normalizer,
+)
 from app.services.ddl_import.dialects import IMPORT_DIALECTS
 from app.services.ddl_import.encoding import DecodeError, decode
 
 logger = logging.getLogger(__name__)
 
 DIALECTS = tuple(IMPORT_DIALECTS)
-_SQLGLOT_DIALECT = {"oracle": "oracle", "postgres": "postgres", "snowflake": "snowflake"}
+_SQLGLOT_DIALECT = {"oracle": "oracle", "postgres": "postgres", "snowflake": "snowflake", "tsql": "tsql"}
+
+# SQL Server types sqlglot reads as user-defined names. Each is typed here,
+# never left untyped: sysname is SQL Server's alias for nvarchar(128).
+_BUILTIN_SPECIAL_TYPES = {"sysname": "NVARCHAR(128)", "hierarchyid": "HIERARCHYID"}
 
 # Statement kinds whose Command result must never be accepted.
 GUARDED_KINDS = ("create_table", "alter_table", "comment", "create_type")
@@ -70,14 +79,23 @@ _GUARDED = (
 # Named skip rules: statements that are not part of a logical model. Each is
 # anchored at the statement's start, so none can match a guarded kind, and the
 # ALTER forms only match when the whole statement is that one action.
-_NAME = r"(?:\"[^\"]+\"|[\w$#]+)(?:\s*\.\s*(?:\"[^\"]+\"|[\w$#]+))*"
+_PART = r"(?:\"[^\"]+\"|\[[^\]]+\]|[\w$#]+)"
+_NAME = rf"{_PART}(?:\s*\.\s*{_PART})*"
 SKIP_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("session setting", re.compile(r"^(?:SET\s|RESET\s|SELECT\s+pg_catalog\.set_config\s*\()", re.IGNORECASE)),
     ("ownership", re.compile(
         rf"^ALTER\s+(?:TABLE|SCHEMA|SEQUENCE|VIEW|MATERIALIZED\s+VIEW|FUNCTION|PROCEDURE|AGGREGATE|TYPE|DOMAIN)"
         rf"\s+(?:ONLY\s+)?{_NAME}(?:\s*\([^;]*\))?\s+OWNER\s+TO\s+\S+\s*;?\s*$", re.IGNORECASE)),
     ("privileges", re.compile(r"^(?:GRANT|REVOKE)\s", re.IGNORECASE)),
-    ("index", re.compile(r"^(?:CREATE\s+(?:UNIQUE\s+|BITMAP\s+)?INDEX|ALTER\s+INDEX)\b", re.IGNORECASE)),
+    ("index", re.compile(
+        r"^(?:CREATE\s+(?:UNIQUE\s+)?(?:BITMAP\s+|PRIMARY\s+XML\s+|XML\s+|SPATIAL\s+|(?:NON)?CLUSTERED\s+)?"
+        r"(?:COLUMNSTORE\s+)?INDEX|ALTER\s+INDEX)\b", re.IGNORECASE)),
+    # T-SQL: enabling or disabling a constraint that already exists. The whole
+    # statement must be that one action; adding a constraint is never this.
+    ("constraint state", re.compile(
+        rf"^ALTER\s+TABLE\s+{_NAME}\s+(?:WITH\s+(?:NO)?CHECK\s+)?(?:NO)?CHECK\s+CONSTRAINT\s+(?:ALL|{_NAME})\s*;?\s*$",
+        re.IGNORECASE)),
+    ("database selection", re.compile(r"^USE\s", re.IGNORECASE)),
     ("sequence", re.compile(r"^(?:CREATE|ALTER)\s+SEQUENCE\b", re.IGNORECASE)),
     ("view", re.compile(r"^(?:CREATE\s+(?:OR\s+REPLACE\s+)?(?:FORCE\s+)?(?:MATERIALIZED\s+)?VIEW|ALTER\s+(?:MATERIALIZED\s+)?VIEW)\b", re.IGNORECASE)),
     ("domain", re.compile(r"^(?:CREATE|ALTER)\s+DOMAIN\b", re.IGNORECASE)),
@@ -86,12 +104,41 @@ SKIP_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("synonym", re.compile(r"^CREATE\s+(?:OR\s+REPLACE\s+)?(?:PUBLIC\s+)?SYNONYM\b", re.IGNORECASE)),
     ("drop", re.compile(r"^DROP\s", re.IGNORECASE)),
 )
+_LATER_TABLE_STATEMENT = re.compile(
+    r"\n\s*(?:CREATE|ALTER|COMMENT)\b[^;(\n]{0,120}?\bTABLE\b|\bsp_addextendedproperty\b", re.IGNORECASE)
 _LOOKS_LIKE_TABLE = re.compile(r"^(?:CREATE|ALTER|COMMENT|DROP)\b[^;(]{0,120}?\bTABLE\b", re.IGNORECASE | re.DOTALL)
 _ATTACH = re.compile(
     rf"^ALTER\s+TABLE\s+(?:ONLY\s+)?(?P<parent>{_NAME})\s+ATTACH\s+PARTITION\s+(?P<child>{_NAME})\s+"
     r"(?P<bound>FOR\s+VALUES\s+.+|DEFAULT)\s*;?\s*$",
     re.IGNORECASE | re.DOTALL,
 )
+# The three T-SQL forms the parser returns as an opaque Command, each read by
+# its own extractor. A statement that starts like one but does not match it
+# whole is a named failure.
+_TYPE_ALIAS = re.compile(
+    rf"^CREATE\s+TYPE\s+(?P<name>{_NAME})\s+FROM\s+(?P<base>.+?)(?:\s+(?P<null>NOT\s+NULL|NULL))?\s*;?\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+_ADD_DEFAULT = re.compile(
+    rf"^ALTER\s+TABLE\s+(?P<table>{_NAME})\s+ADD\s+(?:CONSTRAINT\s+{_NAME}\s+)?DEFAULT\s+(?P<expr>.+?)\s+"
+    rf"FOR\s+(?P<column>{_NAME})\s*;?\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+_EXTENDED_PROPERTY = re.compile(r"^EXEC(?:UTE)?\s+(?:sys\s*\.\s*)?sp_addextendedproperty\b", re.IGNORECASE)
+_PARAM = re.compile(r"@(\w+)\s*=\s*N?'((?:[^']|'')*)'", re.IGNORECASE)
+_POSITIONAL = re.compile(r"N?'((?:[^']|'')*)'")
+_PROPERTY_KEYS = ("name", "value", "level0type", "level0name", "level1type", "level1name", "level2type", "level2name")
+
+# Where a column's declared type ends: the first constraint or property word
+# after it, outside parentheses, quotes and brackets.
+_TYPE_END = re.compile(
+    r"(?:NOT|NULL|CONSTRAINT|DEFAULT|IDENTITY|PRIMARY|UNIQUE|CHECK|REFERENCES|COLLATE|GENERATED|ENABLE|DISABLE"
+    r"|ROWGUIDCOL|SPARSE|FILESTREAM|MASKED|ENCRYPTED|AS)\b",
+    re.IGNORECASE,
+)
+_ITEM_IS_CONSTRAINT = re.compile(
+    r"^(?:CONSTRAINT|PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|EXCLUDE|LIKE|PERIOD|SUPPLEMENTAL)\b", re.IGNORECASE)
+_COLUMN_NAME = re.compile(r"^(\"[^\"]+\"|\[[^\]]+\]|[\w$#]+)\s*")
 
 
 class ImportFailure(Exception):
@@ -108,6 +155,9 @@ class _Column:
     unique: bool = False
     primary_key: bool = False
     description: str | None = None
+    source_type: str | None = None  # the declaration exactly as the file wrote it
+    user_type: str | None = None  # a user-defined type name, resolved in _to_model
+    computed: str | None = None  # a computed column's expression
 
 
 @dataclass
@@ -143,9 +193,90 @@ def _bare(identifier: exp.Expression | None) -> str:
 
 
 def _bare_text(name: str) -> str:
-    parts = re.findall(r"\"([^\"]+)\"|([\w$#]+)", name)
-    quoted, plain = parts[-1]
-    return quoted or plain
+    parts = re.findall(r"\"([^\"]+)\"|\[([^\]]+)\]|([\w$#]+)", name)
+    return next(p for p in parts[-1] if p)
+
+
+def _top_level_items(body: str) -> list[str]:
+    """Split a parenthesised list at its top-level commas, respecting quotes and brackets."""
+    items: list[str] = []
+    depth, start, i, n = 0, 0, 0, len(body)
+    while i < n:
+        ch = body[i]
+        if ch in "'\"[":
+            close = {"'": "'", '"': '"', "[": "]"}[ch]
+            j = body.find(close, i + 1)
+            while ch == "'" and j != -1 and j + 1 < n and body[j + 1] == "'":
+                j = body.find("'", j + 2)
+            i = n if j == -1 else j + 1
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            items.append(body[start:i])
+            start = i + 1
+        i += 1
+    items.append(body[start:])
+    return [item.strip() for item in items if item.strip()]
+
+
+def _type_text(rest: str) -> str | None:
+    """A column's type as written: from after its name to the first constraint word."""
+    depth, i, n = 0, 0, len(rest)
+    while i < n:
+        ch = rest[i]
+        if ch in "'\"[":
+            close = {"'": "'", '"': '"', "[": "]"}[ch]
+            j = rest.find(close, i + 1)
+            i = n if j == -1 else j + 1
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth == 0 and (i == 0 or rest[i - 1].isspace()) and _TYPE_END.match(rest, i):
+            break
+        i += 1
+    text = rest[:i].rstrip()
+    return text or None
+
+
+def declared_types(statement: str) -> dict[str, str | None]:
+    """Each column's type exactly as a CREATE TABLE statement declares it, by column name.
+
+    Read from the statement's own text, before any normalizing, so what is
+    stored is what the file said: ``VARCHAR2(10 BYTE)``, ``[nvarchar](60)``,
+    ``integer``. A computed column declares no type, and maps to None.
+    """
+    open_at = statement.find("(")
+    if open_at == -1:
+        return {}
+    depth, end = 0, len(statement)
+    for i in range(open_at, len(statement)):
+        if statement[i] == "(":
+            depth += 1
+        elif statement[i] == ")":
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    found: dict[str, str | None] = {}
+    for item in _top_level_items(statement[open_at + 1:end]):
+        if _ITEM_IS_CONSTRAINT.match(item) or (name := _COLUMN_NAME.match(item)) is None:
+            continue
+        found[_bare_text(name.group(1))] = _type_text(item[name.end():])
+    return found
+
+
+def _extended_property(text: str) -> dict[str, str]:
+    """sp_addextendedproperty's arguments, named or positional."""
+    named = {key.lower(): value.replace("''", "'") for key, value in _PARAM.findall(text)}
+    if named:
+        return named
+    values = [value.replace("''", "'") for value in _POSITIONAL.findall(text)]
+    return dict(zip(_PROPERTY_KEYS, values, strict=False))
 
 
 def classify(statement: splitter.Statement) -> tuple[str, str | None]:
@@ -155,9 +286,19 @@ def classify(statement: splitter.Statement) -> tuple[str, str | None]:
     text = statement.text.lstrip()
     for name, pattern in SKIP_RULES:
         if pattern.match(text):
+            if _LATER_TABLE_STATEMENT.search(text):
+                # A T-SQL batch can hold several statements: one a rule skips
+                # must not carry a table statement past the importer with it.
+                return "unrecognized_table", None
             return "skipped", name
     if _ATTACH.match(text) or re.match(r"^ALTER\s+TABLE\b[^;]*\bATTACH\s+PARTITION\b", text, re.IGNORECASE | re.DOTALL):
         return "attach_partition", None
+    if _EXTENDED_PROPERTY.match(text):
+        return "extended_property", None
+    if _TYPE_ALIAS.match(text):
+        return "type_alias", None
+    if _ADD_DEFAULT.match(text):
+        return "add_default", None
     for kind, pattern in _GUARDED:
         if pattern.match(text):
             return kind, None
@@ -199,6 +340,9 @@ class _Builder:
         self.tables: dict[str, _Table] = {}
         self.partitions: dict[str, dict[str, Any]] = {}  # child -> {parent, bound, statement}
         self.types: list[dict[str, Any]] = []
+        # T-SQL CREATE TYPE … FROM: alias (lower-cased bare name) -> base type.
+        self.aliases: dict[str, dict[str, Any]] = {}
+        self.nocheck: list[dict[str, Any]] = []  # constraints added WITH NOCHECK
 
     def _table(self, name: str, statement: splitter.Statement) -> _Table:
         table = self.tables.get(name)
@@ -251,9 +395,11 @@ class _Builder:
             if partitioned is not None:
                 partitioning = "PARTITION BY " + self._sql(partitioned.this)
         table.partitioning = partitioning
+        declared = declared_types(statement.text)
         for item in schema.expressions:
             if isinstance(item, exp.ColumnDef):
                 self._column(table, item, statement)
+                table.columns[item.name].source_type = declared.get(item.name)
             else:
                 self._constraint(table, item, statement)
         if not table.columns:
@@ -262,10 +408,19 @@ class _Builder:
 
     def _column(self, table: _Table, item: exp.ColumnDef, statement: splitter.Statement) -> None:
         kind = item.args.get("kind")
-        column = _Column(name=item.name, data_type=self._sql(kind) if kind is not None else "")
+        constraints = item.args.get("constraints") or []
+        computed = next((c.args["kind"] for c in constraints
+                         if isinstance(c.args.get("kind"), exp.ComputedColumnConstraint)), None)
+        if kind is None and computed is not None:
+            # A computed column declares no type; its expression is kept in the report.
+            column = _Column(name=item.name, data_type="COMPUTED", computed=self._sql(computed.this))
+        else:
+            column = _Column(name=item.name, data_type=self._sql(kind) if kind is not None else "")
         if not column.data_type:
             raise ImportFailure(f"column {table.name}.{item.name} has no data type")
-        for constraint in item.args.get("constraints") or []:
+        if isinstance(kind, exp.DataType) and kind.this == exp.DataType.Type.USERDEFINED:
+            column.user_type = _bare_text(self._sql(kind))
+        for constraint in constraints:
             ckind = constraint.args.get("kind")
             if isinstance(ckind, exp.NotNullColumnConstraint):
                 column.nullable = bool(ckind.args.get("allow_null"))
@@ -290,6 +445,55 @@ class _Builder:
             # Identity, generated, collation and similar column properties do
             # not change the logical model and carry no constraint count.
         table.columns[column.name] = column
+
+    def type_alias(self, statement: splitter.Statement) -> None:
+        """T-SQL ``CREATE TYPE name FROM base [NULL | NOT NULL]``: an alias for a base type."""
+        match = _TYPE_ALIAS.match(statement.text.strip())
+        if match is None:
+            raise ImportFailure("CREATE TYPE … FROM in a form the importer does not read")
+        base = match.group("base").strip()
+        # The base type normalized by the parser, through the one parse entry point.
+        probe = parse_statement(f"CREATE TABLE _alias (_c {base})", self.dialect, "create_table")
+        column = probe.this.expressions[0] if isinstance(probe, exp.Create) and isinstance(probe.this, exp.Schema) else None
+        if not isinstance(column, exp.ColumnDef) or column.args.get("kind") is None:
+            raise ImportFailure(f"the base type {base!r} of a user-defined type does not parse")
+        name = _bare_text(match.group("name"))
+        self.aliases[name.lower()] = {
+            "name": name, "base": base, "normalized": self._sql(column.args["kind"]),
+            "nullable": (match.group("null") or "NULL").upper() == "NULL", "statement": statement.index,
+        }
+        self.types.append({"index": statement.index, "statement": statement.head,
+                           "alias": name, "base": base})
+
+    def add_default(self, statement: splitter.Statement) -> None:
+        """T-SQL ``ALTER TABLE t ADD [CONSTRAINT n] DEFAULT expr FOR column``."""
+        match = _ADD_DEFAULT.match(statement.text.strip())
+        if match is None:
+            raise ImportFailure("ADD … DEFAULT … FOR in a form the importer does not read")
+        table = self._table(_bare_text(match.group("table")), statement)
+        column = table.columns.get(_bare_text(match.group("column")))
+        if column is None:
+            raise ImportFailure(f"sets a default on {table.name}.{_bare_text(match.group('column'))}, "
+                                "which the table does not have")
+        column.default = match.group("expr").strip()
+
+    def extended_property(self, statement: splitter.Statement) -> str | None:
+        """Apply an MS_Description to its table or column; otherwise say why it is not imported."""
+        args = _extended_property(statement.text)
+        name, value = args.get("name"), args.get("value")
+        level1, level2 = args.get("level1type", "").upper(), args.get("level2type", "").upper()
+        if name != "MS_Description" or level1 != "TABLE" or level2 not in ("", "COLUMN"):
+            where = "/".join(p for p in (args.get("level0type"), args.get("level1type"), args.get("level2type")) if p)
+            return f"extended property {name or '?'} on {where or 'the database'}"
+        table = self._table(args.get("level1name", ""), statement)
+        if level2 == "":
+            table.description = value or None
+            return None
+        column = table.columns.get(args.get("level2name", ""))
+        if column is None:
+            raise ImportFailure(f"describes {table.name}.{args.get('level2name')}, which the table does not have")
+        column.description = value or None
+        return None
 
     def alter_table(self, tree: exp.Expr, statement: splitter.Statement) -> None:
         if not isinstance(tree, exp.Alter) or str(tree.args.get("kind", "")).upper() != "TABLE":
@@ -381,10 +585,26 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
         columns: list[ColumnSchema] = []
         for position, column in enumerate(table.columns.values()):
             checks = column.checks + column_checks.get(column.name, [])
+            data_type = column.data_type
+            if column.user_type is not None:
+                alias = builder.aliases.get(column.user_type.lower())
+                if alias is not None:
+                    data_type = alias["normalized"]
+                elif column.user_type.lower() in _BUILTIN_SPECIAL_TYPES:
+                    data_type = _BUILTIN_SPECIAL_TYPES[column.user_type.lower()]
+                else:
+                    table_held.setdefault("unresolved_types", []).append({
+                        "column": column.name, "type": column.source_type or data_type,
+                        "reason": "a user-defined type no CREATE TYPE in this file defines"})
+            if column.computed is not None:
+                table_held.setdefault("computed_columns", []).append({
+                    "column": column.name, "expression": column.computed,
+                    "reason": "computed column: the model holds no expression"})
             try:
                 columns.append(ColumnSchema(
                     name=column.name,
-                    data_type=column.data_type,
+                    data_type=data_type,
+                    source_data_type=column.source_type,
                     ordinal_position=position,
                     is_primary_key=column.name in table.primary_key,
                     is_nullable=column.nullable,
@@ -530,6 +750,18 @@ def import_ddl(raw: bytes, dialect: str, file_name: str = "upload.sql") -> Impor
             if kind == "attach_partition":
                 builder.attach(statement)
                 continue
+            if kind == "type_alias":
+                builder.type_alias(statement)
+                continue
+            if kind == "add_default":
+                builder.add_default(statement)
+                continue
+            if kind == "extended_property":
+                not_imported = builder.extended_property(statement)
+                if not_imported is not None:
+                    report["not_imported"].append({"index": statement.index, "line": statement.line,
+                                                   "reason": not_imported, "statement": statement.head})
+                continue
             partitioning = None
             text_to_parse = statement.text
             if dialect == "oracle":
@@ -537,6 +769,13 @@ def import_ddl(raw: bytes, dialect: str, file_name: str = "upload.sql") -> Impor
                 text_to_parse, partitioning = normalized.text, normalized.partitioning
                 for rule, n in normalized.applied.items():
                     applied[rule] = applied.get(rule, 0) + n
+            elif dialect == "tsql":
+                tsql = sqlserver_normalizer.normalize(text_to_parse)
+                text_to_parse, partitioning = tsql.text, tsql.partitioning
+                for rule, n in tsql.applied.items():
+                    applied[rule] = applied.get(rule, 0) + n
+                if tsql.nocheck:
+                    builder.nocheck.append({"index": statement.index, "statement": statement.head})
             tree = parse_statement(text_to_parse, dialect, kind)
             if kind == "create_table":
                 builder.create_table(tree, statement, partitioning)
@@ -551,6 +790,10 @@ def import_ddl(raw: bytes, dialect: str, file_name: str = "upload.sql") -> Impor
                                        "head": statement.head, "reason": str(exc)})
     report["normalizer"] = applied
     report["types"] = builder.types
+    if builder.nocheck:
+        # Added WITH NOCHECK: the constraint is in the model, but the database
+        # did not validate the rows that existed when it was added.
+        report["not_validated"] = builder.nocheck
 
     model, held, build_failures = _to_model(builder)
     report["failures"].extend(build_failures)

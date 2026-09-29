@@ -100,8 +100,18 @@ def to_markdown(report: dict[str, Any], title: str | None = None) -> str:
                     lines.append(f"- **{_cell(table)}**: {_cell(values)}")
                 else:
                     for value in values:
-                        detail = value.get("expression") or ", ".join(value.get("columns", []))
+                        detail = value.get("expression") or ", ".join(value.get("columns", [])) \
+                            or value.get("type", "")
+                        if value.get("column"):
+                            detail = f"{value['column']} {detail}".strip()
                         lines.append(f"- **{_cell(table)}**, {key.replace('_', ' ')}: {_cell(detail)} ({value['reason']})")
+        lines.append("")
+
+    not_validated = report.get("not_validated", [])
+    if not_validated:
+        lines += [f"## Added WITH NOCHECK ({len(not_validated)})", "",
+                  "In the model, but not validated against the rows that existed when added.", ""]
+        lines += [f"- #{i['index']} {_cell(i['statement'])}" for i in not_validated]
         lines.append("")
 
     not_imported = report.get("not_imported", [])

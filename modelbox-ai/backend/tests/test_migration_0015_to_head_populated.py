@@ -196,7 +196,7 @@ async def _populate_and_upgrade(dsn: str, seeded: dict) -> None:
 
 async def test_the_database_reached_head(upgraded) -> None:
     rows = await _fetch(upgraded["dsn"], "SELECT version_num FROM alembic_version")
-    assert rows == [{"version_num": "0023_import_reconciliation"}]
+    assert rows == [{"version_num": "0024_column_source_type"}]
 
 
 async def test_models_from_before_0023_are_not_marked_imported(upgraded) -> None:
@@ -207,6 +207,16 @@ async def test_models_from_before_0023_are_not_marked_imported(upgraded) -> None
         "WHERE reconciliation_status IS NULL AND import_report IS NULL",
     )
     assert rows[0]["n"] == upgraded["models"]
+
+
+async def test_columns_from_before_0024_have_no_source_type(upgraded) -> None:
+    """0024 adds no backfill: a column that was not imported declared no type text."""
+    rows = await _fetch(
+        upgraded["dsn"],
+        "SELECT count(*) AS n, count(source_data_type) AS typed FROM entity_columns",
+    )
+    assert rows[0]["n"] > 0, "fixture sanity: the seed created no columns"
+    assert rows[0]["typed"] == 0
 
 
 async def test_0023_refuses_an_unknown_reconciliation_status(upgraded) -> None:

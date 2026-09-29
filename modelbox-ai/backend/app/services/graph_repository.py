@@ -220,6 +220,7 @@ class GraphRepository:
             row.is_unique = col.is_unique
             row.default_value = col.default_value
             row.check_expression = col.check_expression
+            row.source_data_type = col.source_data_type
             # One concept, three names, and all three are correct:
             #   ColumnSchema.references      the IR — the published contract
             #   entity_columns.reference_target

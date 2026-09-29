@@ -345,12 +345,16 @@ Import an exported DDL file into a new model (MEMBER+). Multipart form.
 |---|---|---|---|
 | `workspace_id` | query | string | yes |
 | `file` | form | file (UTF-8 or UTF-16, with or without a BOM; at most 10 MB) | yes |
-| `dialect` | form | `oracle`, `postgres` or `snowflake` | yes |
+| `dialect` | form | `oracle`, `postgres`, `tsql` (SQL Server) or `snowflake` | yes |
 | `title` | form | string | no |
 
 The response carries `model_id`, `status` (`reconciled` or `unreconciled`), the
 entity and relationship counts, and the report. A statement the parser does not
-understand is a named failure in the report, never skipped.
+understand is a named failure in the report, never skipped. Each imported
+column carries `source_data_type`, its type exactly as the file declared it
+(`VARCHAR2(255 CHAR)`, `[dbo].[Name]`), beside the normalized `data_type`; a SQL
+Server user-defined type resolves to its base type from the file's
+`CREATE TYPE … FROM`.
 
 **Responses:** `201` Model created (reconciled or not), `403` Below MEMBER,
 `413` File too large, `422` Unknown dialect, or nothing in the file could be

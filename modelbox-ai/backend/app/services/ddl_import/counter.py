@@ -30,7 +30,12 @@ _ORACLE_BLOCK = re.compile(
     re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
 _DOLLAR = re.compile(r"\$([A-Za-z_][A-Za-z_0-9]*)?\$")
-_NAME = r"((?:\"[^\"]+\"|[\w$#]+)(?:\s*\.\s*(?:\"[^\"]+\"|[\w$#]+))*)"
+_PART = r"(?:\"[^\"]+\"|\[[^\]]+\]|[\w$#]+)"
+_NAME = rf"({_PART}(?:\s*\.\s*{_PART})*)"
+_GO_LINE = re.compile(r"^[ \t]*GO(?:[ \t]+\d+)?[ \t]*$", re.IGNORECASE | re.MULTILINE)
+_EXTENDED_PROPERTY = re.compile(r"\bEXEC(?:UTE)?\s+(?:sys\s*\.\s*)?sp_addextendedproperty\b", re.IGNORECASE)
+_PARAM = re.compile(r"@(\w+)\s*=\s*N?'((?:[^']|'')*)'", re.IGNORECASE)
+_POSITIONAL = re.compile(r"N?'((?:[^']|'')*)'")
 _CREATE_TABLE = re.compile(
     r"\bCREATE\s+(?:OR\s+REPLACE\s+)?"
     r"(?:(?:GLOBAL|LOCAL|TEMP|TEMPORARY|UNLOGGED|HYBRID|TRANSIENT|VOLATILE)\s+)*"
@@ -108,10 +113,32 @@ def _mask(text: str, dialect: str) -> str:
 
 
 def _bare(name: str) -> str:
-    """The object's own name: the last dotted part, without quotes."""
-    parts = re.findall(r"\"([^\"]+)\"|([\w$#]+)", name)
-    quoted, plain = parts[-1]
-    return quoted or plain
+    """The object's own name: the last dotted part, without quotes or brackets."""
+    parts = re.findall(r"\"([^\"]+)\"|\[([^\]]+)\]|([\w$#]+)", name)
+    return next(p for p in parts[-1] if p)
+
+
+def _statement_end(masked: str, start: int, dialect: str) -> int:
+    """Where the statement that starts before ``start`` ends: ``;``, or GO in T-SQL."""
+    ends = [masked.find(";", start)]
+    if dialect == "tsql" and (go := _GO_LINE.search(masked, start)) is not None:
+        ends.append(go.start())
+    found = [end for end in ends if end != -1]
+    return min(found) if found else len(masked)
+
+
+def _extended_properties(text: str, masked: str, dialect: str) -> list[dict[str, str]]:
+    """Every sp_addextendedproperty call, its parameters read from the raw text."""
+    calls: list[dict[str, str]] = []
+    for match in _EXTENDED_PROPERTY.finditer(masked):
+        raw = text[match.end(): _statement_end(masked, match.end(), dialect)]
+        named = {key.lower(): value.replace("''", "'") for key, value in _PARAM.findall(raw)}
+        if not named:  # positional: name, value, level0type, level0name, level1type, …
+            keys = ("name", "value", "level0type", "level0name", "level1type", "level1name",
+                    "level2type", "level2name")
+            named = dict(zip(keys, (v.replace("''", "'") for v in _POSITIONAL.findall(raw)), strict=False))
+        calls.append(named)
+    return calls
 
 
 def _body(text: str, start: int) -> tuple[str, int] | None:
@@ -156,7 +183,8 @@ def _constraint_kinds(fragment: str) -> dict[str, int]:
         "foreign_keys": len(re.findall(r"\bFOREIGN\s+KEY\b", upper))
         or (0 if has_fk_keyword else len(re.findall(r"\bREFERENCES\b", upper))),
         "unique_constraints": len(re.findall(r"\bUNIQUE\b", upper)),
-        "check_constraints": len(re.findall(r"\bCHECK\s*\(", upper)),
+        # T-SQL may write CHECK NOT FOR REPLICATION ( … ).
+        "check_constraints": len(re.findall(r"\bCHECK\s*(?:NOT\s+FOR\s+REPLICATION\s*)?\(", upper)),
     }
 
 
@@ -185,8 +213,7 @@ def count(text: str, dialect: str) -> dict[str, TableCounts]:
 
     for match in _ALTER_TABLE.finditer(masked):
         name = _bare(match.group(1))
-        end = masked.find(";", match.end())
-        statement = masked[match.end(): len(masked) if end == -1 else end]
+        statement = masked[match.end(): _statement_end(masked, match.end(), dialect)]
         if (attach := _ATTACH.search(statement)) is not None:
             child = tables.setdefault(_bare(attach.group(1)), TableCounts(_bare(attach.group(1))))
             child.partition_of = name
@@ -203,12 +230,26 @@ def count(text: str, dialect: str) -> dict[str, TableCounts]:
         if literal is None or "x" not in literal.group(1):
             continue  # COMMENT ON … IS '' or IS NULL removes a description
         target = match.group(2)
-        parts = re.findall(r"\"([^\"]+)\"|([\w$#]+)", target)
-        names = [q or p for q, p in parts]
+        parts = re.findall(r"\"([^\"]+)\"|\[([^\]]+)\]|([\w$#]+)", target)
+        names = [q or b or p for q, b, p in parts]
         table_name = names[-1] if match.group(1).upper() == "TABLE" else names[-2]
         table = tables.setdefault(table_name, TableCounts(table_name))
         key = "table_descriptions" if match.group(1).upper() == "TABLE" else "column_descriptions"
         table.counts[key] += 1
+
+    # SQL Server keeps descriptions as MS_Description extended properties on a
+    # table (level 1) or one of its columns (level 2). Other properties and
+    # levels are not descriptions and are not counted.
+    for call in _extended_properties(text, masked, dialect):
+        if call.get("name") != "MS_Description" or call.get("level1type", "").upper() != "TABLE":
+            continue
+        if not call.get("value"):
+            continue
+        level2 = call.get("level2type", "").upper()
+        if level2 not in ("", "COLUMN"):
+            continue
+        table = tables.setdefault(call.get("level1name", ""), TableCounts(call.get("level1name", "")))
+        table.counts["column_descriptions" if level2 == "COLUMN" else "table_descriptions"] += 1
     return tables
 
 
