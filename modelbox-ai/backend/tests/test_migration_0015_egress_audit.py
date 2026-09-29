@@ -27,6 +27,8 @@ from __future__ import annotations
 import subprocess
 import time
 import uuid
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
@@ -49,6 +51,7 @@ from tests.test_migration_0013_populated import (
     _need_docker,
     _run_helper,
     _upgrade_to,
+    release_checkout,
 )
 
 PRE_LEDGER_REVISION = "0014_add_suggested_metrics"
@@ -110,7 +113,13 @@ def postgres_dsn() -> str:
 
 
 @pytest.fixture(scope="module")
-def populated_then_migrated(postgres_dsn: str) -> str:
+def release_worktree(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """The models written at 0014 come from the code that shipped with that schema."""
+    yield from release_checkout(tmp_path_factory)
+
+
+@pytest.fixture(scope="module")
+def populated_then_migrated(postgres_dsn: str, release_worktree: Path) -> str:
     """Migrate to 0014, put real data in, *then* apply 0015.
 
     The ordering is the whole point of the word "populated". Applying 0015 to an
@@ -119,7 +128,7 @@ def populated_then_migrated(postgres_dsn: str) -> str:
     question cannot be asked of an empty schema.
     """
     _upgrade_to(BACKEND, postgres_dsn, PRE_LEDGER_REVISION)
-    seeded = _run_helper(BACKEND, postgres_dsn, "seed-and-export")
+    seeded = _run_helper(release_worktree, postgres_dsn, "seed-and-export")
     assert seeded["models"], "fixture sanity: nothing was seeded before the upgrade"
     _upgrade_to(BACKEND, postgres_dsn, LEDGER_REVISION)
     return postgres_dsn

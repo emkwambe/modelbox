@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     audit,
     auth,
     connectors,
+    ddl_import,
     egress,
     export_status,
     jobs,
@@ -34,5 +35,6 @@ api_router.include_router(audit.router)
 api_router.include_router(scim.router)
 api_router.include_router(egress.router)
 api_router.include_router(export_status.router)
+api_router.include_router(ddl_import.router)
 
 __all__ = ["api_router"]

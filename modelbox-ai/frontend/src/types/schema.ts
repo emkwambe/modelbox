@@ -201,6 +201,59 @@ export interface ArtifactStatusInfo {
   reason: string;
 }
 
+/**
+ * A dialect a DDL file can be imported from, and what its import has been
+ * tested against. Served by `GET /import/dialects`; the UI keeps no copy.
+ */
+export interface ImportDialectInfo {
+  dialect: string;
+  label: string;
+  evidence: 'genuine export' | 'documentation-derived' | string;
+  tool: string;
+}
+
+export type ImportCounts = Record<string, number>;
+
+export interface ImportGap {
+  table: string;
+  kind: string;
+  source: number;
+  imported: number;
+  statements: { index: number; line: number; statement: string }[];
+}
+
+export interface ImportFailureInfo {
+  statement: number | null;
+  line: number | null;
+  head?: string;
+  reason: string;
+}
+
+/** The reconciliation report stored on an imported model (abridged). */
+export interface ImportReport {
+  file: string;
+  dialect: string;
+  evidence: string;
+  encoding: string | null;
+  status: 'reconciled' | 'unreconciled';
+  failures: ImportFailureInfo[];
+  not_imported: { index: number; line: number; reason: string; statement: string }[];
+  reconciliation?: {
+    source: { tables: ImportCounts; partitions: ImportCounts };
+    imported: { tables: ImportCounts; partitions: ImportCounts };
+    gaps: ImportGap[];
+  };
+}
+
+export interface ImportResponse {
+  model_id: string;
+  title: string;
+  status: 'reconciled' | 'unreconciled';
+  entities: number;
+  relationships: number;
+  report: ImportReport;
+}
+
 /** One row of the egress ledger (D4). Metadata only — never the prompt text. */
 export interface EgressEvent {
   egress_id: string;

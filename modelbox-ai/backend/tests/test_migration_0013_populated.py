@@ -32,6 +32,7 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -95,6 +96,25 @@ def _add_baseline_worktree(target: Path, tag: str = BASELINE_TAG) -> None:
     )
     if result.returncode != 0:
         _unavailable(f"the {tag} worktree cannot be created: {result.stderr[-300:]}")
+
+
+# The release whose code seeds models into a database at an older revision.
+# From 0023 the current DataModel declares columns an older data_models table
+# does not have, so rows written there must come from code whose ORM matches
+# that schema. v1.11.1 is the last release before 0023.
+SEED_RELEASE_TAG = "v1.11.1"
+
+
+def release_checkout(tmp_path_factory: pytest.TempPathFactory, tag: str = SEED_RELEASE_TAG) -> Iterator[Path]:
+    """Yield the backend of a worktree at ``tag``; for a module-scoped fixture."""
+    target = tmp_path_factory.mktemp("release") / tag.replace(".", "_")
+    _add_baseline_worktree(target, tag=tag)
+    try:
+        yield target / "modelbox-ai" / "backend"
+    finally:
+        # Cleanup: raising here would replace the test's own failure.
+        subprocess.run(["git", "worktree", "remove", "--force", str(target)],
+                       cwd=REPO, capture_output=True, check=False)
 
 
 # ---------------------------------------------------------------------------

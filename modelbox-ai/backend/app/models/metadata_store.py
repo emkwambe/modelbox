@@ -215,6 +215,10 @@ class DataModel(Base):
             "current_paradigm IN ('3NF', 'KIMBALL', 'DATA_VAULT', 'OBT')",
             name="ck_data_models_current_paradigm",
         ),
+        CheckConstraint(
+            "reconciliation_status IN ('reconciled', 'unreconciled')",
+            name="ck_data_models_reconciliation_status",
+        ),
     )
 
     model_id: Mapped[uuid.UUID] = _uuid_pk()
@@ -239,6 +243,11 @@ class DataModel(Base):
     # migration 0014 legitimately has none — an empty list and "never persisted"
     # are the same thing here, and inventing a distinction would be worse.
     suggested_metrics: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Set only on a model imported from a DDL file (migration 0023): whether
+    # the import reconciled against counts taken from the file independently
+    # of the parser, and the full report. NULL means not imported.
+    reconciliation_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    import_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.current_timestamp(),

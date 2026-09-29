@@ -98,4 +98,8 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("DELETE", f"{_V1}/scim/v2/Users/{{user_id}}"): SCIM,
     # --- export status (a statement about the build; needs sign-in) --------
     ("GET", f"{_V1}/export/status"): AUTHENTICATED,
+    # --- offline DDL import (Sprint 8) ---------------------------------------
+    ("GET", f"{_V1}/import/dialects"): AUTHENTICATED,
+    ("POST", f"{_V1}/import/ddl"): "MEMBER",
+    ("GET", f"{_V1}/model/{{model_id}}/import-report"): "VIEWER",
 }
