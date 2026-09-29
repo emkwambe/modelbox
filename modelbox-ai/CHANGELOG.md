@@ -5,8 +5,10 @@ steps are in `docs/RELEASE_NOTES_v<version>.md`; this file is the index.
 
 ## v1.11.0
 
-Tagged from `main` after this file lands; the merge that carries the work is
-`d81f569` (pull request #9). Full notes:
+Tagged 2026-09-29 (UTC) at `d5822f1` on `main`, and published to GHCR by the
+gated release workflow (run 36511971512) as `ghcr.io/emkwambe/modelbox-backend`
+and `modelbox-frontend`, `1.11.0`. The merge that carries the work is `d81f569`
+(pull request #9). Full notes:
 [`docs/RELEASE_NOTES_v1.11.0.md`](docs/RELEASE_NOTES_v1.11.0.md).
 
 Secure by default, and proven against the running appliance. It carries Sprints

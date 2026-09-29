@@ -53,6 +53,12 @@ _OVERRIDES = {
 }
 _COMPOSE_PROFILES = {"insecure": ["--profile", "airgap"]}
 
+# Layered on every profile, after its own override: `BLACKBOX_EXTRA_COMPOSE`,
+# paths relative to modelbox-ai/ separated by os.pathsep. The Verify Release
+# workflow sets it to tests/blackbox/compose/published.yml, so the same checks
+# run against the images a release published instead of images built here.
+_EXTRA = [ROOT / p for p in os.environ.get("BLACKBOX_EXTRA_COMPOSE", "").split(os.pathsep) if p]
+
 DEV_EMAIL = "dev@modelbox.ai"
 DEV_PASSWORD = "password123"
 SHIPPED_JWT_SECRET = "dev-secret-change-me"
@@ -115,7 +121,7 @@ def read_env() -> dict[str, str]:
 
 def compose_command(*args: str, profile: str = PROFILE) -> list[str]:
     files: list[str] = ["-f", str(BASE_COMPOSE)]
-    for override in _OVERRIDES[profile]:
+    for override in [*_OVERRIDES[profile], *_EXTRA]:
         files += ["-f", str(override)]
     return [
         "docker", "compose", "--env-file", str(ENV_FILE), *files,

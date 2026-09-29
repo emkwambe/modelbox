@@ -1,32 +1,33 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `release/v1.11.0`, branched from `main` at `d81f569`.
-This file is rewritten at every stop, merge, deploy and tag; a figure here is
-the output of a command run for it, not a copy from another document.*
+*Regenerated 2026-09-29 on `sprint-7/close`, branched from `main` at `d5822f1`,
+the `v1.11.0` tag. This file is rewritten at every stop, merge, deploy and tag;
+a figure here is the output of a command run for it, not a copy from another
+document.*
 
 ## Where the code is
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `d81f569` | Sprints 5, 6, 6.5 and 7 merged from `sprint-7/secure-by-default` by pull request #9, as a merge commit; CI green (run 36508539613, ten jobs) |
-| `sprint-7/secure-by-default` | `49191cc` | kept after the merge: the Proof Log, register and verification records cite its commits and runs |
-| `release/v1.11.0` | from `d81f569` | version stamps to 1.11.0, final release notes, CHANGELOG; pull request into `main` |
+| `main` | `d5822f1` | release prep merged (#10) on top of Sprints 5–7 (#9, `d81f569`); CI green (run 36511210046, ten jobs) |
+| `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36511971512: gate, backend and frontend images all green) |
+| `sprint-7/secure-by-default` | `49191cc` | kept: the Proof Log, register and verification records cite its commits and runs |
+| `sprint-7/close` | from `d5822f1` | the Verify Release workflow and these records; pull request into `main` |
 
 Migration head: `0022_append_only_ledgers`.
 
 ## Versions
 
-- Latest tag on the remote: **`v1.9.0`**.
-- Version stamp in the code on this branch: **1.11.0**
-  (`scripts/check_versions.py`: all stamps agree). `v1.10.0` was never tagged
-  and is superseded by v1.11.0.
-- Next: the owner tags **`v1.11.0`** from `main` after the release-prep merge,
-  and `release.yml` publishes it only if that commit is on `main` with a green
-  CI run.
+- Latest tag on the remote: **`v1.11.0`**, at `d5822f1`.
+- Version stamp in the code: **1.11.0** (`scripts/check_versions.py`: all
+  stamps agree).
+- Published images: `ghcr.io/emkwambe/modelbox-backend` and
+  `ghcr.io/emkwambe/modelbox-frontend`, `1.11.0` (also `1.11` and `latest`).
 
 ## Status
 
 Not for deployment on a shared network before v1.11.0 (README, Status).
+v1.11.0 is now released.
 
 ## Repository contents
 
@@ -51,7 +52,9 @@ re-specified to OIDC and stays NOT MET until its UI login flow.
 Breaking changes and upgrade steps: `docs/RELEASE_NOTES_v1.11.0.md`. Index of
 versions: `CHANGELOG.md`.
 
-## After the tag
+## Published-image verification
 
-The black-box suite runs against the images `release.yml` publishes, pulled on
-a clean machine.
+`.github/workflows/verify-release.yml` runs the black-box suite against the
+images a release published, pulled on a runner that never built them. It runs
+after every successful release, and on demand; v1.11.0's run is dispatched once
+this workflow is on `main`, and its result is in that workflow's run history.

@@ -1,6 +1,6 @@
 # ModelBox AI — v1.11.0 Release Notes
 
-**Tag:** `v1.11.0`, cut from `main` after the release-prep merge  ·  **Carries:**
+**Tag:** `v1.11.0`, at `d5822f1` on `main`; images published by the gated release workflow  ·  **Carries:**
 Sprints 5, 6, 6.5 and 7, merged to `main` as `d81f569` (pull request #9, CI
 green)  ·  **Supersedes:** v1.10.0, which was never tagged.
 
