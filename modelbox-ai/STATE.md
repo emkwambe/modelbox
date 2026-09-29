@@ -1,6 +1,6 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-28 on `sprint-7/secure-by-default` at `b6686f4`. This file is rewritten at
+*Regenerated 2026-09-28 on `sprint-7/secure-by-default` at `ac1e36a`. This file is rewritten at
 every stop, merge, deploy and tag; a figure here is the output of a command run
 for it, not a copy from another document.*
 
@@ -10,7 +10,7 @@ for it, not a copy from another document.*
 | :-- | :-- | :-- |
 | `main` | `49d268c` | README and home page claims narrowed (#6); `dbt_date` 0.21.0 lock (#7) |
 | `sprint/6-product-experience` | `8001975` | Sprints 5, 6 and 6.5; never merged to `main` |
-| `sprint-7/secure-by-default` | `b6686f4` | cut from `8001975`, `origin/main` merged in; pushed, CI green at `b6686f4` (run 36499325344, ten jobs) |
+| `sprint-7/secure-by-default` | `ac1e36a` | cut from `8001975`, `origin/main` merged in; pushed, CI green at `ac1e36a` (run 36503016248, ten jobs); pull request into `main` not yet opened |
 
 Migration head: `0022_append_only_ledgers`.
 
@@ -50,8 +50,11 @@ upgraded database, an air-gapped appliance on a network with no route out, and
 a test-only insecure profile against which each check covering a weakness that
 profile reintroduces must fail.
 
-CI runs per commit on ubuntu-24.04. Required on `main`: backend tests, Ruff,
-mypy, the leak guard, the fidelity harness, migrations, version consistency,
-and the frontend type check, build and lint. A release is published only for
-a tag whose commit is on `main` with a green CI run. Breaking changes and
-upgrade steps are in `docs/RELEASE_NOTES_v1.11.0.draft.md`.
+The Security FAQ, Proof Log (PL-015 to PL-017 added) and acceptance register
+state what these tests prove: G10 and G11 are MET against the running
+appliance, D8 is MET, and G8 is re-specified to OIDC and stays NOT MET until
+its UI login flow.
+
+CI runs per commit on ubuntu-24.04. A release is published only for a tag
+whose commit is on `main` with a green CI run. Breaking changes and upgrade
+steps are in `docs/RELEASE_NOTES_v1.11.0.draft.md`.
