@@ -61,7 +61,7 @@ export type ContractFormat = 'opendatacontract' | 'avro' | 'protobuf';
 
 export type SemanticEngine = 'cube' | 'lookml' | 'metricflow';
 
-export type DictionaryFormat = 'markdown' | 'html' | 'json';
+export type DictionaryFormat = 'markdown' | 'html' | 'json' | 'csv';
 
 // ---------------------------------------------------------------------------
 // Core domain shapes
