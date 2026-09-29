@@ -10,7 +10,12 @@ import ModelsPage from './page';
 const { listModels } = vi.hoisted(() => ({ listModels: vi.fn() }));
 vi.mock('@/lib/api', () => ({ listModels }));
 
-beforeEach(() => listModels.mockReset());
+// A block body, not `() => listModels.mockReset()`: mockReset returns the
+// mock, and a function returned from beforeEach is run as a teardown, which
+// called listModels once more after each test.
+beforeEach(() => {
+  listModels.mockReset();
+});
 
 describe('the model list', () => {
   it('links each model to its canvas', async () => {
@@ -32,10 +37,7 @@ describe('the model list', () => {
   });
 
   it('says so when the list cannot be loaded', async () => {
-    // Rejected when called, not when the test is set up (see Step 3's verification record).
-    listModels.mockImplementation(async () => {
-      throw new Error('down');
-    });
+    listModels.mockRejectedValue(new Error('down'));
     render(<ModelsPage />);
     expect(await screen.findByRole('alert')).toHaveTextContent('down');
   });

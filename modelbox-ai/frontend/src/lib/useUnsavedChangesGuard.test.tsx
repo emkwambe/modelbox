@@ -28,7 +28,9 @@ function follow(name: string): boolean {
   return event.defaultPrevented;
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('useUnsavedChangesGuard', () => {
   it('asks before following an in-app link, and stays when declined', () => {

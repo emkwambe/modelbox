@@ -94,7 +94,9 @@ function expectedPayload() {
   };
 }
 
-beforeEach(() => useCanvasStore.getState().reset());
+beforeEach(() => {
+  useCanvasStore.getState().reset();
+});
 
 describe('a loaded model saves back as the same graph', () => {
   it('sends the whole graph unchanged, lists and order included', () => {

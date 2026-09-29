@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `sprint-8/step-2b-sqlserver`, branched from
-`main` at `930a07f`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-29 on `sprint-8/step-3-journey`, branched from
+`main` at `afba4d6`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,11 +9,11 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `930a07f` | offline DDL import for Oracle, PostgreSQL and Snowflake (#17), on the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `afba4d6` | SQL Server import and original type text (#18), on the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36516574170: gate, backend and frontend images all green) |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-8/step-2b-sqlserver` | this branch | SQL Server import and original type text (below) |
-| `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-8/step-3-journey` | this branch | keys and constraints in the model, reopening saved models, DDL export with named gaps (below) |
+| `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
 ## Offline DDL import (on `main`)
 
@@ -28,7 +28,25 @@ import with zero gaps against their catalog manifests (Pagila as 15 tables and
 55 partitions); the Snowflake fixture fails by name on its HYBRID TABLE and is
 saved unreconciled.
 
-## In progress on this branch: SQL Server import
+## In progress on this branch: keys, constraints and the saved-model journey
+
+Keys and constraints have one representation: each entity's primary key (in
+key order), UNIQUE and CHECK constraints, and each relationship's column
+pairs, so composite keys, composite foreign keys and multi-column constraints
+are in the model; the column flags are derived from them. Migration 0025
+moves stored models to that representation, keeps what it cannot convert
+exactly (a relationship saved without columns stays, unresolved) and lists it
+per model; it also adds each imported column's DEFAULT as declared. The DDL
+importer, the linter (`UNRESOLVED_RELATIONSHIP`), and every exporter read it;
+DDL export states composite keys and foreign keys, UNIQUE, CHECK and
+`COMMENT ON`, and names each gap. Saved models have an address,
+`/canvas/<id>`, and a list at `/models`; a relationship's columns are chosen
+when it is drawn; leaving unsaved changes asks first. The round trip (import,
+save, reopen, export PostgreSQL DDL, re-import) matches the catalog manifests
+of HR, CO and Pagila exactly, and AdventureWorks except for its ten computed
+columns, each a named gap.
+
+## SQL Server import (on `main`)
 
 SQL Server joins the import. A script is split at `GO`; `SET` and `USE` are
 listed, procedures are listed, and a batch a skip rule matches cannot carry a
@@ -58,7 +76,7 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0024_column_source_type` on this branch (`0023_import_reconciliation` on `main`).
+Migration head: `0025_keys_and_constraints` on this branch (`0024_column_source_type` on `main`).
 
 ## Versions
 
