@@ -1,0 +1,26 @@
+name: Release Dry Run
+
+# Builds both images through images.yml with push: false whenever the release
+# path changes, so a change to release.yml, images.yml or a Dockerfile is
+# exercised before a tag ever depends on it. Nothing is published: no gate is
+# needed because nothing leaves the runner.
+on:
+  push:
+    branches: [ "**" ]
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/images.yml
+      - .github/workflows/release-dry-run.yml
+      - modelbox-ai/docker/Dockerfile.backend
+      - modelbox-ai/docker/Dockerfile.frontend
+  workflow_dispatch:
+
+jobs:
+  build-only:
+    name: Build images (no push)
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/images.yml
+    with:
+      push: false
