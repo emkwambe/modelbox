@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `sprint-8/step-2a-import-core`, branched from
-`main` at `ce2233e`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-29 on `sprint-8/step-2b-sqlserver`, branched from
+`main` at `930a07f`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,13 +9,13 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `ce2233e` | PostgreSQL and Snowflake DDL fixtures (#16), on the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `930a07f` | offline DDL import for Oracle, PostgreSQL and Snowflake (#17), on the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36516574170: gate, backend and frontend images all green) |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-8/step-2a-import-core` | this branch | offline DDL import (below) |
-| `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-8/step-2b-sqlserver` | this branch | SQL Server import and original type text (below) |
+| `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
-## In progress on this branch: offline DDL import
+## Offline DDL import (on `main`)
 
 An exported DDL file (Oracle, PostgreSQL, or Snowflake as documentation-derived)
 is uploaded at `/import` and becomes a model, with nothing connected to. Every
@@ -26,14 +26,30 @@ parser returns as an opaque `Command` is a named failure. Partitions are
 metadata of their parent. The genuine Pagila, Oracle HR and Oracle CO fixtures
 import with zero gaps against their catalog manifests (Pagila as 15 tables and
 55 partitions); the Snowflake fixture fails by name on its HYBRID TABLE and is
-saved unreconciled. At `492c70f` (run 36544774927) both pytest jobs report 1304
-passed, 63 skipped, 24 xfailed, with identical skip sets.
+saved unreconciled.
+
+## In progress on this branch: SQL Server import
+
+SQL Server joins the import. A script is split at `GO`; `SET` and `USE` are
+listed, procedures are listed, and a batch a skip rule matches cannot carry a
+table statement with it. A normalizer removes the physical clauses SSMS writes
+(ROWGUIDCOL, NOT FOR REPLICATION, index options, filegroups, TEXTIMAGE_ON,
+clustering, key order, XML schema collections), keeps a partition scheme as
+metadata, and records `WITH NOCHECK`; each rule has a case and a negative
+control, and a clustered primary key with options on `[PRIMARY]` is a named
+regression test. Constraints added by `ALTER TABLE`, defaults added by
+`ADD … DEFAULT … FOR`, `MS_Description` properties and `CREATE TYPE … FROM`
+aliases are in the model; other extended properties are listed. Every imported
+column in every dialect keeps its declared type text in `source_data_type`
+(migration 0024), carried through save and reload. AdventureWorks imports with
+zero gaps against its catalog manifest (71 tables, 486 columns, 90 foreign keys,
+89 checks, 556 descriptions) in UTF-8 and UTF-16, each with and without a BOM.
 
 ## DDL fixtures (on `main`)
 
 `backend/tests/fixtures/ddl/` holds the importer's evidence base. Oracle
 (`DBMS_METADATA`, HR and CO, populated), SQL Server (SMO, AdventureWorks2022)
-and, on this branch, PostgreSQL (`pg_dump` from the appliance's own 16.15
+and PostgreSQL (`pg_dump` from the appliance's own 16.15
 image, Pagila) are genuine tool output: the DDL Fixtures workflow regenerates
 them in fresh containers and fails unless the committed copies match. Each
 has a manifest counted from its catalog views. Snowflake is the exception:
@@ -42,7 +58,7 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0023_import_reconciliation` on this branch (`0022_append_only_ledgers` on `main`).
+Migration head: `0024_column_source_type` on this branch (`0023_import_reconciliation` on `main`).
 
 ## Versions
 

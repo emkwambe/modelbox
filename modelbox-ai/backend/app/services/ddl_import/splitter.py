@@ -12,6 +12,9 @@ Every statement is kept and classified, never dropped:
   Oracle's end at a line holding only ``/``, PostgreSQL's and Snowflake's at
   the ``;`` after their ``$$`` body. They are not imported, and the report
   lists them;
+
+T-SQL is split into batches at ``GO`` lines instead: each batch is one
+statement, which is how SSMS and SMO write them and how SQL Server runs them.
 * ``sql``: everything else, for the importer to classify and parse.
 """
 
@@ -41,9 +44,15 @@ SNOWFLAKE_PROCEDURAL = re.compile(
     r"^CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:PROCEDURE|FUNCTION|TASK)\b",
     re.IGNORECASE,
 )
+TSQL_PROCEDURAL = re.compile(
+    r"^CREATE\s+(?:OR\s+ALTER\s+)?(?:PROC(?:EDURE)?|FUNCTION|TRIGGER)\b",
+    re.IGNORECASE,
+)
+# SSMS and SMO end each batch with a line holding only GO (optionally a count).
+_GO = re.compile(r"^[ \t]*GO(?:[ \t]+\d+)?[ \t]*$", re.IGNORECASE | re.MULTILINE)
 _DOLLAR_TAG = re.compile(r"\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$")
 
-DIALECTS = ("oracle", "postgres", "snowflake")
+DIALECTS = ("oracle", "postgres", "snowflake", "tsql")
 _PROCEDURAL = {"postgres": POSTGRES_PROCEDURAL, "snowflake": SNOWFLAKE_PROCEDURAL}
 
 
@@ -122,9 +131,28 @@ def _scan_to_slash_line(text: str, i: int) -> tuple[int, int]:
     return len(text), len(text)
 
 
+def _split_batches(text: str) -> list[Statement]:
+    """T-SQL: each batch between GO lines is one statement, as SQL Server runs it."""
+    statements: list[Statement] = []
+    start = 0
+    for boundary in [*_GO.finditer(text), None]:
+        end = boundary.start() if boundary is not None else len(text)
+        chunk = text[start:end]
+        offset = _skip_ws_and_comments(chunk, 0)
+        body = chunk[offset:].strip()
+        if body:
+            line = text.count("\n", 0, start + offset) + 1
+            kind = "procedural" if TSQL_PROCEDURAL.match(body) else "sql"
+            statements.append(Statement(len(statements) + 1, line, body, kind))
+        start = boundary.end() if boundary is not None else len(text)
+    return statements
+
+
 def split(text: str, dialect: str) -> list[Statement]:
     if dialect not in DIALECTS:
         raise ValueError(f"no statement splitter for dialect {dialect!r}")
+    if dialect == "tsql":
+        return _split_batches(text)
     statements: list[Statement] = []
     i, n = 0, len(text)
     while True:

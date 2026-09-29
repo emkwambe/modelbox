@@ -379,6 +379,9 @@ class EntityColumn(Base):
     # Named reference_target in the database because REFERENCES is a reserved
     # SQL word; the IR field keeps its name.
     reference_target: Mapped[str | None] = mapped_column(String(257), nullable=True)
+    # ColumnSchema.source_data_type: the type as an imported file declared it
+    # (migration 0024). NULL for a column that was not imported.
+    source_data_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     entity: Mapped[ModelEntity] = relationship(back_populates="columns")
 

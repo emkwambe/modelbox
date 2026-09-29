@@ -13,6 +13,10 @@ fixture, totals and table by table:
 Partitions are metadata of their parent: Pagila reconciles as 15 tables and
 55 partitions, not 70 tables, and the model has 15 entities.
 
+AdventureWorks, scripted by SMO, is also read off the model itself (keys,
+defaults and descriptions against the catalog), in every encoding SSMS can
+save. Every column in every genuine fixture keeps its declared type verbatim.
+
 The documentation-derived Snowflake fixture is held to a different standard:
 the pinned parser does not understand its HYBRID TABLE, and the import must
 say so by name and be saved as unreconciled, not report success without it.
@@ -22,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +38,7 @@ from app.services.ddl_import.importer import ImportResult, import_ddl
 logging.getLogger("sqlglot").setLevel(logging.CRITICAL)
 
 DDL = Path(__file__).resolve().parent / "fixtures" / "ddl"
-GENUINE = [("oracle", "hr"), ("oracle", "co"), ("postgres", "pagila")]
+GENUINE = [("oracle", "hr"), ("oracle", "co"), ("postgres", "pagila"), ("tsql", "adventureworks")]
 
 
 def _manifest(dialect: str, stem: str) -> dict[str, Any]:
@@ -74,7 +79,9 @@ def test_the_independent_counter_agrees_with_the_catalog(dialect: str, stem: str
     per_table = counter.count((DDL / dialect / f"{stem}.sql").read_text(encoding="utf-8"), dialect)
     assert counter.totals(per_table) == _catalog_totals(manifest)
     for table in manifest["tables"]:
-        assert per_table[table["name"]].counts == {k: int(table[k]) for k in counter.KINDS}, table["name"]
+        # SQL Server's catalog names a table Schema.Table; the counter keys by the bare name.
+        bare = table["name"].split(".")[-1]
+        assert per_table[bare].counts == {k: int(table[k]) for k in counter.KINDS}, table["name"]
 
 
 @pytest.mark.parametrize(("dialect", "stem"), GENUINE, ids=[s for _, s in GENUINE])
@@ -116,6 +123,94 @@ def test_oracle_nullability_is_bounded_by_the_catalog(stem: str) -> None:
         non_key = sum(1 for c in entity.columns if not c.is_nullable and not c.is_primary_key)
         every = sum(1 for c in entity.columns if not c.is_nullable)
         assert non_key <= catalog[entity.entity_name] <= every, entity.entity_name
+
+
+# --- AdventureWorks, from SQL Server's own scripting ----------------------------------
+
+def test_adventureworks_manifest_is_the_catalog_the_step_names() -> None:
+    """The headline figures, pinned: 71 tables, 486 columns, 90 foreign keys,
+    89 checks and 556 descriptions, from sys.* catalog views."""
+    counts = _manifest("tsql", "adventureworks")["counts"]
+    assert (counts["tables"], counts["columns"], counts["foreign_keys"], counts["check_constraints"],
+            counts["table_descriptions"] + counts["column_descriptions"]) == (71, 486, 90, 89, 556)
+    assert _catalog_totals(_manifest("tsql", "adventureworks"))["tables"]["count"] == counts["tables"]
+
+
+def test_adventureworks_model_carries_the_catalogs_keys_defaults_and_descriptions() -> None:
+    """Read off the model itself, not the importer's counts: every foreign key
+    is a relationship or held by name, every default constraint is a column
+    default, and every MS_Description is a description."""
+    counts = _manifest("tsql", "adventureworks")["counts"]
+    result = _import("tsql", "adventureworks")
+    model = result.model
+    assert model is not None
+    held_fks = sum(len(t.get("foreign_keys", [])) for t in result.report["held"].values())
+    assert len(model.relationships) + held_fks == counts["foreign_keys"]
+    assert sum(1 for e in model.entities for c in e.columns if c.default_value is not None) \
+        == counts["default_constraints"]
+    assert sum(1 for e in model.entities if e.description) == counts["table_descriptions"]
+    assert sum(1 for e in model.entities for c in e.columns if c.description) == counts["column_descriptions"]
+
+
+ENCODINGS = [
+    pytest.param("utf-8", "UTF-8 without BOM", id="utf-8"),
+    pytest.param("utf-8-sig", "UTF-8 with BOM", id="utf-8-bom"),
+    pytest.param("utf-16", "UTF-16 LE with BOM", id="utf-16-bom"),
+    pytest.param("utf-16-le", "UTF-16-LE without BOM", id="utf-16-le"),
+]
+
+
+@pytest.mark.parametrize(("codec", "label"), ENCODINGS)
+def test_adventureworks_imports_identically_in_every_encoding(codec: str, label: str) -> None:
+    """SSMS saves scripts as UTF-16 by default; the model must not depend on it."""
+    text = (DDL / "tsql" / "adventureworks.sql").read_text(encoding="utf-8")
+    result = import_ddl(text.encode(codec), "tsql", "adventureworks.sql")
+    baseline = _import("tsql", "adventureworks")
+    assert result.encoding == label
+    assert result.status == "reconciled"
+    assert result.model is not None and baseline.model is not None
+    assert result.model.model_dump() == baseline.model.model_dump()
+    assert {k: v for k, v in result.report.items() if k != "encoding"} == \
+        {k: v for k, v in baseline.report.items() if k != "encoding"}
+
+
+# --- Original type text ------------------------------------------------------------
+
+_NOT_A_TYPE = re.compile(r"\b(?:NOT|NULL|DEFAULT|CONSTRAINT|IDENTITY|PRIMARY|REFERENCES|COLLATE)\b", re.IGNORECASE)
+
+
+def _declared_verbatim(text: str, column: str, source: str) -> bool:
+    """Whether the file declares ``column`` followed by exactly ``source``: the
+    whole type, ending where the declaration's next word or comma begins."""
+    if _NOT_A_TYPE.search(source):
+        return False
+    name = re.escape(column)
+    pattern = rf'(?:"{name}"|\[{name}\]|(?<![\w"\[]){name})\s+{re.escape(source)}(?=[\s,)])'
+    return re.search(pattern, text) is not None
+
+
+def test_negative_control_a_truncated_or_overlong_type_is_not_verbatim() -> None:
+    text = (DDL / "oracle" / "hr.sql").read_text(encoding="utf-8")
+    assert _declared_verbatim(text, "EMAIL", "VARCHAR2(25)")
+    assert not _declared_verbatim(text, "EMAIL", "VARCHAR2")
+    assert not _declared_verbatim(text, "EMAIL", "VARCHAR2(25) CONSTRAINT")
+    assert not _declared_verbatim(text, "EMAIL", "VARCHAR2(2")
+
+
+@pytest.mark.parametrize(("dialect", "stem"), GENUINE, ids=[s for _, s in GENUINE])
+def test_every_column_keeps_its_type_exactly_as_the_file_declares_it(dialect: str, stem: str) -> None:
+    text = (DDL / dialect / f"{stem}.sql").read_text(encoding="utf-8")
+    model = _import(dialect, stem).model
+    assert model is not None
+    wrong = []
+    for entity in model.entities:
+        for column in entity.columns:
+            if column.data_type == "COMPUTED":  # declares no type; its expression is held
+                assert column.source_data_type is None
+                continue
+            if column.source_data_type is None or not _declared_verbatim(text, column.name, column.source_data_type):
+                wrong.append((entity.entity_name, column.name, column.source_data_type))
+    assert wrong == []
 
 
 def test_the_documentation_derived_snowflake_fixture_fails_by_name_and_is_unreconciled() -> None:

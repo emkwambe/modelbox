@@ -95,6 +95,8 @@ export interface Column {
   is_unique?: boolean;
   default_value?: string | null;
   check_expression?: string | null;
+  /** The type exactly as an imported DDL file declared it; null if not imported. */
+  source_data_type?: string | null;
 }
 
 export interface Entity {
