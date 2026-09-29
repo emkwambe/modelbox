@@ -7,7 +7,8 @@ MODELBOX_MIGRATION_STRICT=1, where it fails instead (CI runs it strict).
 the way they did, then the database is upgraded to head and read back with raw
 SQL, never through the ORM (register standard 1):
 
-* at 0015, real models (the gold graphs) and egress-ledger rows;
+* at 0015, real models (the gold graphs), written by the v1.11.1 release's
+  own code from a worktree at its tag, and egress-ledger rows;
 * at 0019, audit rows with and without a workspace (no ``scope`` column yet),
   a user, and an API key (no ``role_cap`` column yet);
 * then head, confirmed by reading ``alembic_version`` back (`_upgrade_to`).
@@ -36,6 +37,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 from types import ModuleType
 
 import pytest
@@ -58,9 +60,16 @@ from tests.test_migration_0013_populated import (
     _need_docker,
     _run_helper,
     _upgrade_to,
+    release_checkout,
 )
 
 MIGRATION_0021 = BACKEND / "alembic" / "versions" / "0021_audit_scope_and_owner.py"
+
+
+@pytest.fixture(scope="module")
+def release_worktree(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """The models written at 0015 come from the code that shipped with that schema."""
+    yield from release_checkout(tmp_path_factory)
 
 
 def _load_0021() -> ModuleType:
@@ -141,16 +150,16 @@ def _database(server: str, name: str) -> str:
 
 
 @pytest.fixture(scope="module")
-def upgraded(server: str) -> dict:
+def upgraded(server: str, release_worktree: Path) -> dict:
     dsn = _database(server, "populated")
-    seeded: dict = {}
+    seeded: dict = {"release_worktree": release_worktree}
     asyncio.run(_populate_and_upgrade(dsn, seeded))
     return {"dsn": dsn, "models": len(seeded["models"])}
 
 
 async def _populate_and_upgrade(dsn: str, seeded: dict) -> None:
     _upgrade_to(BACKEND, dsn, "0015_add_egress_audit")
-    seeded.update(_run_helper(BACKEND, dsn, "seed-and-export"))
+    seeded.update(_run_helper(seeded["release_worktree"], dsn, "seed-and-export"))
     assert seeded["models"], "fixture sanity: nothing was seeded"
     for i in range(3):
         await _execute(

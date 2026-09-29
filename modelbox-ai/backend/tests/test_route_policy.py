@@ -107,9 +107,9 @@ def _check_policy(app: FastAPI, table: dict[tuple[str, str], str]) -> None:
 
 
 def test_the_walk_finds_every_route() -> None:
-    """Precondition: 47 routes, reached through included routers."""
+    """Precondition: 50 routes, reached through included routers."""
     served = _served(create_app())
-    assert len(served) == len(ROUTE_POLICY) == 47
+    assert len(served) == len(ROUTE_POLICY) == 50
     assert ("POST", "/api/v1/model/{model_id}/transform-paradigm") in served
 
 
