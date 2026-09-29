@@ -321,6 +321,56 @@ Delete a database connection (ADMIN+)
 
 ---
 
+## Offline DDL Import
+
+An exported DDL file becomes a model without the appliance connecting to
+anything. Every import is reconciled against counts read from the file by a
+counter that shares no code with the parser; the model is stored with
+`reconciliation_status` `reconciled` or `unreconciled` and the full report.
+
+### `GET /api/v1/import/dialects`
+
+The dialects a file can be imported from, each with `evidence`: `genuine
+export` (tested on fixtures written by the database's own export tool) or
+`documentation-derived` (tested only on a fixture written from the vendor's
+documentation). Signed-in callers.
+
+**Responses:** `200` Successful Response
+
+### `POST /api/v1/import/ddl`
+
+Import an exported DDL file into a new model (MEMBER+). Multipart form.
+
+| Param | In | Type | Required |
+|---|---|---|---|
+| `workspace_id` | query | string | yes |
+| `file` | form | file (UTF-8 or UTF-16, with or without a BOM; at most 10 MB) | yes |
+| `dialect` | form | `oracle`, `postgres` or `snowflake` | yes |
+| `title` | form | string | no |
+
+The response carries `model_id`, `status` (`reconciled` or `unreconciled`), the
+entity and relationship counts, and the report. A statement the parser does not
+understand is a named failure in the report, never skipped.
+
+**Responses:** `201` Model created (reconciled or not), `403` Below MEMBER,
+`413` File too large, `422` Unknown dialect, or nothing in the file could be
+imported (the report is in `detail`)
+
+### `GET /api/v1/model/{model_id}/import-report`
+
+The import's reconciliation report (VIEWER+): counts from the file and counts
+imported, for tables and partitions separately; every gap and failure by
+statement; what was not imported and why; what the model cannot hold yet.
+
+| Param | In | Type | Required |
+|---|---|---|---|
+| `model_id` | path | string | yes |
+| `format` | query | `markdown` (default) or `json` | no |
+
+**Responses:** `200` Successful Response, `404` The model was not imported from a file
+
+---
+
 ## ModelBox Trainer
 
 ### `GET /api/v1/trainer/assignments`

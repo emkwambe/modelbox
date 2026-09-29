@@ -51,6 +51,32 @@ Reverse-engineer an existing schema onto the canvas.
 
 **API:** `POST /api/v1/connectors` then `POST /api/v1/connectors/introspect`.
 
+### Workflow 2b — Import an exported DDL file
+
+Build a model from a schema file, with no connection to the database it came
+from: the file is read on the appliance.
+
+1. Go to **Import** (`/import`).
+2. Choose the workspace, the file's dialect and the file. The dialect list says
+   what each import has been tested against: Oracle (`DBMS_METADATA.GET_DDL`
+   output) and PostgreSQL (`pg_dump --schema-only`) against genuine exports;
+   Snowflake only against a fixture written from its documentation. Files may
+   be UTF-8 or UTF-16 (as SSMS saves them), with or without a byte-order mark.
+3. Click **Import**. The result says whether the import **reconciled**: the
+   file's own counts of tables, columns, keys, constraints and descriptions
+   beside what was imported, with partitions counted apart from tables. A
+   difference, or a statement the parser did not understand, is listed with
+   its statement number and line, and the model is saved **unreconciled**.
+4. **Open on the canvas**, or download the report as Markdown or JSON.
+
+Not imported, and listed in the report: indexes, sequences, views, procedures,
+functions, triggers, ownership, privileges and session settings. A partition
+is kept as metadata of its parent table. A UNIQUE or CHECK constraint over
+several columns, or a composite foreign key, is kept in the report because the
+model cannot hold it yet.
+
+**API:** `POST /api/v1/import/ddl`, then `GET /api/v1/model/{id}/import-report`.
+
 ## Workflow 3 — Governance linting & PII classification
 
 Every validation run includes the **governance lint pack** (advisory warnings —
