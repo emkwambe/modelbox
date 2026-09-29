@@ -12,9 +12,9 @@ writes two files:
 * ``<name>.manifest.json``: the counts an import must reconcile against, **read
   from the pg_catalog views**, never from a parser. Every constraint the catalog
   holds on a table is counted, and those a partition inherits from its parent
-  (``conparentid <> 0``) are also counted apart, because pg_dump treats them
-  differently by kind: it writes each partition's primary key as its own
-  ``ADD CONSTRAINT``, and never writes the foreign keys a partition inherits.
+  (``conparentid <> 0``) are also counted apart: pg_dump writes each
+  partition's inherited primary key as its own ``ADD CONSTRAINT``, so an
+  importer meets them in the text, and a reconciliation must know which they are.
 
 Usage::
 
@@ -82,9 +82,8 @@ COUNT_KEYS = (
 NOTE = (
     "Constraint counts are every constraint the catalog holds on the table; the "
     "*_inherited counts are those a partition inherits from its parent. pg_dump "
-    "writes each partition's inherited primary key as its own ADD CONSTRAINT, and "
-    "never writes the foreign keys a partition inherits. CHECK constraints on "
-    "domains are not table constraints and are not counted."
+    "writes each partition's inherited primary key as its own ADD CONSTRAINT. "
+    "CHECK constraints on domains are not table constraints and are not counted."
 )
 
 
