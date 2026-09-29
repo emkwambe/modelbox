@@ -1,10 +1,15 @@
-# ModelBox AI — v1.11.0 Release Notes (draft)
+# ModelBox AI — v1.11.0 Release Notes
 
-**Status: draft, unreleased.** This file is renamed to `RELEASE_NOTES_v1.11.0.md`
-in the same commit that moves the version stamp to 1.11.0. Until then the
-version check reads v1.10.0's notes, and this name keeps it out of that check.
+**Tag:** `v1.11.0`, cut from `main` after the release-prep merge  ·  **Carries:**
+Sprints 5, 6, 6.5 and 7, merged to `main` as `d81f569` (pull request #9, CI
+green)  ·  **Supersedes:** v1.10.0, which was never tagged.
 
-v1.11.0 supersedes v1.10.0, which was never tagged.
+**This is the release that is secure by default and proven from outside.** The
+installed appliance refuses the credentials this repository publishes, publishes
+one port, enforces a declared role on every route, keeps append-only ledgers
+under a least-privilege database role, and records every provider request. CI
+checks all of it against the running containers (`tests/blackbox`), and a tag is
+published only from a green `main`.
 
 ---
 
