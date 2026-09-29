@@ -180,12 +180,28 @@ def test_a_sequence_default_and_an_undefined_type_are_named_gaps() -> None:
     graph = {"entities": [{"entity_name": "film", "columns": [
         {"name": "film_id", "data_type": "INTEGER",
          "default_value": "NEXTVAL(CAST('public.film_film_id_seq' AS REGCLASS))"},
-        {"name": "rating", "data_type": "public.mpaa_rating"}], "primary_key": ["film_id"]}],
+        {"name": "rating", "data_type": "public.mpaa_rating",
+         "default_value": "CAST('G' AS public.mpaa_rating)"}], "primary_key": ["film_id"]}],
         "relationships": []}
     export = ExporterService(source_dialect="postgres").generate_ddl_export(_model(graph), "postgres")
     assert _column(export.sql, "film", "film_id").find(exp.DefaultColumnConstraint) is None
-    assert _column(export.sql, "film", "rating").args["kind"].sql("postgres") == "TEXT"
+    rating = _column(export.sql, "film", "rating")
+    assert rating.args["kind"].sql("postgres") == "TEXT"
+    # The default keeps its value and loses the cast to the type the file does not create.
+    assert rating.find(exp.DefaultColumnConstraint).this.sql("postgres") == "'G'"
+    assert "mpaa_rating" not in "\n".join(export.statements)
     assert sorted(g.kind for g in export.gaps) == ["data_type", "default"]
+
+
+def test_negative_control_an_unqualified_type_is_written_as_is() -> None:
+    """tsvector is PostgreSQL's own; only a schema-qualified type is taken as
+    one the file would have to create."""
+    graph = {"entities": [{"entity_name": "film", "columns": [
+        {"name": "film_id", "data_type": "INTEGER"}, {"name": "fulltext", "data_type": "tsvector"}],
+        "primary_key": ["film_id"]}], "relationships": []}
+    export = ExporterService(source_dialect="postgres").generate_ddl_export(_model(graph), "postgres")
+    assert _column(export.sql, "film", "fulltext").args["kind"].sql("postgres").upper() == "TSVECTOR"
+    assert export.gaps == []
 
 
 def test_oracle_star_precision_is_written_as_38() -> None:

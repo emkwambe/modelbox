@@ -191,8 +191,8 @@ _USER_TYPE_GAPS: dict[str, dict[str, tuple[str, str]]] = {
     "postgres": {"HIERARCHYID": ("VARCHAR", ("PostgreSQL has no HIERARCHYID; emitted as VARCHAR, "
                                              "which holds its string form ('/1/3/')"))},
 }
-# A user-defined type the model does not define (a domain or enum the import
-# listed but did not bring in) cannot be created by this file.
+# A schema-qualified user-defined type the model does not define (a domain or
+# enum the import listed but did not bring in) cannot be created by this file.
 _UNDEFINED_USER_TYPE: dict[str, tuple[str, str]] = {
     "postgres": ("TEXT", "is a user-defined type the model does not define; emitted as TEXT"),
 }
@@ -211,6 +211,24 @@ def _as_boolean_default(column: exp.ColumnDef) -> None:
             value = value.this
         if isinstance(value, exp.Literal) and value.name in ("0", "1"):
             default.set("this", exp.true() if value.name == "1" else exp.false())
+
+
+def _uncast_default(column: exp.ColumnDef, written: exp.DataType) -> bool:
+    """Remove casts to ``written`` from the column's default; True if any was removed.
+
+    Pagila's ``rating mpaa_rating DEFAULT 'G'::mpaa_rating``: once the column
+    is TEXT, the cast still names the type the file does not create.
+    """
+    removed = False
+    for constraint in column.args.get("constraints") or []:
+        default = constraint.args.get("kind")
+        if not isinstance(default, exp.DefaultColumnConstraint):
+            continue
+        for cast in list(default.find_all(exp.Cast)):
+            if cast.to == written:
+                cast.replace(cast.this)
+                removed = True
+    return removed
 
 
 def _fit_type(column: exp.ColumnDef, entity: str, target: str, gaps: list[ExportGap],
@@ -245,9 +263,15 @@ def _fit_type(column: exp.ColumnDef, entity: str, target: str, gaps: list[Export
         if user is not None:
             column.set("kind", exp.DataType.build(user[0], dialect=target))
             gaps.append(ExportGap("data_type", entity, f"{column.name} {written}: {user[1]}"))
-        elif (undefined := _UNDEFINED_USER_TYPE.get(target)) is not None:
+        elif "." in kind.sql() and (undefined := _UNDEFINED_USER_TYPE.get(target)) is not None:
+            # Schema-qualified, as pg_dump writes a type it created. An
+            # unqualified name (Pagila's tsvector) is a type sqlglot does not
+            # know but the target may: written as is, and applying the export
+            # to PostgreSQL (test_ddl_on_postgres) is what checks it.
             column.set("kind", exp.DataType.build(undefined[0], dialect=target))
-            gaps.append(ExportGap("data_type", entity, f"{column.name} {written} {undefined[1]}"))
+            uncast = _uncast_default(column, kind)
+            gaps.append(ExportGap("data_type", entity, f"{column.name} {written} {undefined[1]}"
+                                  + ("; the cast to it in the default is removed" if uncast else "")))
     limit = _MAX_PRECISION.get(target)
     if limit is not None and kind.this.name in _TEMPORAL and len(params) == 1 and params[0].name.isdigit() \
             and int(params[0].name) > limit:

@@ -150,7 +150,7 @@ async def test_the_genuine_oracle_and_postgres_fixtures_round_trip_with_no_diffe
         catalog, got, gaps, _ = await _round_trip(session, dialect, stem)
         if stem == "pagila":
             kinds = Counter(g.kind for g in gaps)
-            assert kinds == Counter({"default": 13, "data_type": 3}), kinds
+            assert kinds == Counter({"default": 13, "data_type": 2}), kinds
             assert all("sequence" in g.detail for g in gaps if g.kind == "default")
             assert all("user-defined type" in g.detail for g in gaps if g.kind == "data_type")
         else:
