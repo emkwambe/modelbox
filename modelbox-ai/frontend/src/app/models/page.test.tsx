@@ -32,8 +32,11 @@ describe('the model list', () => {
   });
 
   it('says so when the list cannot be loaded', async () => {
-    listModels.mockRejectedValue(new Error('down'));
+    // Rejected when called, not when the test is set up (see Step 3's verification record).
+    listModels.mockImplementation(async () => {
+      throw new Error('down');
+    });
     render(<ModelsPage />);
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('down');
   });
 });

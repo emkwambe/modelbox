@@ -250,13 +250,16 @@ async def test_storage_holds_the_lists_by_raw_sql(session: AsyncSession) -> None
     graph = _graph()
     await GraphRepository(session).replace_graph(row.model_id, graph.entities, graph.relationships)
     await session.commit()
-    constraints = (await session.execute(text(
-        "SELECT e.entity_name, k.kind, k.name, k.expression, "
-        "(SELECT group_concat(m.column_name, ',') FROM (SELECT column_name FROM entity_constraint_columns "
-        " WHERE constraint_id = k.constraint_id ORDER BY position) m) AS cols "
+    # Portable SQL (this file also runs on PostgreSQL): members are grouped here.
+    rows = (await session.execute(text(
+        "SELECT e.entity_name, k.constraint_id, k.kind, k.name, k.expression, m.column_name "
         "FROM entity_constraints k JOIN model_entities e ON e.entity_id = k.entity_id "
-        "ORDER BY e.position, k.position"))).all()
-    assert [tuple(r) for r in constraints] == [
+        "JOIN entity_constraint_columns m ON m.constraint_id = k.constraint_id "
+        "ORDER BY e.position, k.position, m.position"))).all()
+    constraints: dict[Any, list[Any]] = {}
+    for entity, constraint_id, kind, name, expression, column in rows:
+        constraints.setdefault(constraint_id, [entity, kind, name, expression, []])[4].append(column)
+    assert [(e, k, n, x, ",".join(cols)) for e, k, n, x, cols in constraints.values()] == [
         ("orders", "PRIMARY KEY", None, None, "order_id,region"),
         ("orders", "UNIQUE", "uq_orders_placed", None, "placed_at,region"),
         ("orders", "CHECK", "ck_region", "region IN ('EU', 'US')", "region"),
