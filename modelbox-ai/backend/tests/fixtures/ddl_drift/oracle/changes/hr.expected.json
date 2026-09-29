@@ -1,0 +1,27 @@
+{
+  "fixture": "oracle/hr",
+  "alter_script": "hr.alter.sql",
+  "derived_from": "Written from hr.alter.sql, statement by statement, and classified by the rules in docs/USER_GUIDE.md (Drift report); never from ModelBox's output.",
+  "drifts": [
+    {"statement": 1, "kind": "table_added", "table": "SKILLS", "class": "non-breaking"},
+    {"statement": 2, "kind": "column_added", "table": "DEPARTMENTS", "column": "IS_ACTIVE", "class": "non-breaking"},
+    {"statement": 3, "kind": "type_changed", "table": "LOCATIONS", "column": "CITY", "class": "non-breaking"},
+    {"statement": 4, "kind": "type_changed", "table": "JOBS", "column": "JOB_TITLE", "class": "breaking"},
+    {"statement": 5, "kind": "nullability_changed", "table": "EMPLOYEES", "column": "EMAIL", "class": "non-breaking"},
+    {"statement": 6, "kind": "default_changed", "table": "EMPLOYEES", "column": "HIRE_DATE", "class": "non-breaking"},
+    {"statement": 7, "kind": "column_removed", "table": "EMPLOYEES", "column": "COMMISSION_PCT", "class": "breaking"},
+    {"statement": 8, "kind": "check_removed", "table": "EMPLOYEES", "columns": ["SALARY"], "class": "non-breaking"},
+    {"statement": 9, "kind": "unique_removed", "table": "EMPLOYEES", "columns": ["EMAIL"], "class": "breaking"},
+    {"statement": 10, "kind": "unique_added", "table": "EMPLOYEES", "columns": ["FIRST_NAME", "LAST_NAME"], "class": "breaking"},
+    {"statement": 11, "kind": "check_added", "table": "JOBS", "columns": ["MIN_SALARY", "MAX_SALARY"], "class": "breaking"},
+    {"statement": 12, "kind": "foreign_key_removed", "table": "LOCATIONS", "columns": ["COUNTRY_ID"], "class": "breaking"},
+    {"statement": 13, "kind": "primary_key_changed", "table": "JOB_HISTORY", "class": "breaking"},
+    {"statement": 14, "kind": "column_removed", "table": "LOCATIONS", "column": "STREET_ADDRESS", "class": "breaking"},
+    {"statement": 14, "kind": "column_added", "table": "LOCATIONS", "column": "ADDRESS_LINE", "class": "non-breaking"},
+    {"statement": 15, "kind": "description_changed", "table": "REGIONS", "class": "informational"},
+    {"statement": 16, "kind": "description_changed", "table": "REGIONS", "column": "REGION_NAME", "class": "informational"}
+  ],
+  "possible_renames": [
+    {"statement": 14, "table": "LOCATIONS", "removed": "STREET_ADDRESS", "added": "ADDRESS_LINE"}
+  ]
+}
