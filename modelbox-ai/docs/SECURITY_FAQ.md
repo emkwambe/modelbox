@@ -20,16 +20,21 @@ past its evidence.
 
 ## 1. What leaves the network?
 
-**One kind of thing: a prompt sent to a language model provider.** ModelBox is a
-data *modelling* tool — it works on schemas, not on your rows.
+**By design, one kind of thing: a prompt sent to a language-model provider.** No
+other feature is built to reach outside. ModelBox is a data *modelling* tool —
+it works on schemas, not on your rows.
 
-**The appliance needs no outbound connection to start or to run (PL-010).** Our
-CI installs it with every service except the web UI on a Docker network that
-has no gateway, first proving the backend cannot open an outbound connection,
-and then shows that it starts, serves its API through the UI, refuses a request
-routed to a cloud provider, and records no outbound attempt. What that proves
-is that nothing the appliance needs depends on reaching outside; the prompt
-paths below are the only features that send anything.
+**Configuration C proves the appliance needs no outbound connection to start or
+run (PL-010).** Our CI installs it with every service except the web UI on a
+Docker network that has no gateway, first proving the backend cannot open an
+outbound connection, and then shows that it starts, serves its API through the
+UI, refuses a request routed to a cloud provider, and records no outbound
+attempt.
+
+**On a network that allows outbound traffic, the way to guarantee nothing else
+leaves is air-gapped mode on a network without a route** (`AIRGAPPED=true`,
+§3). The design sends nothing else; that configuration is what makes it a
+guarantee rather than a design statement.
 
 Four features send a prompt: synthesising a model from requirements,
 transforming a model between paradigms, enriching a data dictionary, and the
