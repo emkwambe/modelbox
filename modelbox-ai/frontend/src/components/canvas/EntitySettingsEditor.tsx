@@ -183,6 +183,10 @@ const card: React.CSSProperties = {
   left: 16,
   bottom: 16,
   width: 288,
+  // Anchored to the bottom: capped and scrolling, so the header stays reachable.
+  maxHeight: 'calc(100% - 32px)',
+  overflowY: 'auto',
+  boxSizing: 'border-box',
   zIndex: 30,
   background: color.white,
   border: `1px solid ${color.neutral[200]}`,
