@@ -10,6 +10,8 @@ with no gateway.
   resolution: the backend's log records the air-gap refusal.
 * Zero outbound attempts: the egress ledger, which the gateway writes before
   it dials anything, holds no row, and the backend's log has no routing line.
+* A DDL import succeeds: the genuine Oracle HR export reconciles with no route
+  out, and leaves the egress ledger empty.
 
 The first check is the precondition: the network really denies egress, so a
 pass below is not a box that merely happened to have no route out.
@@ -19,7 +21,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from conftest import World, bearer, check, compose, sql_ok, token
+from conftest import World, bearer, check, compose, import_fixture, sql_ok, token
 
 pytestmark = pytest.mark.config_c
 
@@ -68,3 +70,13 @@ def test_c3_zero_outbound_attempts(client: httpx.Client, world: World) -> None:
     rows = sql_ok("SELECT count(*) FROM egress_audit;")
     check(rows == "0", f"the egress ledger holds {rows} rows")
     check("Routing task" not in _backend_log(), "the backend's log shows a request routed to a provider")
+
+
+def test_c4_a_ddl_import_needs_no_route_out(client: httpx.Client, world: World) -> None:
+    """The file is read on the appliance: with no route out, HR still imports and reconciles."""
+    imported = import_fixture(client, world, "oracle/hr.sql", "oracle")
+    gaps = imported["report"]["reconciliation"]["gaps"]
+    check(imported["status"] == "reconciled" and gaps == [],
+          f"air-gapped: status {imported['status']!r}, gaps {gaps[:3]}")
+    rows = sql_ok("SELECT count(*) FROM egress_audit;")
+    check(rows == "0", f"the import left {rows} rows in the egress ledger")

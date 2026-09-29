@@ -78,7 +78,9 @@ from: the file is read on the appliance.
    beside what was imported, with partitions counted apart from tables. A
    difference, or a statement the parser did not understand, is listed with
    its statement number and line, and the model is saved **unreconciled**.
-4. **Open on the canvas**, or download the report as Markdown or JSON.
+4. **Open on the canvas**, or download the report as Markdown or JSON. A
+   DDL file holds no diagram positions, so the canvas lays the tables out
+   when the model first opens; **Save** keeps that layout.
 
 Not imported, and listed in the report: indexes, sequences, views, procedures,
 functions, triggers, ownership, privileges, session settings and `USE`. A
@@ -196,6 +198,11 @@ the same kind (fixed to varying and ASCII to Unicode also widen), a larger
 float, more fractional seconds. Any other type change, including one ModelBox
 cannot read, is D7.
 
+On the canvas, open **Drift report**, choose the deployed schema's DDL file
+and its dialect, and **Compare**. The panel shows any unreconciled-import
+warning first, then both sources, the counts by class, each drift with its
+class, rule and flag, and the possible renames.
+
 **API:** `POST /api/v1/model/{id}/drift`, multipart, with the file, its
 `dialect` (as for import) and `format` (`markdown`, `html` or `json`).
 
@@ -276,9 +283,13 @@ value you change is recorded as supplied by you, on that date, and is
 pending review. A model's synthesis never fills these fields: a business
 name or an owner the model guessed would read as fact.
 
-A person with the **APPROVER** role verifies fields with
-`POST /api/v1/model/{id}/attestations/verify`. A field becomes verified only
-when all three hold:
+Open **Dictionary** on the canvas to review them: every field that holds a
+value, with its status and the "N of M fields verified, K pending review"
+count, filterable by table. An **APPROVER**, admin or owner sees a **Verify**
+button on each field not yet verified, and a checkbox to verify a selection
+with **Verify selected**; a member or viewer sees neither, and the server
+refuses them. The API is `POST /api/v1/model/{id}/attestations/verify`. A
+field becomes verified only when all three hold:
 
 1. the model was imported from a DDL file and **reconciled**;
 2. its **definition** (the column's or table's description) passes the
@@ -288,7 +299,8 @@ when all three hold:
 3. its **provenance** is recorded, and it is not an AI draft.
 
 Each field is answered with the three conditions as found, so a field that
-stays pending shows what it lacks. The rest of ISO/IEC 11179-4 is judgement,
+stays pending shows what it lacks; the Dictionary panel lists them under
+**Verification results**, with the reason a field stayed pending. The rest of ISO/IEC 11179-4 is judgement,
 and passing these rules does not claim it. **A verified field returns to
 pending when its value changes**, as a model's approval lapses when the model
 is edited. Every status change is written to the audit log, which is the

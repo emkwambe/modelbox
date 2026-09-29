@@ -442,6 +442,11 @@ const card: React.CSSProperties = {
   left: 16,
   bottom: 16,
   width: 280,
+  // Anchored to the bottom, so without a cap a tall card grows upward past
+  // the canvas and its header, with the close button, cannot be reached.
+  maxHeight: 'calc(100% - 32px)',
+  overflowY: 'auto',
+  boxSizing: 'border-box',
   zIndex: 30,
   background: color.white,
   border: `1px solid ${color.neutral[200]}`,

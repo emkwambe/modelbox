@@ -276,6 +276,19 @@ function layoutNodes(
   });
 }
 
+/**
+ * True when a model of more than one entity has every entity at one position.
+ *
+ * A DDL import stores no positions, so every table arrives at the origin and
+ * the canvas drew them as one pile until someone found Auto-layout. No saved
+ * layout puts two entities at the same point, so this cannot discard one.
+ */
+export function stackedAtOnePoint(nodes: EntityNode[]): boolean {
+  const first = nodes[0]?.position;
+  if (!first || nodes.length < 2) return false;
+  return nodes.every((n) => n.position.x === first.x && n.position.y === first.y);
+}
+
 export const useCanvasStore = create<CanvasState>((set, get) => {
   /** Snapshot current graph onto the undo stack before a mutation. */
   const commit = (): void => {
@@ -556,19 +569,24 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
 
     loadModel: (model) => {
       commit();
+      const edges = model.relationships.map(relationshipToEdge);
+      const placed = model.entities.map(entityToNode);
+      // An unplaced model (a DDL import) is laid out on open, and the layout
+      // is an unsaved change: Save stores the positions.
+      const unplaced = stackedAtOnePoint(placed);
       set({
         modelId: model.model_id,
         workspaceId: model.workspace_id ?? null,
         // A real model supersedes whatever template seeded the canvas.
         sourcePrompt: null,
         paradigm: model.paradigm,
-        nodes: model.entities.map(entityToNode),
-        edges: model.relationships.map(relationshipToEdge),
+        nodes: unplaced ? layoutNodes(placed, edges, 'TB') : placed,
+        edges,
         validation: model.validation ?? null,
         selectedNodeId: null,
         selectedEdgeId: null,
         pendingConnection: null,
-        dirty: false,
+        dirty: unplaced,
       });
     },
 

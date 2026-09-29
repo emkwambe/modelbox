@@ -400,3 +400,27 @@ def world(client: httpx.Client) -> World:
     assert joined.status_code == 201, f"setup: the owner could not add the viewer: {joined.text[:300]}"
     viewer = Account("viewer@blackbox.test", viewer_password, viewer_id)
     return World(owner, viewer, ws_a, ws_b, model_a, model_b)
+
+
+# --- Importing a DDL file, as the import page does -------------------------------------
+
+#: The genuine exports the backend's own tests import. Read, never copied.
+DDL_FIXTURES = ROOT / "backend" / "tests" / "fixtures" / "ddl"
+
+
+def import_fixture(client: httpx.Client, world: World, relative: str, dialect: str) -> dict:
+    """Upload one fixture to /import/ddl as the owner; the response's JSON."""
+    path = DDL_FIXTURES / relative
+    owner = bearer(token(client, world.owner.email, world.owner.password))
+    response = client.post(
+        "/api/v1/import/ddl",
+        params={"workspace_id": world.workspace_a},
+        data={"dialect": dialect, "title": f"Blackbox import {relative}"},
+        files={"file": (path.name, path.read_bytes(), "application/sql")},
+        headers=owner,
+        timeout=300,
+    )
+    assert response.status_code == 201, (
+        f"setup: importing {relative} got HTTP {response.status_code}: {response.text[:300]}"
+    )
+    return response.json()

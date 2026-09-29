@@ -9,10 +9,27 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import { AUTH_BADGE_RESERVE } from '@/components/auth/AuthBadge';
-import { color, semantic } from '@/styles/tokens';
+import { color, radius, semantic, space, type } from '@/styles/tokens';
+
+/** A header button that opens a side panel (tokens only: this page's type budget is fixed). */
+function panelToggle(active: boolean, enabled: boolean): React.CSSProperties {
+  return {
+    padding: `${space.xs}px ${space.md}px`,
+    borderRadius: radius.md,
+    border: `1px solid ${color.neutral[700]}`,
+    background: active ? color.neutral[700] : color.white,
+    color: active ? color.white : color.neutral[700],
+    fontSize: type.uiSmall.size,
+    fontWeight: type.uiXSmall.weight,
+    cursor: enabled ? 'pointer' : 'default',
+    opacity: enabled ? 1 : 0.5,
+  };
+}
 import ERDCanvas from '@/components/canvas/ERDCanvas';
 import ColumnSemanticEditor from '@/components/canvas/ColumnSemanticEditor';
 import EntitySettingsEditor from '@/components/canvas/EntitySettingsEditor';
+import DictionaryPanel from '@/components/dictionary/DictionaryPanel';
+import DriftPanel from '@/components/drift/DriftPanel';
 import DiffPanel from '@/components/migration/DiffPanel';
 import ExportPanel from '@/components/editor/ExportPanel';
 import { deleteModel, saveGraph, updateModel } from '@/lib/api';
@@ -36,6 +53,8 @@ export default function CanvasPage() {
   useUnsavedChangesGuard(dirty);
   const [showExport, setShowExport] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
+  const [showDictionary, setShowDictionary] = useState(false);
+  const [showDrift, setShowDrift] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -222,8 +241,36 @@ export default function CanvasPage() {
           <button
             type="button"
             onClick={() => {
+              setShowDictionary((v) => !v);
+              setShowDrift(false);
+              setShowDiff(false);
+              setShowExport(false);
+            }}
+            disabled={!modelId}
+            style={panelToggle(showDictionary, Boolean(modelId))}
+          >
+            {showDictionary ? 'Hide dictionary' : 'Dictionary'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowDrift((v) => !v);
+              setShowDictionary(false);
+              setShowDiff(false);
+              setShowExport(false);
+            }}
+            disabled={!modelId}
+            style={panelToggle(showDrift, Boolean(modelId))}
+          >
+            {showDrift ? 'Hide drift report' : 'Drift report'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               setShowDiff((v) => !v);
               setShowExport(false);
+              setShowDictionary(false);
+              setShowDrift(false);
             }}
             disabled={!modelId}
             style={{
@@ -245,6 +292,8 @@ export default function CanvasPage() {
             onClick={() => {
               setShowExport((v) => !v);
               setShowDiff(false);
+              setShowDictionary(false);
+              setShowDrift(false);
             }}
             disabled={!modelId}
             style={{
@@ -317,6 +366,16 @@ export default function CanvasPage() {
         {showExport && (
           <div style={{ width: '45%', minWidth: 380, maxWidth: 720 }}>
             <ExportPanel onClose={() => setShowExport(false)} />
+          </div>
+        )}
+        {showDictionary && (
+          <div style={{ width: '45%', minWidth: 380, maxWidth: 720 }}>
+            <DictionaryPanel onClose={() => setShowDictionary(false)} />
+          </div>
+        )}
+        {showDrift && (
+          <div style={{ width: '45%', minWidth: 380, maxWidth: 720 }}>
+            <DriftPanel onClose={() => setShowDrift(false)} />
           </div>
         )}
       </div>

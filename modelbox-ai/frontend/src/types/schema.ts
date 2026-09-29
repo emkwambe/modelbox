@@ -249,6 +249,91 @@ export interface WorkspaceInfo {
 
 export type WorkspaceRole = 'OWNER' | 'ADMIN' | 'APPROVER' | 'MEMBER' | 'VIEWER';
 
+// --- Field attestations (Sprint 8 Steps 4b and 7) ---
+export type FieldStatus = 'verified' | 'pending' | 'recorded';
+
+export interface FieldRef {
+  entity: string;
+  column: string | null;
+  field: string;
+}
+
+export interface FieldStatusInfo extends FieldRef {
+  status: FieldStatus;
+  provenance: string | null;
+  provenance_by: string | null;
+  provenance_at: string | null;
+  verified_by: string | null;
+  verified_at: string | null;
+}
+
+export interface AttestationSummary {
+  verified: number;
+  fields: number;
+  pending_review: number;
+  statement: string;
+}
+
+export interface AttestationsResponse {
+  model_id: string;
+  summary: AttestationSummary;
+  fields: FieldStatusInfo[];
+}
+
+/** The three conditions for "verified", as the server found them. */
+export interface VerifyConditions {
+  reconciled_import: boolean;
+  definition_failures: string[];
+  provenance: string | null;
+  provenance_verifiable: boolean;
+}
+
+export interface VerifyResult extends FieldStatusInfo {
+  conditions: VerifyConditions;
+}
+
+export interface VerifyResponse {
+  model_id: string;
+  summary: AttestationSummary;
+  results: VerifyResult[];
+}
+
+// --- Drift report (Sprint 8 Steps 5 and 7) ---
+export interface DriftSource {
+  label: string;
+  name: string;
+  model_id: string | null;
+  version: number | null;
+  imported_at: string | null;
+  dialect: string | null;
+  reconciliation: string | null;
+  statement: string;
+}
+
+export interface Drift {
+  kind: string;
+  table: string;
+  column: string | null;
+  columns: string[];
+  before: unknown;
+  after: unknown;
+  class: 'breaking' | 'non-breaking' | 'informational';
+  rule: string;
+  rule_text: string;
+  verified_fields_affected: string[];
+  flag: string | null;
+}
+
+export interface DriftReport {
+  report: string;
+  warnings: string[];
+  design: DriftSource;
+  deployed: DriftSource;
+  summary: Record<string, number>;
+  drifts: Drift[];
+  possible_renames: { table: string; removed: string; added: string; type: string; position: number }[];
+}
+
 /** A member of a workspace (Sprint 8 Step 6). */
 export interface MemberInfo {
   user_id: string;

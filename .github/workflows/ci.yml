@@ -522,6 +522,88 @@ jobs:
         if: ${{ always() }}
         run: docker compose -p modelbox-ai down -v --remove-orphans
 
+  journey:
+    name: Engagement Journey
+    # One consultant engagement in a real browser (Sprint 8 Step 7): e2e/
+    # drives the UI of the appliance in configuration B, with the owner made
+    # by create-owner as an operator would. Screenshots and the trace are kept
+    # when it fails.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: modelbox-ai
+    env:
+      COMPOSE: docker compose --env-file .env -f docker/docker-compose.appliance.yml
+      E2E_EMAIL: owner@journey.test
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: modelbox-ai/e2e/package-lock.json
+
+      - name: Install Playwright and Chromium
+        working-directory: modelbox-ai/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Create .env with init-env
+        run: sh scripts/init-env.sh
+
+      - name: Build the appliance images
+        run: $COMPOSE build
+
+      - name: "B: start the appliance and wait for health"
+        run: |
+          $COMPOSE up -d
+          port=$(sed -n 's/^UI_PORT=//p' .env)
+          echo "E2E_BASE_URL=http://localhost:${port:-3000}" >> "$GITHUB_ENV"
+          for i in $(seq 1 120); do
+            if curl -fsS "http://localhost:${port:-3000}/api/health" > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "the appliance never answered /api/health" >&2
+          exit 1
+
+      - name: Make the owner with create-owner
+        run: |
+          password="journey-$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          echo "E2E_PASSWORD=$password" >> "$GITHUB_ENV"
+          printf '%s\n' "$password" | $COMPOSE exec -T modelbox-backend python -m app.cli create-owner \
+            --email "$E2E_EMAIL" --workspace-name "Journey" --password-stdin
+
+      - name: Run the journey
+        working-directory: modelbox-ai/e2e
+        run: npx playwright test
+
+      - name: Keep screenshots and the trace
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: engagement-journey
+          path: |
+            modelbox-ai/e2e/test-results/
+            modelbox-ai/e2e/playwright-report/
+          retention-days: 14
+
+      - name: Appliance logs
+        if: ${{ failure() }}
+        run: |
+          docker compose -p modelbox-ai ps -a
+          docker compose -p modelbox-ai logs --no-color --tail 200
+
+      - name: Stop the appliance
+        if: ${{ always() }}
+        run: docker compose -p modelbox-ai down -v --remove-orphans
+
   versions:
     name: Version Consistency
     runs-on: ubuntu-24.04
