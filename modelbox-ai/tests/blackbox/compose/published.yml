@@ -1,0 +1,22 @@
+# =============================================================================
+# TEST ONLY. The appliance from the images a release published to GHCR.
+#
+# Layered on docker/docker-compose.appliance.yml (and on a profile's own
+# override) by the Verify Release workflow, with MODELBOX_RELEASE set to the
+# published version. Every ModelBox service runs the pulled image; nothing is
+# built on the runner.
+# =============================================================================
+
+services:
+  modelbox-ui:
+    image: ghcr.io/emkwambe/modelbox-frontend:${MODELBOX_RELEASE:?MODELBOX_RELEASE must name the published version}
+    pull_policy: always
+  modelbox-backend:
+    image: ghcr.io/emkwambe/modelbox-backend:${MODELBOX_RELEASE:?MODELBOX_RELEASE must name the published version}
+    pull_policy: always
+  modelbox-worker:
+    image: ghcr.io/emkwambe/modelbox-backend:${MODELBOX_RELEASE:?MODELBOX_RELEASE must name the published version}
+    pull_policy: always
+  modelbox-migrate:
+    image: ghcr.io/emkwambe/modelbox-backend:${MODELBOX_RELEASE:?MODELBOX_RELEASE must name the published version}
+    pull_policy: always

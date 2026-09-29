@@ -5,9 +5,11 @@ steps are in `docs/RELEASE_NOTES_v<version>.md`; this file is the index.
 
 ## v1.11.1
 
-Tagged from `main` after this file lands. Full notes:
-[`docs/RELEASE_NOTES_v1.11.1.md`](docs/RELEASE_NOTES_v1.11.1.md). Supersedes
-v1.11.0; upgrade by pulling the new images, with no migration and no
+Tagged 2026-09-29 (UTC) at `e8d9ac1` on `main` (pull request #12), and
+published by the gated release workflow (run 36516574170) as
+`ghcr.io/emkwambe/modelbox-backend` and `modelbox-frontend`, `1.11.1`. Full
+notes: [`docs/RELEASE_NOTES_v1.11.1.md`](docs/RELEASE_NOTES_v1.11.1.md).
+Supersedes v1.11.0; upgrade by pulling the new images, with no migration and no
 configuration change.
 
 - **Transactions:** every API request that writes commits, or fails, before its response is
@@ -17,6 +19,9 @@ configuration change.
 - **Black-box reports:** the acceptance suite redacts every credential it handles from its
   failure reports, enforced by a test, and checks read-your-writes against the
   running appliance fifty times over.
+- **Frontend image build:** package install scripts run after every package is
+  installed (`npm ci --ignore-scripts && npm rebuild`); the installed set is
+  unchanged.
 
 ## v1.11.0
 

@@ -1,8 +1,9 @@
 # ModelBox AI — v1.11.1 Release Notes
 
-**Tag:** `v1.11.1`, cut from `main` after this file lands  ·  **Supersedes:**
-v1.11.0  ·  **Upgrade:** pull the new images; no migration and no configuration
-change.
+**Tag:** `v1.11.1`, at `e8d9ac1` on `main` (pull request #12), published by
+the gated release workflow (run 36516574170)  ·  **Supersedes:** v1.11.0, whose
+tag and images remain  ·  **Upgrade:** pull the new images; no migration and no
+configuration change.
 
 ## A request's transaction completes before its response is sent
 
@@ -29,6 +30,13 @@ each on the request after it was returned.
 The black-box acceptance suite now redacts every token, key and password it
 handles from its failure reports, down to eight-character fragments, and a
 test enforces it.
+
+## Frontend image build
+
+The frontend image installs its packages with `npm ci --ignore-scripts` and
+then runs their install scripts with `npm rebuild`, after every package is in
+place. The installed set is unchanged, and the install still refuses an
+incomplete lock.
 
 ## Breaking changes
 
