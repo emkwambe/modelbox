@@ -217,8 +217,10 @@ async def _seed_legacy_keys(dsn: str, workspace_id: uuid.UUID) -> uuid.UUID:
                         "VALUES (:m, :w, 'legacy keys', 'postgres')", m=model_id, w=workspace_id)
     entities = {name: uuid.uuid4() for name in ("customer", "invoice", "note", "shipment")}
     for name, entity_id in entities.items():
+        # shipment as a provider that omitted entity_type left it before this step.
+        stored = "EntityType.TABLE" if name == "shipment" else "TABLE"
         await _execute(dsn, "INSERT INTO model_entities (entity_id, model_id, entity_name, entity_type) "
-                            "VALUES (:e, :m, :n, 'TABLE')", e=entity_id, m=model_id, n=name)
+                            "VALUES (:e, :m, :n, :t)", e=entity_id, m=model_id, n=name, t=stored)
     columns: dict[tuple[str, str], uuid.UUID] = {}
     spec = [  # (entity, column, is_pk, is_fk, is_unique, check, reference)
         ("customer", "id", True, False, False, None, None),
@@ -297,6 +299,7 @@ async def test_0025_keeps_every_relationship_and_lists_what_it_could_not_convert
         dsn, "SELECT kind, entity_name, revision FROM model_conversion_findings WHERE model_id = :m "
              "ORDER BY kind, entity_name", m=model)
     assert [(f["kind"], f["entity_name"]) for f in findings] == [
+        ("enum_name_repaired", "shipment"),
         # invoice.customer_id was flagged, but its relationship names no column.
         ("foreign_key_without_target", "invoice"),
         ("foreign_key_without_target", "note"),
@@ -307,6 +310,8 @@ async def test_0025_keeps_every_relationship_and_lists_what_it_could_not_convert
         ("unresolved_relationship", "invoice"),
     ]
     assert {f["revision"] for f in findings} == {"0025_keys_and_constraints"}
+    types = await _fetch(dsn, "SELECT DISTINCT entity_type FROM model_entities WHERE model_id = :m", m=model)
+    assert types == [{"entity_type": "TABLE"}]
 
 
 async def test_0025_converts_the_seeded_gold_models_with_nothing_to_list(upgraded) -> None:

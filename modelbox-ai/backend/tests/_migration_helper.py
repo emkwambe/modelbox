@@ -152,17 +152,21 @@ async def project_models(session: AsyncSession) -> dict:
             ],
             # In the older "entity.column" form, which is how the previous
             # release states a one-column relationship; from Sprint 8 Step 3
-            # the entity and its columns are separate fields.
+            # the entity and its columns are separate fields. This file runs
+            # under both releases' code, so it reads whichever it is given.
             "relationships": sorted(
-                f"{_side(r.from_ref, r.from_columns)}->{_side(r.to_ref, r.to_columns)}:{r.cardinality}"
+                f"{_side(r.from_ref, getattr(r, 'from_columns', None))}->"
+                f"{_side(r.to_ref, getattr(r, 'to_columns', None))}:{r.cardinality}"
                 for r in response.relationships
             ),
         }
     return out
 
 
-def _side(entity: str, columns: list[str]) -> str:
-    return f"{entity}.{columns[0]}" if len(columns) == 1 else entity
+def _side(ref: str, columns: list[str] | None) -> str:
+    if columns is None:  # the previous release: ref is already "entity.column"
+        return ref
+    return f"{ref}.{columns[0]}" if len(columns) == 1 else ref
 
 
 async def inspect_backfill(session: AsyncSession) -> dict:

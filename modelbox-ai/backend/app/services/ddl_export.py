@@ -135,6 +135,9 @@ def translate_check(
     condition = _single_condition(f"SELECT 1 WHERE ({expression})", source)
     if condition is None:
         return None, f"is not a single {source} boolean expression"
+    # The parentheses were added here to parse it; CHECK (…) adds its own.
+    if isinstance(condition, exp.Paren):
+        condition = condition.this
     if columns:
         exact = set(columns)
         folded = {c.lower(): c for c in columns}

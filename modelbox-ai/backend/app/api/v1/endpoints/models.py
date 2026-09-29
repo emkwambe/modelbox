@@ -328,7 +328,7 @@ async def export_model(
         if export_format == ExportFormat.DDL:
             ddl = exporter.generate_ddl_export(_to_synthesized(result), dialect)
             files = {f"model_{dialect}.sql": ddl.sql}
-            gaps = [ExportGapSchema(**gap.as_dict()) for gap in ddl.gaps]
+            gaps = [ExportGapSchema(kind=gap.kind, entity=gap.entity, detail=gap.detail) for gap in ddl.gaps]
         else:
             files = exporter.export(_to_synthesized(result), export_format.value, dialect)
     except ExporterError as exc:

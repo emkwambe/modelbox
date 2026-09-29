@@ -126,12 +126,14 @@ class GraphRepository:
             else:
                 row = found
             row.position = entity_position
-            row.entity_type = str(entity.entity_type)
+            # Values, not str(): an enum member that skipped validation would
+            # store its name ('EntityType.TABLE'), which reloads as invalid.
+            row.entity_type = str(getattr(entity.entity_type, "value", entity.entity_type))
             row.canvas_position_x = entity.canvas_position_x
             row.canvas_position_y = entity.canvas_position_y
             row.description = entity.description
             row.grain = entity.grain
-            row.tier = str(entity.tier) if entity.tier else None
+            row.tier = str(getattr(entity.tier, "value", entity.tier)) if entity.tier else None
             row.freshness_sla = entity.freshness_sla
             row.agg_time_column = entity.agg_time_column
             if row.next_stable_id is None:
@@ -241,7 +243,7 @@ class GraphRepository:
             row.column_name = col.name
             row.data_type = col.data_type
             row.is_pii = col.is_pii
-            row.pii_type = str(col.pii_type) if col.pii_type else None
+            row.pii_type = str(getattr(col.pii_type, "value", col.pii_type)) if col.pii_type else None
             row.description = col.description
             row.is_metric = col.is_metric
             row.aggregation = col.aggregation

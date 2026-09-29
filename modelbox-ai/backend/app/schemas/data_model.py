@@ -736,7 +736,11 @@ class EntitySchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
     entity_name: str = Field(..., max_length=128)
-    entity_type: EntityType = EntityType.TABLE
+    # validate_default: an omitted entity_type (a provider may leave it out)
+    # must become the value 'TABLE' as a supplied one does. Unvalidated, the
+    # default stayed the enum member, str() of which is 'EntityType.TABLE',
+    # and a model saved that way could not be reopened (Sprint 8 Step 3).
+    entity_type: EntityType = Field(default=EntityType.TABLE, validate_default=True)
     description: str | None = None
     grain: str | None = Field(
         default=None, description="Grain statement for FACT entities."

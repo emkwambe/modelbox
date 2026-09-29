@@ -9,7 +9,6 @@
 
 import { create } from 'zustand';
 import {
-  addEdge,
   applyEdgeChanges,
   applyNodeChanges,
   type Connection,
@@ -342,8 +341,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         });
         return;
       }
+      // Appended, not addEdge: React Flow's addEdge drops an edge between two
+      // nodes that already have one, and two foreign keys between the same
+      // tables (a role-playing dimension) are two relationships.
       const id = `rel-${pending.source}-${pending.target}-${get().edges.length}`;
-      set({ edges: addEdge(edgeFor(data, id), get().edges), pendingConnection: null });
+      set({ edges: [...get().edges, edgeFor(data, id)], pendingConnection: null });
     },
 
     cancelConnection: () => set({ pendingConnection: null }),

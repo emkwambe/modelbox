@@ -36,6 +36,10 @@ The conversion, per model:
 * an `is_foreign_key` flag with no relationship and no reference names no
   target; it is listed.
 
+* an `entity_type`, `tier` or `pii_type` stored as an enum's name
+  (`EntityType.TABLE`, which a model synthesized without `entity_type` got)
+  is repaired to its value, and listed.
+
 Everything listed goes to `model_conversion_findings`, by model, and is served
 with the model. Nothing is dropped silently.
 
@@ -154,6 +158,28 @@ def upgrade() -> None:
             bind.execute(sa.text(
                 "INSERT INTO entity_constraint_columns (constraint_id, position, column_name) VALUES (:c, :p, :n)"),
                 {"c": constraint_id, "p": i, "n": member})
+
+    # Enum names stored as values. The repository stored str() of an enum
+    # member, which on Python 3.11 is 'EntityType.TABLE' for an entity_type
+    # a provider omitted (the unvalidated default), and such a model could not
+    # be reopened. Each member's name is its value, so the repair is exact;
+    # each repaired row is listed.
+    for table, column, prefix, key in (
+        ("model_entities", "entity_type", "EntityType.", "entity_id"),
+        ("model_entities", "tier", "AssetTier.", "entity_id"),
+        ("entity_columns", "pii_type", "PIIType.", "column_id"),
+    ):
+        broken = bind.execute(sa.text(
+            f"SELECT {key} AS id, {column} AS value FROM {table} WHERE {column} LIKE :p"),
+            {"p": prefix + "%"}).all()
+        for row in broken:
+            fixed = row.value[len(prefix):]
+            bind.execute(sa.text(f"UPDATE {table} SET {column} = :v WHERE {key} = :i"), {"v": fixed, "i": row.id})
+            entity_id = row.id if table == "model_entities" else next(
+                (c.entity_id for c in columns if c.column_id == row.id), None)
+            if entity_id is not None:
+                finding(entity_model[entity_id], "enum_name_repaired", entity_name[entity_id],
+                        f"{column} was stored as {row.value!r}, which could not be read back; now {fixed!r}")
 
     # Primary keys, UNIQUE and CHECK: exact.
     by_entity: dict[uuid.UUID, list] = defaultdict(list)

@@ -24,9 +24,15 @@ export default function ModelsPage() {
 
   useEffect(() => {
     let live = true;
-    listModels()
-      .then((found) => live && setModels(found))
-      .catch((e) => live && setError(errMessage(e, 'The models could not be loaded.')));
+    const load = async () => {
+      try {
+        const found = await listModels();
+        if (live) setModels(found);
+      } catch (e) {
+        if (live) setError(errMessage(e, 'The models could not be loaded.'));
+      }
+    };
+    void load();
     return () => {
       live = false;
     };
