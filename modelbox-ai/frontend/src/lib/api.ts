@@ -18,6 +18,7 @@ import type {
   ApiKeyCreatedResponse,
   ApiKeyInfo,
   ArtifactStatusInfo,
+  AttestationsResponse,
   ClassificationScale,
   ConnectionCreateRequest,
   ConnectionInfo,
@@ -27,10 +28,12 @@ import type {
   DictionaryFormat,
   DiffRequest,
   DiffResponse,
+  DriftReport,
   EgressLedgerPage,
   Entity,
   ExportFormat,
   ExportResponse,
+  FieldRef,
   ImportDialectInfo,
   ImportResponse,
   IntrospectRequest,
@@ -48,6 +51,7 @@ import type {
   TransformParadigmRequest,
   TransformParadigmResponse,
   ValidationReport,
+  VerifyResponse,
   WorkspaceInfo,
   WorkspaceRole,
 } from '@/types/schema';
@@ -419,6 +423,30 @@ export async function importDdl(payload: {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return data;
+}
+
+// --- Field attestations and verification (Sprint 8 Step 7) ---
+export async function listAttestations(modelId: string): Promise<AttestationsResponse> {
+  const { data } = await apiClient.get<AttestationsResponse>(`/model/${modelId}/attestations`);
+  return data;
+}
+
+/** Ask for fields to be verified; the server decides, and says why for each. APPROVER or higher. */
+export async function verifyFields(modelId: string, fields: FieldRef[]): Promise<VerifyResponse> {
+  const { data } = await apiClient.post<VerifyResponse>(`/model/${modelId}/attestations/verify`, { fields });
+  return data;
+}
+
+/** The drift report: the saved model against a fresh import of the deployed schema's DDL. */
+export async function driftReport(modelId: string, file: File, dialect: string): Promise<DriftReport> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('dialect', dialect);
+  form.append('format', 'json');
+  const { data } = await apiClient.post<{ files: Record<string, string> }>(`/model/${modelId}/drift`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return JSON.parse(data.files['drift_report.json'] ?? '{}') as DriftReport;
 }
 
 export async function getImportReport(
