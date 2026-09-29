@@ -38,12 +38,16 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
 from app.schemas.data_model import (
+    Cardinality,
+    CheckConstraintSchema,
     ColumnSchema,
     EntitySchema,
     EntityType,
     Paradigm,
     RelationshipSchema,
     SynthesizedModel,
+    UniqueConstraintSchema,
+    columns_read_by,
 )
 from app.services.ddl_import import (
     counter,
@@ -168,8 +172,8 @@ class _Table:
     primary_key: list[str] = field(default_factory=list)
     primary_key_count: int = 0
     foreign_keys: list[dict[str, Any]] = field(default_factory=list)
-    uniques: list[list[str]] = field(default_factory=list)
-    checks: list[str] = field(default_factory=list)  # table-level CHECKs, as SQL
+    uniques: list[tuple[str | None, list[str]]] = field(default_factory=list)  # (name, columns)
+    checks: list[tuple[str | None, str]] = field(default_factory=list)  # table-level (name, SQL)
     description: str | None = None
     partitioning: str | None = None
     statements: list[int] = field(default_factory=list)
@@ -354,10 +358,11 @@ class _Builder:
     def _sql(self, node: exp.Expression) -> str:
         return node.sql(dialect=_SQLGLOT_DIALECT[self.dialect])
 
-    def _constraint(self, table: _Table, node: exp.Expression, statement: splitter.Statement) -> None:
+    def _constraint(self, table: _Table, node: exp.Expression, statement: splitter.Statement,
+                    name: str | None = None) -> None:
         if isinstance(node, exp.Constraint):
             for inner in node.expressions:
-                self._constraint(table, inner, statement)
+                self._constraint(table, inner, statement, node.name or None)
             return
         if isinstance(node, exp.PrimaryKey):
             table.primary_key = _column_names(node.expressions)
@@ -366,6 +371,7 @@ class _Builder:
             reference = node.args.get("reference")
             target = reference.this if reference is not None else None
             table.foreign_keys.append({
+                "name": name,
                 "columns": _column_names(node.expressions),
                 "references": _bare(target.this) if isinstance(target, exp.Schema) else _bare(target),
                 "ref_columns": _column_names(target.expressions) if isinstance(target, exp.Schema) else [],
@@ -373,9 +379,9 @@ class _Builder:
             })
         elif isinstance(node, exp.UniqueColumnConstraint):
             schema = node.this
-            table.uniques.append(_column_names(schema.expressions) if isinstance(schema, exp.Schema) else [])
+            table.uniques.append((name, _column_names(schema.expressions) if isinstance(schema, exp.Schema) else []))
         elif isinstance(node, exp.CheckColumnConstraint):
-            table.checks.append(self._sql(node.this))
+            table.checks.append((name, self._sql(node.this)))
         else:
             raise ImportFailure(f"table constraint of an unsupported kind: {type(node).__name__}")
 
@@ -437,6 +443,7 @@ class _Builder:
             elif isinstance(ckind, exp.Reference):
                 target = ckind.this
                 table.foreign_keys.append({
+                    "name": constraint.name or None,
                     "columns": [column.name],
                     "references": _bare(target.this) if isinstance(target, exp.Schema) else _bare(target),
                     "ref_columns": _column_names(target.expressions) if isinstance(target, exp.Schema) else [],
@@ -569,22 +576,9 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
         if name in builder.partitions:
             continue
         table_held: dict[str, Any] = {}
-        unique_single = {cols[0] for cols in table.uniques if len(cols) == 1}
-        held_uniques = [cols for cols in table.uniques if len(cols) != 1]
-        column_checks: dict[str, list[str]] = {}
-        held_checks: list[str] = []
-        for check in table.checks:
-            referenced = {c for c in re.findall(r"[\"]?([A-Za-z_][\w$#]*)[\"]?", check)
-                          if c in table.columns or c.upper() in table.columns or c.lower() in table.columns}
-            if len(referenced) == 1:
-                col = next(iter(referenced))
-                key = col if col in table.columns else (col.upper() if col.upper() in table.columns else col.lower())
-                column_checks.setdefault(key, []).append(check)
-            else:
-                held_checks.append(check)
+        names = list(table.columns)
         columns: list[ColumnSchema] = []
         for position, column in enumerate(table.columns.values()):
-            checks = column.checks + column_checks.get(column.name, [])
             data_type = column.data_type
             if column.user_type is not None:
                 alias = builder.aliases.get(column.user_type.lower())
@@ -606,43 +600,36 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
                     data_type=data_type,
                     source_data_type=column.source_type,
                     ordinal_position=position,
-                    is_primary_key=column.name in table.primary_key,
                     is_nullable=column.nullable,
-                    is_unique=column.unique or column.name in unique_single,
                     default_value=column.default,
-                    check_expression=" AND ".join(f"({c})" for c in checks) if checks else None,
                     description=column.description,
                 ))
             except ValueError as exc:
                 failures.append({"statement": table.statement, "table": name,
                                  "reason": f"column {column.name} does not fit the model: {exc}"})
+        # Keys and constraints go into the model whole (Sprint 8 Step 3): a
+        # composite key, and a UNIQUE or CHECK over several columns, included.
+        uniques = [UniqueConstraintSchema(columns=[c.name]) for c in table.columns.values() if c.unique]
+        uniques += [UniqueConstraintSchema(name=n, columns=cols) for n, cols in table.uniques if cols]
+        checks = [CheckConstraintSchema(expression=e, columns=[c.name])
+                  for c in table.columns.values() for e in c.checks]
+        checks += [CheckConstraintSchema(name=n, expression=e, columns=columns_read_by(e, names))
+                   for n, e in table.checks]
         for fk in table.foreign_keys:
-            simple = len(fk["columns"]) == 1 and len(fk["ref_columns"]) <= 1
             target = fk["references"]
-            if simple and target in entity_names:
-                ref_col = fk["ref_columns"][0] if fk["ref_columns"] else None
-                if ref_col is None:
-                    target_table = builder.tables[target]
-                    ref_col = target_table.primary_key[0] if len(target_table.primary_key) == 1 else None
-                if ref_col is not None:
-                    relationships.append(RelationshipSchema.model_validate({
-                        "from": f"{name}.{fk['columns'][0]}", "to": f"{target}.{ref_col}", "cardinality": "N:1"}))
-                    for modelled in columns:
-                        if modelled.name == fk["columns"][0]:
-                            modelled.is_foreign_key = True
-                            modelled.references = f"{target}.{ref_col}"
-                    continue
-            reason = ("composite foreign key: the model holds single-column relationships"
-                      if not simple else f"references {target!r}, which is not a table in this file")
-            table_held.setdefault("foreign_keys", []).append({**fk, "reason": reason})
-        if held_uniques:
-            table_held["unique_constraints"] = [
-                {"columns": cols, "reason": "UNIQUE over several columns: the model holds single-column UNIQUE"}
-                for cols in held_uniques]
-        if held_checks:
-            table_held["check_constraints"] = [
-                {"expression": check, "reason": "CHECK over several columns: the model holds column CHECKs"}
-                for check in held_checks]
+            if target not in entity_names:
+                table_held.setdefault("foreign_keys", []).append(
+                    {**fk, "reason": f"references {target!r}, which is not a table in this file"})
+                continue
+            referenced = fk["ref_columns"] or builder.tables[target].primary_key
+            if len(referenced) != len(fk["columns"]):
+                table_held.setdefault("foreign_keys", []).append(
+                    {**fk, "reason": f"names {len(fk['columns'])} columns, but {target}'s primary key, which it "
+                                     f"references implicitly, has {len(referenced)}"})
+                continue
+            relationships.append(RelationshipSchema(
+                from_ref=name, from_columns=fk["columns"], to_ref=target, to_columns=referenced,
+                name=fk.get("name"), cardinality=Cardinality.MANY_TO_ONE))
         if table.partitioning:
             table_held["partitioning"] = table.partitioning
         partitions = [
@@ -656,8 +643,14 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
         if table_held:
             held[name] = table_held
         if columns:
-            entities.append(EntitySchema(entity_name=name, entity_type=EntityType.TABLE,
-                                         description=table.description, columns=columns))
+            try:
+                entities.append(EntitySchema(
+                    entity_name=name, entity_type=EntityType.TABLE, description=table.description,
+                    columns=columns, primary_key=table.primary_key, unique_constraints=uniques,
+                    check_constraints=checks))
+            except ValueError as exc:
+                failures.append({"statement": table.statement, "table": name,
+                                 "reason": f"its keys or constraints do not fit the model: {exc}"})
     for child, info in builder.partitions.items():
         if info["parent"] not in entity_names:
             failures.append({"statement": info["statement"], "table": child,

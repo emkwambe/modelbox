@@ -313,6 +313,11 @@ class ModelEntity(Base):
     next_stable_id: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
     )
+    # The entity's place in the model, so a model reopens in the order it was
+    # saved (migration 0025).
+    position: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
 
     data_model: Mapped[DataModel] = relationship(back_populates="entities")
     columns: Mapped[list[EntityColumn]] = relationship(
@@ -320,6 +325,12 @@ class ModelEntity(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="EntityColumn.ordinal_position",
+    )
+    constraints: Mapped[list[EntityConstraint]] = relationship(
+        back_populates="entity",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="EntityConstraint.position",
     )
 
 
@@ -340,12 +351,9 @@ class EntityColumn(Base):
     )
     column_name: Mapped[str] = mapped_column(String(128), nullable=False)
     data_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    is_primary_key: Mapped[bool] = mapped_column(
-        default=False, server_default=text("false")
-    )
-    is_foreign_key: Mapped[bool] = mapped_column(
-        default=False, server_default=text("false")
-    )
+    # Keys and constraints are not column flags here: they live in
+    # entity_constraints and relationship_columns (migration 0025), and the
+    # IR derives ColumnSchema's flags from them.
     is_pii: Mapped[bool] = mapped_column(
         default=False, server_default=text("false")
     )
@@ -370,15 +378,7 @@ class EntityColumn(Base):
     is_nullable: Mapped[bool] = mapped_column(
         default=True, server_default=text("true")
     )
-    is_unique: Mapped[bool] = mapped_column(
-        default=False, server_default=text("false")
-    )
     default_value: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    check_expression: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    # ColumnSchema.references — a qualified 'entity.column' FK target (M6).
-    # Named reference_target in the database because REFERENCES is a reserved
-    # SQL word; the IR field keeps its name.
-    reference_target: Mapped[str | None] = mapped_column(String(257), nullable=True)
     # ColumnSchema.source_data_type: the type as an imported file declared it
     # (migration 0024). NULL for a column that was not imported.
     source_data_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -386,8 +386,65 @@ class EntityColumn(Base):
     entity: Mapped[ModelEntity] = relationship(back_populates="columns")
 
 
+CONSTRAINT_KINDS = ("PRIMARY KEY", "UNIQUE", "CHECK")
+
+
+class EntityConstraint(Base):
+    """An entity's primary key, a UNIQUE constraint, or a CHECK constraint (0025).
+
+    Members are stored by column name in ``entity_constraint_columns``; the IR
+    checks every member against the entity's columns on each write.
+    """
+
+    __tablename__ = "entity_constraints"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('PRIMARY KEY', 'UNIQUE', 'CHECK')",
+            name="ck_entity_constraints_kind",
+        ),
+        CheckConstraint(
+            "(kind = 'CHECK') = (expression IS NOT NULL)",
+            name="ck_entity_constraints_expression",
+        ),
+    )
+
+    constraint_id: Mapped[uuid.UUID] = _uuid_pk()
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("model_entities.entity_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    expression: Mapped[str | None] = mapped_column(Text, nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    entity: Mapped[ModelEntity] = relationship(back_populates="constraints")
+    columns: Mapped[list[EntityConstraintColumn]] = relationship(
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="EntityConstraintColumn.position",
+    )
+
+
+class EntityConstraintColumn(Base):
+    """One column of an entity constraint, in key order."""
+
+    __tablename__ = "entity_constraint_columns"
+
+    constraint_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("entity_constraints.constraint_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    column_name: Mapped[str] = mapped_column(String(128), nullable=False)
+
+
 class EntityRelationship(Base):
-    """A relationship edge between two entities (and optionally columns)."""
+    """A relationship edge between two entities; its column pairs are rows of
+    ``relationship_columns`` (migration 0025). None means unresolved."""
 
     __tablename__ = "entity_relationships"
     __table_args__ = (
@@ -410,25 +467,67 @@ class EntityRelationship(Base):
         nullable=False,
         index=True,
     )
-    from_column_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid,
-        ForeignKey("entity_columns.column_id"),
-        nullable=True,
-    )
     to_entity_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         ForeignKey("model_entities.entity_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    to_column_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid,
-        ForeignKey("entity_columns.column_id"),
-        nullable=True,
-    )
     cardinality: Mapped[str] = mapped_column(String(16), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    position: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
 
     data_model: Mapped[DataModel] = relationship(back_populates="relationships")
+    columns: Mapped[list[RelationshipColumn]] = relationship(
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="RelationshipColumn.position",
+    )
+
+
+class RelationshipColumn(Base):
+    """One column pair of a relationship, by column name (migration 0025).
+
+    Stored by name so an unresolved or partly resolved pair, or one naming a
+    column that does not exist, is kept exactly as written and reported by the
+    linter, rather than lost to a NULL id.
+    """
+
+    __tablename__ = "relationship_columns"
+
+    relationship_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("entity_relationships.relationship_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    from_column_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    to_column_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class ModelConversionFinding(Base):
+    """Something a migration could not convert exactly, listed by model.
+
+    Written by migration 0025 when keys and constraints moved from column
+    flags to their own tables. The model keeps what it can; this says what
+    changed shape and why.
+    """
+
+    __tablename__ = "model_conversion_findings"
+
+    finding_id: Mapped[uuid.UUID] = _uuid_pk()
+    model_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("data_models.model_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    revision: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    detail: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class SynthesisJob(Base):

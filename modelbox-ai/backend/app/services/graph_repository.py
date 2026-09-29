@@ -20,18 +20,22 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.metadata_store import (
     EntityColumn,
+    EntityConstraint,
+    EntityConstraintColumn,
     EntityRelationship,
     ModelEntity,
+    RelationshipColumn,
 )
 from app.schemas.data_model import (
     ColumnSchema,
     EntitySchema,
     RelationshipSchema,
+    unify_foreign_keys,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,11 +68,12 @@ class GraphRepository:
         from scratch and hand out an id that a deployed Protobuf consumer still
         associates with an older field.
 
-        It also stops churning ``EntityRelationship.from_column_id`` /
-        ``to_column_id`` on every canvas save, which the previous
-        delete-and-recreate did as a side effect.
+        Entities and relationships keep the order they are given in, so a
+        model reopens as it was saved.
         """
-        await self._persist(model_id, entities, relationships)
+        # Every writer's graph gets the same reading: an older-form reference
+        # becomes the relationship it describes before anything is stored.
+        await self._persist(model_id, entities, unify_foreign_keys(entities, relationships))
 
     async def _persist(
         self,
@@ -77,7 +82,6 @@ class GraphRepository:
         relationships: list[RelationshipSchema],
     ) -> None:
         entity_ids: dict[str, uuid.UUID] = {}
-        column_ids: dict[tuple[str, str], uuid.UUID] = {}
 
         existing_entities = {
             row.entity_name: row
@@ -88,17 +92,21 @@ class GraphRepository:
             ).scalars().all()
         }
 
-        # Relationships are rebuilt wholesale — they carry no identity of their
-        # own — but must go first, because they reference the column rows a
-        # column deletion below would otherwise orphan.
-        for rel_row in (
-            await self._session.execute(
-                select(EntityRelationship).where(
-                    EntityRelationship.model_id == model_id
-                )
-            )
-        ).scalars().all():
-            await self._session.delete(rel_row)
+        # Relationships and constraints are rebuilt wholesale — they carry no
+        # identity of their own. Child rows are deleted explicitly rather than
+        # left to a database cascade the test schema may not enforce.
+        relationship_ids = select(EntityRelationship.relationship_id).where(
+            EntityRelationship.model_id == model_id)
+        await self._session.execute(
+            delete(RelationshipColumn).where(RelationshipColumn.relationship_id.in_(relationship_ids)))
+        await self._session.execute(delete(EntityRelationship).where(EntityRelationship.model_id == model_id))
+        constraint_ids = select(EntityConstraint.constraint_id).join(
+            ModelEntity, ModelEntity.entity_id == EntityConstraint.entity_id).where(ModelEntity.model_id == model_id)
+        await self._session.execute(
+            delete(EntityConstraintColumn).where(EntityConstraintColumn.constraint_id.in_(constraint_ids)))
+        await self._session.execute(
+            delete(EntityConstraint).where(EntityConstraint.entity_id.in_(
+                select(ModelEntity.entity_id).where(ModelEntity.model_id == model_id))))
         await self._session.flush()
 
         incoming = {entity.entity_name for entity in entities}
@@ -110,13 +118,14 @@ class GraphRepository:
                 await self._session.delete(row)
         await self._session.flush()
 
-        for entity in entities:
+        for entity_position, entity in enumerate(entities):
             found = existing_entities.get(entity.entity_name)
             if found is None:
                 row = ModelEntity(model_id=model_id, entity_name=entity.entity_name)
                 self._session.add(row)
             else:
                 row = found
+            row.position = entity_position
             row.entity_type = str(entity.entity_type)
             row.canvas_position_x = entity.canvas_position_x
             row.canvas_position_y = entity.canvas_position_y
@@ -131,15 +140,10 @@ class GraphRepository:
             entity_ids[entity.entity_name] = row.entity_id
 
             await self._persist_columns(row, entity)
-            for col_row in await self._entity_columns(row.entity_id):
-                column_ids[(entity.entity_name, col_row.column_name)] = (
-                    col_row.column_id
-                )
+            await self._persist_constraints(row, entity)
 
-        for rel in relationships:
-            from_entity, from_col = self._split_ref(rel.from_ref)
-            to_entity, to_col = self._split_ref(rel.to_ref)
-            if from_entity not in entity_ids or to_entity not in entity_ids:
+        for rel_position, rel in enumerate(relationships):
+            if rel.from_ref not in entity_ids or rel.to_ref not in entity_ids:
                 # A dangling edge is a lint finding (DANGLING_REF), not a write
                 # error — the canvas must still be able to save a work in
                 # progress. Log it so a silently dropped edge is traceable.
@@ -149,16 +153,40 @@ class GraphRepository:
                     rel.to_ref,
                 )
                 continue
-            self._session.add(
-                EntityRelationship(
-                    model_id=model_id,
-                    from_entity_id=entity_ids[from_entity],
-                    from_column_id=column_ids.get((from_entity, from_col)),
-                    to_entity_id=entity_ids[to_entity],
-                    to_column_id=column_ids.get((to_entity, to_col)),
-                    cardinality=str(rel.cardinality),
-                )
+            rel_row = EntityRelationship(
+                model_id=model_id,
+                from_entity_id=entity_ids[rel.from_ref],
+                to_entity_id=entity_ids[rel.to_ref],
+                cardinality=str(rel.cardinality),
+                name=rel.name,
+                position=rel_position,
             )
+            self._session.add(rel_row)
+            await self._session.flush()
+            for pair in range(max(len(rel.from_columns), len(rel.to_columns))):
+                self._session.add(RelationshipColumn(
+                    relationship_id=rel_row.relationship_id,
+                    position=pair,
+                    from_column_name=rel.from_columns[pair] if pair < len(rel.from_columns) else None,
+                    to_column_name=rel.to_columns[pair] if pair < len(rel.to_columns) else None,
+                ))
+        await self._session.flush()
+
+    async def _persist_constraints(self, entity_row: ModelEntity, entity: EntitySchema) -> None:
+        """Write the entity's primary key, UNIQUE and CHECK constraints, in order."""
+        rows: list[tuple[str, str | None, str | None, list[str]]] = []
+        if entity.primary_key:
+            rows.append(("PRIMARY KEY", None, None, entity.primary_key))
+        rows += [("UNIQUE", u.name, None, u.columns) for u in entity.unique_constraints]
+        rows += [("CHECK", k.name, k.expression, k.columns) for k in entity.check_constraints]
+        for position, (kind, name, expression, columns) in enumerate(rows):
+            constraint = EntityConstraint(entity_id=entity_row.entity_id, kind=kind, name=name,
+                                          expression=expression, position=position)
+            self._session.add(constraint)
+            await self._session.flush()
+            for member, column in enumerate(columns):
+                self._session.add(EntityConstraintColumn(
+                    constraint_id=constraint.constraint_id, position=member, column_name=column))
         await self._session.flush()
 
     # -- columns & stable identity ------------------------------------------
@@ -206,8 +234,6 @@ class GraphRepository:
 
             row.column_name = col.name
             row.data_type = col.data_type
-            row.is_primary_key = col.is_primary_key
-            row.is_foreign_key = col.is_foreign_key
             row.is_pii = col.is_pii
             row.pii_type = str(col.pii_type) if col.pii_type else None
             row.description = col.description
@@ -217,20 +243,11 @@ class GraphRepository:
             row.max_value = col.max_value
             row.regex_pattern = col.regex_pattern
             row.is_nullable = col.is_nullable
-            row.is_unique = col.is_unique
             row.default_value = col.default_value
-            row.check_expression = col.check_expression
             row.source_data_type = col.source_data_type
-            # One concept, three names, and all three are correct:
-            #   ColumnSchema.references      the IR — the published contract
-            #   entity_columns.reference_target
-            #                                storage — REFERENCES is reserved SQL
-            #   ODCS v3.1.0 `foreignKey`     the emitted artifact (Sprint 3, C7)
-            # This assignment is the only place the IR and storage names are
-            # translated. Do not "fix" the mismatch by renaming either side:
-            # the column name would break Postgres, and the IR name is a
-            # published contract the canvas and every export already use.
-            row.reference_target = col.references
+            # is_primary_key, is_unique, check_expression, is_foreign_key and
+            # references are derived from the entity's constraints and the
+            # model's relationships, and stored there (migration 0025).
             row.ordinal_position = (
                 col.ordinal_position if col.ordinal_position is not None else position
             )
@@ -270,8 +287,3 @@ class GraphRepository:
         if match is not None and match.stable_id not in claimed:
             return match
         return None
-
-    @staticmethod
-    def _split_ref(ref: str) -> tuple[str, str]:
-        parts = ref.split(".", 1)
-        return (parts[0], parts[1] if len(parts) > 1 else "")

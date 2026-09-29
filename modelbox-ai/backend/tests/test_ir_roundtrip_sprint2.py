@@ -301,9 +301,12 @@ async def test_every_new_field_survives_a_full_round_trip(
         grain="One row per order.",
         agg_time_column="ordered_at",
     )
-    await save(session, model_id, [original])
+    # A reference is a relationship (Sprint 8 Step 3), so its target is in the model.
+    target = entity("dim_customer", [col("customer_sk", "INTEGER", is_primary_key=True)])
+    await save(session, model_id, [original, target])
 
-    reloaded = (await reload(session, model_id)).entities[0]
+    whole = await reload(session, model_id)
+    reloaded = whole.entities[0]
     assert reloaded.agg_time_column == "ordered_at"
     assert reloaded.grain == "One row per order."
 
@@ -318,7 +321,7 @@ async def test_every_new_field_survives_a_full_round_trip(
     assert all(c.stable_id is not None for c in reloaded.columns)
 
     # Idempotence: saving what was just read back must change nothing.
-    await save(session, model_id, [reloaded])
+    await save(session, model_id, whole.entities, whole.relationships)
     again = (await reload(session, model_id)).entities[0]
     assert again.model_dump() == reloaded.model_dump(), (
         "a save-reload cycle is not idempotent"
