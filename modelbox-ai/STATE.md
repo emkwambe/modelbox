@@ -1,32 +1,32 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `sprint-8/step-1-export-fixtures`, branched from
-`main` at `989fed6`. This file is rewritten at every stop, merge, deploy
-and tag; a figure here is the output of a command run for it, not a copy from
-another document.*
+*Regenerated 2026-09-29 on `sprint-8/step-1-5-pg-snowflake-fixtures`,
+branched from `main` at `5096822`. This file is rewritten at every stop,
+merge, deploy and tag; a figure here is the output of a command run for it,
+not a copy from another document.*
 
 ## Where the code is
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `989fed6` | records and CI hygiene (#14): Node 24 release actions and a shared image build, the backend suite on PostgreSQL ("Backend Pytest (Postgres)", not yet required) |
+| `main` | `5096822` | genuine Oracle and SQL Server DDL export fixtures (#15), on records and CI hygiene (#14) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36516574170: gate, backend and frontend images all green) |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-8/step-1-export-fixtures` | this branch | genuine DDL export fixtures (below); no product behaviour change |
-| `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-8/step-1-5-pg-snowflake-fixtures` | this branch | PostgreSQL and Snowflake DDL fixtures (below); no product behaviour change |
+| `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
-## In progress on this branch
+## DDL fixtures
 
-- **DDL fixtures, genuine tool output.** A new workflow, DDL Fixtures, loads
-  public sample schemas into real databases and exports them with the
-  databases' own tools: Oracle's `DBMS_METADATA` (HR and CO, populated, on
-  Oracle Database Free 23.26.3) and SMO, the engine behind SSMS's scripting
-  (AdventureWorks2022 on SQL Server 2022 CU27). Each fixture under
-  `backend/tests/fixtures/ddl/` has a provenance header and a manifest counted
-  from the catalog views: HR 7 tables and 35 columns, CO 7 and 43,
-  AdventureWorks 71 and 486. Every run regenerates the fixtures in fresh
-  containers and fails unless the committed copies match (run 36534235923:
-  both match).
+`backend/tests/fixtures/ddl/` holds the importer's evidence base. Oracle
+(`DBMS_METADATA`, HR and CO, populated), SQL Server (SMO, AdventureWorks2022)
+and, on this branch, PostgreSQL (`pg_dump` from the appliance's own 16.15
+image, Pagila) are genuine tool output: the DDL Fixtures workflow regenerates
+them in fresh containers and fails unless the committed copies match. Each
+has a manifest counted from its catalog views. Snowflake is the exception:
+one fixture hand-written from Snowflake's `GET_DDL` documentation, labelled
+documentation-derived in its header and manifest, with a test that fails if
+the label goes or if anything calls Snowflake import certified while it
+stands.
 
 Migration head: `0022_append_only_ledgers`.
 
