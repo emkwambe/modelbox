@@ -1,7 +1,8 @@
 # ModelBox AI — Security FAQ
 
 *For security reviewers, data-protection officers and platform teams assessing
-the appliance. Last reviewed 2026-08-29 against `sprint/5-governance`.*
+the appliance. Last reviewed 2026-09-28 against `sprint-7/secure-by-default`,
+including a black-box suite run against the installed appliance.*
 
 **Every capability statement below carries a `PL-` identifier** pointing at
 [`marketing/PROOF_LOG.md`](marketing/PROOF_LOG.md), where the claim is written
@@ -20,9 +21,15 @@ past its evidence.
 ## 1. What leaves the network?
 
 **One kind of thing: a prompt sent to a language model provider.** ModelBox is a
-data *modelling* tool — it works on schemas, not on your rows. There is no
-telemetry, no analytics beacon, no licence check phoning home, and no crash
-reporter.
+data *modelling* tool — it works on schemas, not on your rows.
+
+**The appliance needs no outbound connection to start or to run (PL-010).** Our
+CI installs it with every service except the web UI on a Docker network that
+has no gateway, first proving the backend cannot open an outbound connection,
+and then shows that it starts, serves its API through the UI, refuses a request
+routed to a cloud provider, and records no outbound attempt. What that proves
+is that nothing the appliance needs depends on reaching outside; the prompt
+paths below are the only features that send anything.
 
 Four features send a prompt: synthesising a model from requirements,
 transforming a model between paradigms, enriching a data dictionary, and the
@@ -41,11 +48,16 @@ never holds your data. Reverse-engineering an existing warehouse reads
 > can import a provider SDK, exactly one function inside it reaches the client,
 > and the ledger write precedes every statement in that function that does. All
 > three are asserted by tests, so a fourth call site added later fails the build
-> rather than escaping the record.
+> rather than escaping the record. **Each HTTP request is its own row**, a
+> retry after an invalid response included.
 
 **The ledger stores a prompt's SHA-256 and its length, never its text**
 (`test_the_ledger_does_not_store_the_prompt`). You can prove two requests
-carried the same prompt; you cannot read either from the audit trail.
+carried the same prompt; you cannot read either from the audit trail. **Nor
+does it store what the model said:** a failed request is recorded by provider,
+model, error class, HTTP status, the provider's error type or code, and
+retry-after seconds, as validated fields, never as the model's output or free
+text (PL-008).
 
 ---
 
@@ -139,11 +151,30 @@ Two consequences a reviewer should weigh:
 
 ## 5. Authentication, secrets and multi-tenancy
 
+- **One organisation per appliance.** Workspaces are teams within a single
+  organisation; two organisations need two appliances. Two things are
+  appliance-wide by design as a result: the SCIM token, and the sign-in events
+  only the appliance owner reads.
+- **The installed appliance refuses the credentials this repository publishes
+  (PL-015).** It will not start until its four secrets are set, and names the
+  one that is missing. It has no default account and no open registration; the
+  first owner is created on the command line (`python -m app.cli
+  create-owner`). A token signed with the development secret is refused. Each
+  of these is checked against the running appliance, and each check has been
+  seen to fail against a test-only profile that puts the weakness back.
+- **One port is published: the web UI's (PL-015).** The API, the database, the
+  cache and the local model runtime are unreachable from the host. The UI port
+  is plain HTTP, so terminate TLS in front of it.
 - **Authentication** is JWT, and tokens are validated for audience and issuer,
-  not merely for signature (register D9). API keys are available for programmatic
-  access and are revocable per workspace.
-- **Tenancy** is by workspace, with OWNER/ADMIN/MEMBER roles. Model access is
-  checked against membership on every route that touches a model.
+  not merely for signature (register D9).
+- **Roles are enforced by the API (PL-016).** Every route declares its minimum
+  role (VIEWER, MEMBER, APPROVER, ADMIN or OWNER). An API key acts only in the
+  workspace it was minted in, at no more than the role its creator gave it and
+  still holds, and a key cannot mint another key. There is no API or UI to add
+  workspace members or change their roles yet.
+- **Sign-ins are audited (PL-017).** Sign-ins, failed sign-ins and SCIM changes
+  reach the appliance owner's JSONL export. A failed audit write is logged as an
+  error, and `/health` reports the appliance as degraded.
 - **Provider credentials** are supplied by environment file and are never
   written to the ledger, the database, or any exported artifact.
 - **Connection strings** for reverse-engineering are encrypted at rest with

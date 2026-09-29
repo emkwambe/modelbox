@@ -17,7 +17,7 @@ graph and writing one would mean inventing a reference answer for a domain in
 order to grade a model against it — and the D10 experience is that a
 single-reference metric mostly measures whether the model picked the same words.
 
-The instrument is the product's own thirteen-rule linter, which needs no
+The instrument is the product's own linter, which needs no
 reference, and the measure is **findings per entity**, not raw findings. A raw
 count is not comparable across sizes — the whole point here is that sizes differ
 — and it rewards omission, since a model emitting fewer tables emits fewer
@@ -303,7 +303,7 @@ async def main(argv: list[str] | None = None) -> int:
         "repeats": args.repeats,
         "conditions": conditions,
         "instrument": (
-            "The product's thirteen-rule linter, reference-free. Findings per "
+            "The product's linter, reference-free. Findings per "
             "entity, split into structural codes "
             f"({sorted(_STRUCTURAL_CODES)}) and tabular codes. No gold graph is "
             "involved and no F1 is computed."

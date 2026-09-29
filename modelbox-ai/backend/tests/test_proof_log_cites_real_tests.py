@@ -59,9 +59,14 @@ def _cited_test_names() -> set[str]:
     return set(_CITATION.findall(PROOF_LOG.read_text(encoding="utf-8")))
 
 
+# The black-box suite (modelbox-ai/tests/blackbox) proves claims against the
+# running appliance, and the Proof Log cites its tests beside these.
+BLACKBOX_DIR = TESTS_DIR.parents[1] / "tests" / "blackbox"
+
+
 def _defined_test_names() -> set[str]:
     defined: set[str] = set()
-    for path in TESTS_DIR.rglob("test_*.py"):
+    for path in [*TESTS_DIR.rglob("test_*.py"), *BLACKBOX_DIR.rglob("test_*.py")]:
         source = path.read_text(encoding="utf-8", errors="ignore")
         defined.update(re.findall(r"^\s*(?:async )?def (test_[a-z0-9_]+)", source, re.MULTILINE))
     return defined
@@ -91,8 +96,10 @@ def test_the_scan_finds_the_test_suite() -> None:
     defined = _defined_test_names()
     assert len(defined) > 200, f"only {len(defined)} test definitions found"
     # A name this file itself defines, so the scanner is checked against a known
-    # answer rather than only against a count.
+    # answer rather than only against a count; and one from the black-box suite,
+    # so its half of the scan is checked the same way.
     assert "test_the_scan_finds_the_test_suite" in defined
+    assert "test_b8_the_application_role_cannot_update_the_egress_ledger" in defined
 
 
 MARKETING = PROOF_LOG.parent
@@ -130,7 +137,7 @@ def test_there_are_marketing_surfaces_and_entries_to_check() -> None:
 def test_every_pl_id_a_public_surface_cites_is_defined() -> None:
     """Register G3, enforced: every landing-page claim traces to a Proof Log ID.
 
-    `VALUE_NARRATIVE.md` cites a dozen ids by hand. A typo — `PL-015`, or a
+    `VALUE_NARRATIVE.md` cites a dozen ids by hand. A typo — `PL-099`, or a
     number kept after an entry was renumbered — would read to a buyer as
     evidence and resolve to nothing, which is the precise failure the Claims
     rule exists to prevent, committed on the one surface a customer actually

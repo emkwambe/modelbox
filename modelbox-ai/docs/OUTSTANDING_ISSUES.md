@@ -14,7 +14,7 @@ argument.
 | id | state | what is missing |
 |---|---|---|
 | **D10** | **open, two ways** | The cloud half **ran and failed** (2026-09-03, 12 calls, both models FAIL on all three F1 axes). The **local half has never been attempted** — `ollama-engine` / `qwen2.5-coder:32b` was never stood up, and Sprint 6 stop condition 8 names it. Fixing the first does not close the criterion. |
-| **G8** | **NOT MET** | OIDC done and tested; **SAML 2.0 outstanding**. No partial credit by register rule. |
+| **G8** | **NOT MET** | OIDC done and tested; **SAML 2.0 outstanding**. No partial credit by register rule. *2026-09-28: re-specified to OIDC end to end (decision 5); still NOT MET until the UI login flow lands in Sprint 9. SAML is added on a pilot's demand.* |
 | **F1** | **partial** | Colour: **22 literals remaining of 332** (310 converted, 7 files). Type: **253 of 254 remaining** — one declaration converted, and the burn-down is gated but not worked. Blocked on the type-ramp weights decision (§3). |
 | **F2** | **4 screens of 8** | Four screens still hand-roll state; `errorKind` has two consumers. Three unbuilt states are recorded as deferred. |
 | **F4** | **no evidence of any kind** | No test, no 500-entity fixture, no way to build one, no benchmark. Stop condition 4 accepts *either* the full evidence set *or* a narrowed criterion stating the measured ceiling. Neither exists. |
@@ -90,8 +90,14 @@ Two entries were struck on 2026-09-03, recorded rather than deleted:
 
 ---
 
-## 6. Unvalidated assumptions
+## 6. Unvalidated assumptions (the uncertainty register)
 
+- **2026-09-28: Sprint 9's D10 re-measure must pin the linter version.** D10's
+  instrument is the product's own linter, and its code set changed from 13 to 15
+  in Sprint 7 (`INVALID_DATA_TYPE` and `INVALID_DEFAULT`, both errors). A
+  re-measure scored by a different code set than the measurement it is compared
+  with is not a comparison, so the run records the linter's code set and version
+  beside its numbers. Not critical: nothing is claimed from D10 (decision 4).
 - **H2 is load-bearing and rests on one engineer's reading.** The claim that
   `saas-subscription`'s 0.000 is a good model badly scored — which motivates
   most of the metric work — has never been checked by anyone who did not build

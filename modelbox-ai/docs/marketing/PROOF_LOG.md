@@ -76,10 +76,16 @@ pin in `requirements.lock`, or the gold graph set.
 
 ## PL-003 — `main` is protected and cannot be merged into on a red build
 
-**Claim:** "Nothing reaches our main branch without six independent checks
-passing: backend tests, the artifact fidelity harness, strict TypeScript, a
-production build, lint, and a single-migration-head check — plus a version
-consistency gate."
+**Claim** (reworded 2026-09-28): "Nothing reaches our main branch without every
+required check passing: backend tests, lint and type checks, the artifact
+fidelity harness, strict TypeScript, a production build, migration and version
+gates, a leak guard, and the black-box acceptance suite against the running
+appliance. A pull request with one red required check cannot be merged."
+
+**Exercised 2026-09-28:** a throwaway pull request (#8) whose only change was a
+deliberately failing test read `BLOCKED`, and `gh pr merge` without `--admin`
+refused it ("the base branch policy prohibits the merge"). It was closed
+unmerged and its branch deleted.
 
 **Evidence:** GitHub branch protection on `emkwambe/modelbox@main` with named
 required status checks and `strict: true` (branches must be up to date before
@@ -102,11 +108,13 @@ runs. The claim worth making is not "we have CI"; it is "our CI checks each
 artifact against the tool that consumes it," and the fidelity job is what makes
 that true.
 
-**Honest limit:** `enforce_admins` is off and no reviewer approval is required,
-so a repository administrator can still bypass. Suitable for "changes are gated,"
-not for "changes are impossible to force."
+**Honest limit:** ~~`enforce_admins` is off and no reviewer approval is required,
+so a repository administrator can still bypass.~~ `enforce_admins` is on as of
+2026-09-28 (read back with the command above). No reviewer approval is
+required, and an administrator can still change the protection itself.
+Suitable for "changes are gated," not for "changes are impossible to force."
 
-**Verified:** 2026-08-11 · **Sprint:** 1 · **Version:** 1.6.0
+**Verified:** 2026-08-11, exercised 2026-09-28 · **Sprint:** 1, 7 · **Version:** 1.6.0
 **Expires:** if branch protection is relaxed, a required check is removed from the
 context list, or the fidelity job stops running with `MODELBOX_FIDELITY_STRICT=1`.
 **Usable in:** enterprise procurement questionnaire, engineering-practices page,
@@ -261,12 +269,15 @@ writes a file into the project that the exporter did not emit.
 
 ## PL-008 — Nothing reaches a model provider without being recorded first
 
-**Claim:** "Every request this appliance makes to a language model is written
-to an append-only ledger *before* it is sent. If the ledger cannot be written,
-the request is not made. And no code outside the single gateway can reach a
-provider at all — that is enforced structurally, not by review."
+**Claim** (reworded 2026-09-28 to its exact evidence): "Every HTTP request this
+appliance sends to a language model provider is written to a ledger *before* it
+is sent: one row per request, a schema re-ask included, and if the row cannot be
+written the request is not made. No code outside the single gateway can reach a
+provider; that is enforced structurally, not by review. The application cannot
+rewrite the ledger: its database role may read and add rows, and nothing else,
+which is proven against the running appliance."
 
-**Evidence:** `test_egress_choke_point.py`, five tests carrying the claim:
+**Evidence:** `test_egress_choke_point.py`, five tests carrying the structure:
 
 | Property | Test |
 | :-- | :-- |
@@ -275,6 +286,15 @@ provider at all — that is enforced structurally, not by review."
 | Exactly one function reaches the provider client | `test_only_one_function_reaches_the_provider_client` |
 | The ledger write precedes every statement that reaches it | `test_the_attempt_write_precedes_every_client_statement` |
 | A ledger that cannot write stops the request | `test_a_ledger_that_cannot_write_stops_the_request` |
+
+Added in Sprint 7:
+
+| Property | Test |
+| :-- | :-- |
+| One ledger row per HTTP request: invalid JSON twice then valid is three rows, through the real Instructor client | `test_gateway_instructor.py::test_invalid_json_twice_then_valid_is_three_attempt_rows`; negative control `test_negative_control_instructor_retries_hide_requests_from_the_ledger` |
+| A failure is recorded by class and structured fields, never the model's output | `test_model_output_redaction.py::test_model_output_reaches_no_ledger_error_or_log`; `test_provider_failure_fields.py::test_a_rate_limit_records_status_type_code_and_retry_after` |
+| The application's role cannot update, delete or truncate either ledger (Postgres, raw SQL) | `test_ledger_roles_postgres.py::test_the_app_role_appends_but_cannot_rewrite_either_ledger`; negative control `test_negative_control_an_extra_ledger_grant_fails_the_check` |
+| The same, against the running appliance | black-box `test_config_b.py::test_b8_the_application_role_cannot_update_the_egress_ledger`, CI run 36501535008 |
 
 Schema and durability: `test_migration_0015_egress_audit.py`, against a
 populated PostgreSQL 16, verified with raw SQL rather than through the ORM.
@@ -313,8 +333,11 @@ relied on. See `docs/sprint-5-progress.md`.
   the request has already left, and the ATTEMPT row stands alone saying exactly
   that. A lone ATTEMPT means "we tried and cannot say what happened", not "this
   did not happen".
+* **"Cannot rewrite" is about the application.** The database owner can change
+  a ledger by a deliberate schema change, shipped as a migration; root on the
+  host is out of scope (`SECURITY_FAQ.md` §6).
 
-**Verified:** 2026-08-12 · **Sprint:** 5 · **Version:** unreleased
+**Verified:** 2026-08-12, reworded and extended 2026-09-28 · **Sprint:** 5, 7 · **Version:** unreleased
 **Expires:** if any module outside `llm_gateway.py` gains a provider import, if
 a second function reaches the provider client, or if the ledger write stops
 preceding it. All three are asserted, so expiry is loud rather than silent.
@@ -399,6 +422,21 @@ your API keys, and the air-gapped path is tested with every key present."
 `test_provider_call_without_the_opt_in_is_refused` and
 `test_the_refusal_precedes_any_network_attempt`.
 
+**Against the running appliance** (black-box configuration C, added
+2026-09-28, CI run 36501535008): the appliance with `AIRGAPPED=true`, a
+sentinel value in every provider key, and every service but the web UI on a
+Docker network with no gateway.
+
+| Property | Test (`tests/blackbox/test_config_c.py`) |
+| :-- | :-- |
+| Precondition: the backend cannot open an outbound connection | `test_c0_the_backend_cannot_reach_outside` |
+| The appliance starts and reports itself air-gapped | `test_c1_the_backend_starts_airgapped` |
+| A synthesis that names a cloud provider is refused at route resolution | `test_c2_a_cloud_route_is_refused_at_resolution` |
+| No ledger row and no routing line: zero outbound attempts | `test_c3_zero_outbound_attempts` |
+
+The precondition is what makes the rest mean something: a box that merely had
+no route out would pass C2 and C3 without any control existing.
+
 **Why it is stronger than it looks — the air-gap suite runs with the keys
 loaded.** The obvious way to test air-gapped mode is to unset the credentials,
 which proves nothing: a run with no keys cannot reach a provider whatever the
@@ -441,7 +479,7 @@ distinct.
 * **Neither control encrypts anything.** They govern whether a request is made,
   not what a network observer sees.
 
-**Verified:** 2026-08-29 · **Sprint:** 5 · **Version:** unreleased
+**Verified:** 2026-08-29, against the running appliance 2026-09-28 · **Sprint:** 5, 7 · **Version:** unreleased
 **Expires:** if `AIRGAPPED` stops stripping cloud providers at resolution, if the
 opt-in stops preceding client construction, or if the two flags collapse into
 one. All three are asserted.
@@ -606,6 +644,118 @@ tests, not a consumer's own.
 **Expires:** if a constraint family is added to the IR without a fixture case,
 which `test_seed_fixtures_exercise_every_declared_rule` turns red.
 **Usable in:** landing page, seed/demo-data positioning, evaluation guide.
+
+---
+
+## PL-015 — An installed appliance refuses the credentials this repository publishes, and publishes one port
+
+**Claim:** "Installed as documented, the appliance will not start until its
+four secrets are set, and it names the one that is missing. It has no default
+account and no open registration: the first owner is created on the command
+line. It refuses a token signed with the development secret published in this
+repository. And it publishes one port, the web UI's: the API, the database,
+the cache and the local model runtime cannot be reached from the host."
+
+**Evidence against the running appliance** (`tests/blackbox`, CI run
+36501535008), with the in-process tests that carry each rule:
+
+| Property | Black-box test | In-process |
+| :-- | :-- | :-- |
+| Only `.env.example`: compose refuses and names a missing secret, no container is created | `test_config_a.py::test_a_compose_refuses_with_only_the_example_env` | `test_appliance_configuration.py::test_negative_control_a_defaulted_secret_fails_the_check` |
+| The development account cannot sign in | `test_config_b.py::test_b1_the_dev_account_cannot_sign_in` | `test_dev_seed.py::test_the_seed_is_refused_outside_development_even_when_asked` |
+| A token signed with the shipped secret is refused | `test_config_b.py::test_b2_a_token_signed_with_the_shipped_secret_is_rejected` | `test_config_secrets.py::test_a_shipped_or_short_secret_refuses_to_start` |
+| Ports 4000, 8000, 11434, 5432 and 6379 are unreachable from the host | `test_config_b.py::test_b3_only_the_ui_port_is_reachable` | `test_port_surface.py::test_only_the_ui_publishes_a_port` |
+| Self-registration is refused | `test_config_b.py::test_b4_self_registration_is_refused` | `test_registration_and_bootstrap.py::test_production_refuses_self_registration` |
+| The first owner comes from `create-owner` | the B fixture runs it | `test_registration_and_bootstrap.py::test_create_owner_refuses_a_second_owner` |
+
+**Why it is stronger than it looks — every one of these checks has been seen to
+fail.** CI also runs the suite against a committed, test-only insecure profile
+that puts the weaknesses back by configuration (development mode, the dev seed,
+the shipped JWT secret, open registration, the backend and Ollama ports
+published). Against it, B1, B2, B4 and the 8000 and 11434 port checks must
+fail, and fail on their own check; a check that passed there would turn the
+build red. So none of them is a check that cannot see what it looks for.
+
+**Honest limits:**
+
+* **The web UI's port is plain HTTP.** Terminate TLS in front of it.
+* **Root on the host is out of scope.** Someone with root can read `.env`.
+* **The shipped database password is refused by settings, not observed from
+  outside**: the database publishes no port to probe
+  (`test_config_secrets.py`, `test_appliance_configuration.py`).
+
+**Verified:** 2026-09-28 · **Sprint:** 7 · **Version:** unreleased
+**Expires:** if any black-box B-check above fails, if the insecure profile stops
+making its checks fail, or if the appliance compose file publishes a second port.
+**Usable in:** security FAQ, install guide, regulated-buyer review.
+
+---
+
+## PL-016 — Roles and API keys are enforced by the API, and proven from outside
+
+**Claim:** "Every API route declares the minimum role it needs, from VIEWER
+through MEMBER, APPROVER and ADMIN to OWNER, and the server enforces it. An API
+key acts only in the workspace it was minted in, at no more than the role its
+creator gave it and still holds."
+
+**Evidence:**
+
+| Property | Test |
+| :-- | :-- |
+| Every route, through every included router, declares and enforces a role | `test_route_policy.py::test_every_route_enforces_its_declared_role`; negative control `test_negative_control_an_unguarded_route_in_a_nested_router_fails` |
+| Per-role refusals on mutating routes | `test_role_authorization.py::test_editing_the_graph_requires_member`, `test_approving_requires_approver`, `test_deleting_requires_admin` |
+| A key is refused outside its workspace, and capped | `test_api_key_scope.py::test_a_key_is_refused_in_another_workspace`, `test_a_viewer_capped_key_cannot_write`; negative control `test_negative_control_without_the_workspace_scope_a_key_reaches_b` |
+| A VIEWER's `transform-paradigm` is 403 on the running appliance | black-box `test_config_b.py::test_b5_a_viewer_cannot_transform_a_model` |
+| A key minted in workspace A is 403 in workspace B, whose model its creator can read | black-box `test_config_b.py::test_b6_a_key_minted_in_a_is_refused_in_b` |
+
+The authorisation tests sign in with real credentials and never override the
+code that decides who the caller is.
+
+**Honest limits:**
+
+* **There is no API or UI to add workspace members or set their roles yet**
+  (scheduled for Sprint 8). SCIM provisions people without a role; the
+  black-box suite writes its VIEWER membership directly in the database.
+* **One organisation per appliance.** Workspaces are teams within it; separate
+  organisations need separate appliances (`SECURITY_FAQ.md` §5).
+
+**Verified:** 2026-09-28 · **Sprint:** 7 · **Version:** unreleased
+**Expires:** if a route lacks a declared role, if B5 or B6 fails, or if a key
+acts outside its workspace.
+**Usable in:** security FAQ, regulated-buyer review. **Not** usable as a claim
+that roles can be managed in the product.
+
+---
+
+## PL-017 — Sign-ins reach an owner's audit export, and a failed audit write is visible
+
+**Claim:** "Sign-ins and failed sign-ins, SCIM provisioning and the designation
+of the appliance owner are recorded, and the appliance owner can export them as
+JSONL for a SIEM. If an audit write fails, it is logged as an error and
+`/health` reports the appliance as degraded."
+
+**Evidence:**
+
+| Property | Test |
+| :-- | :-- |
+| The audit sink writes a row with nothing in its path patched | `test_audit_sink_unpatched.py::test_the_unpatched_sink_writes_a_row`; negative control `test_negative_control_without_get_sessionmaker_nothing_is_stored` |
+| A failed write is an ERROR and `/health` reads `degraded` | `test_audit_sink_unpatched.py::test_a_failed_write_logs_error_and_degrades_health`; negative control `test_negative_control_without_the_counter_health_stays_ok` |
+| Every declared audit action, SCIM provisioning included, is emitted by its code path | `test_audit_actions.py::test_every_declared_action_is_emitted_by_its_path`; negative control `test_negative_control_an_unemitted_action_fails_the_check` |
+| The appliance owner reads sign-ins; a plain workspace owner cannot | `test_audit_actions.py::test_the_appliance_owner_reads_logins_and_failed_logins`, `test_a_plain_workspace_owner_is_refused` |
+| On the running appliance: `AUTH_LOGIN` and `AUTH_LOGIN_FAILED` in the owner's export, `/health` ok | black-box `test_config_b.py::test_b7_sign_ins_reach_the_owners_export_and_health_is_ok` |
+| On a database upgraded from before v1.11.0: `designate-appliance-owner`, then `APPLIANCE_OWNER_DESIGNATED` and `AUTH_LOGIN` in that owner's export | black-box `test_upgrade.py::test_designate_on_an_upgraded_database_reaches_the_owners_export` |
+
+**Honest limits:**
+
+* **The failure count is per process.** The API and the worker each report
+  their own; `/health` is the API's.
+* **The owner can change the ledgers by a deliberate schema change**, and root
+  on the host is out of scope (`SECURITY_FAQ.md` §6).
+
+**Verified:** 2026-09-28 · **Sprint:** 7 · **Version:** unreleased
+**Expires:** if the unpatched sink test or B7 fails, or if `/health` stops
+reporting audit write failures.
+**Usable in:** security FAQ, regulated-buyer review, SIEM integration notes.
 
 ---
 

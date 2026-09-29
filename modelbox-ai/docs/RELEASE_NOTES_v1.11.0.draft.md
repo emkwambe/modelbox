@@ -154,6 +154,24 @@ appliance owner, the account `create-owner` makes, at
 `GET /api/v1/audit/appliance-events` and `GET /api/v1/audit/appliance-export`
 (JSONL). A workspace OWNER does not have this access.
 
+### `/health` reports audit writes, and can read `degraded`
+
+`GET /api/health` now carries an `audit` block, `write_failures` and
+`last_write_failure`, and its `status` is `degraded` instead of `ok` while the
+process has failed to write an audit event. The HTTP status stays 200, so a
+check that reads only the status code is unaffected; one that compares the body
+to `"ok"` will see `degraded` when audit writes fail, which is the point. The
+count is per process.
+
+### Provider failures in the egress ledger are recorded as fields
+
+A failed request's `error` column now holds the classification, the exception
+classes, provider, model, and, where the provider sent them, `status=`,
+`type=`, `code=` and `retry_after=` as validated fields. It no longer holds an
+exception's message text, which could quote the model's output. The same text
+is in the gateway's log and in a failed synthesis job's error. Anything that
+parsed the old free-text message needs updating.
+
 ### Paradigm transformation refuses two cases
 
 `POST /api/v1/model/{id}/transform-paradigm` now returns **409** when the

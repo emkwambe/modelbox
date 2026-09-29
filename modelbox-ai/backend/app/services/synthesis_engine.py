@@ -114,8 +114,9 @@ _REPAIRABLE_CODES: frozenset[str] = frozenset(
 """The lint codes a model is asked to fix, and nothing else.
 
 **Not "errors only", though that was the intention.** The obvious rule — feed
-back `severity == "error"` — does not survive contact with the linter: exactly
-two of the thirteen codes are errors, `CYCLIC_FK` and `DANGLING_REF`. Missing
+back `severity == "error"` — does not survive contact with the linter: four of
+its fifteen codes are errors, `CYCLIC_FK`, `DANGLING_REF`, and since Sprint 7
+`INVALID_DATA_TYPE` and `INVALID_DEFAULT`. Missing
 primary keys and the whole invented-constraint family are *warnings*, so
 severity would have excluded the most mechanically fixable defects there are
 while including nothing else.

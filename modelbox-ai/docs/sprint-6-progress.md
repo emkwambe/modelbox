@@ -716,6 +716,28 @@ before the new tests were added.
 
 ---
 
+## D10 conformance work, after Sprint 6.5
+
+*Recorded 2026-09-28, after the fact, as the Sprint 6.5 table above: the
+commits landed on this branch without this file being updated. Author dates
+are as git records them, all 2026-09-03. Each line is the commit's own subject;
+the register and `OUTSTANDING_ISSUES.md` carry D10's current status (open, and
+narrowed by decision 4 to a first draft a modeller reviews).*
+
+| Commit | Date | Subject |
+| :-- | :-- | :-- |
+| `6752c1e` | 2026-09-03 | Stop scoring the axis that could not tell a good answer from a bad one |
+| `8a01561` | 2026-09-03 | Fourteen claims proven around the one that is not |
+| `34cf527` | 2026-09-03 | Three fixes, three false negatives, and no test that the metric can still say no |
+| `1392459` | 2026-09-03 | Eight of twelve, not nine, and the counts were never comparable anyway |
+| `c67d0da` | 2026-09-03 | Damage the models on purpose, and check the metric still notices |
+| `c278ab8` | 2026-09-03 | A harness that measures the product, and a 2x2 that can tell two stories apart |
+| `7385ce9` | 2026-09-03 | Record whether the repair fired, because the run that needed to know could not tell |
+| `7e05ccc` | 2026-09-03 | Size drives the volume, the domain drives the severity |
+| `8001975` | 2026-09-03 | The repair pass has never fired, and that is the answer |
+
+---
+
 ## Carried, and why each is still open
 
 | Item | Why it is open |

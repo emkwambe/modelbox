@@ -3,7 +3,7 @@
 `GraphEngine.validate` has always run on the synthesised graph. Its report went
 to the canvas for a human to fix by hand and, in the engine, into
 ``logger.warning`` as a *count* — the issues themselves were discarded. So the
-product owned a deterministic thirteen-rule checker and never told the model
+product owned a deterministic rule-based linter and never told the model
 what it found.
 
 That is the one shape of self-correction with evidence behind it. A model asked

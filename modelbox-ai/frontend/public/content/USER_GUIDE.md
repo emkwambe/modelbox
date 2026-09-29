@@ -1,9 +1,9 @@
 # ModelBox AI — User Guide
 
-ModelBox AI is an LLM-agnostic **data modeling & governance mesh**: synthesize
-validated models from plain language, reverse-engineer live warehouses, lint for
-governance, diff & migrate schemas, and export production artifacts — dbt, data
-contracts, semantic layers, dictionaries, and seed data.
+ModelBox AI is an LLM-agnostic **data modelling appliance**: generate a first-draft
+model from plain language for a modeller to review and edit, reverse-engineer
+live warehouses, lint for governance, diff & migrate schemas, and export
+artifacts — dbt, data contracts, semantic layers, dictionaries, and seed data.
 
 This guide walks data teams through the seven core workflows. All actions are
 available in the web UI; every one is also scriptable via the API (see

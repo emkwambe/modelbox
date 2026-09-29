@@ -133,7 +133,7 @@ def test_each_description_states_a_grain(graph_id: str) -> None:
     """Grain is the field a model cannot infer and source documents omit.
 
     It is also the single highest-leverage input the product has — `MISSING_GRAIN`
-    is one of the thirteen codes the candidate will be scored against. A prompt
+    is one of the linter codes the candidate will be scored against. A prompt
     that omits it is asking the model to guess, then penalising the guess.
     """
     description = DESCRIPTIONS[graph_id].lower()

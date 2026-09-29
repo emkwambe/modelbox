@@ -24,7 +24,7 @@ const CAPABILITIES: { icon: string; title: string; desc: string }[] = [
   {
     icon: '🧠',
     title: 'AI Synthesis',
-    desc: 'Natural language, PRDs, or DDL → validated models across 3NF, Kimball, Data Vault & OBT.',
+    desc: 'Natural language, PRDs, or DDL → a first-draft model for a modeller to review and edit, in 3NF, Kimball, Data Vault or OBT.',
   },
   {
     icon: '🔀',
@@ -220,14 +220,14 @@ export default function HomePage() {
           marginTop: 40,
         }}
       >
-        The end-to-end data modeling
+        A data modelling appliance
         <br />
-        &amp; governance mesh
+        for teams that review what they ship
       </h1>
       <p style={{ color: color.neutral[600], marginTop: 12, fontSize: 16, maxWidth: 640 }}>
-        Synthesize validated models from plain language, diff &amp; migrate
-        schemas, and ship dbt, data contracts, and semantic layers — with
-        governance built in.
+        Generate a first-draft model from plain language for a modeller to
+        review and edit, diff &amp; migrate schemas, and export dbt, data
+        contracts, and semantic layers.
       </p>
 
       <button
