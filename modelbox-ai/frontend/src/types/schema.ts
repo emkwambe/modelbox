@@ -66,6 +66,15 @@ export type DictionaryFormat = 'markdown' | 'html' | 'json';
 // ---------------------------------------------------------------------------
 // Core domain shapes
 // ---------------------------------------------------------------------------
+/**
+ * Keys and constraints (Sprint 8 Step 3) have one source: the entity's
+ * `primary_key`, `unique_constraints` and `check_constraints`, and the model's
+ * relationships for foreign keys. The column flags below
+ * (`is_primary_key`, `is_unique`, `check_expression`, `is_foreign_key`,
+ * `references`) are derived from those by the server. The canvas edits the
+ * one-column flags and `getGraphPayload` turns them back into lists; it never
+ * sends the flags, because a flag that disagrees with a list is refused.
+ */
 export interface Column {
   name: string;
   data_type: string;
@@ -97,6 +106,20 @@ export interface Column {
   check_expression?: string | null;
   /** The type exactly as an imported DDL file declared it; null if not imported. */
   source_data_type?: string | null;
+  /** The DEFAULT exactly as an imported DDL file declared it; null if not imported. */
+  source_default_value?: string | null;
+}
+
+export interface UniqueConstraint {
+  name?: string | null;
+  columns: string[];
+}
+
+export interface CheckConstraint {
+  name?: string | null;
+  expression: string;
+  /** The columns the expression reads. */
+  columns?: string[];
 }
 
 export interface Entity {
@@ -116,14 +139,30 @@ export interface Entity {
   canvas_position_x: number;
   canvas_position_y: number;
   columns: Column[];
+  /** The primary key's columns, in key order. */
+  primary_key?: string[];
+  unique_constraints?: UniqueConstraint[];
+  check_constraints?: CheckConstraint[];
 }
 
 export interface Relationship {
-  /** Source ref, e.g. `fact_orders.customer_hk`. */
+  /** Source entity, e.g. `fact_orders`. The older `entity.column` form is still read. */
   from: string;
-  /** Target ref, e.g. `dim_customer.customer_hk`. */
+  /** Target entity, e.g. `dim_customer`. */
   to: string;
+  /** The referencing columns, in key order; empty on an unresolved relationship. */
+  from_columns?: string[];
+  /** The referenced columns, paired with `from_columns` by position. */
+  to_columns?: string[];
+  name?: string | null;
   cardinality: Cardinality;
+}
+
+/** Something the keys-and-constraints migration could not convert exactly. */
+export interface ConversionFinding {
+  kind: string;
+  entity_name?: string | null;
+  detail: string;
 }
 
 export interface SuggestedMetric {
@@ -152,6 +191,8 @@ export interface SynthesizeResponse {
   relationships: Relationship[];
   suggested_metrics: SuggestedMetric[];
   validation?: ValidationReport | null;
+  /** What the keys-and-constraints migration kept but could not convert exactly. */
+  conversion_findings?: ConversionFinding[];
 }
 
 export interface TransformParadigmRequest {
@@ -424,6 +465,9 @@ export interface EntityNodeData extends Record<string, unknown> {
   freshness_sla?: string | null;
   agg_time_column?: string | null;
   columns: Column[];
+  primary_key?: string[];
+  unique_constraints?: UniqueConstraint[];
+  check_constraints?: CheckConstraint[];
 }
 
 /** A canvas node representing a single entity. */
@@ -432,8 +476,13 @@ export type EntityNode = Node<EntityNodeData, 'entity'>;
 /** Edge data carried by relationship connectors. */
 export interface RelationshipEdgeData extends Record<string, unknown> {
   cardinality: Cardinality;
+  /** The source entity. */
   from_ref: string;
+  /** The target entity. */
   to_ref: string;
+  from_columns: string[];
+  to_columns: string[];
+  name?: string | null;
 }
 
 /** A canvas edge representing a relationship. */

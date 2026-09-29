@@ -21,6 +21,7 @@ import '@xyflow/react/dist/style.css';
 
 import ControlPanel from '@/components/canvas/ControlPanel';
 import EntityNode from '@/components/canvas/EntityNode';
+import RelationshipColumnsModal from '@/components/canvas/RelationshipColumnsModal';
 import ValidationPanel from '@/components/canvas/ValidationPanel';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { EntityNode as EntityNodeType } from '@/types/schema';
@@ -37,6 +38,7 @@ function ERDCanvasInner() {
   const onNodesChange = useCanvasStore((s) => s.onNodesChange);
   const onEdgesChange = useCanvasStore((s) => s.onEdgesChange);
   const onConnect = useCanvasStore((s) => s.onConnect);
+  const editEdgeColumns = useCanvasStore((s) => s.editEdgeColumns);
   const selectNode = useCanvasStore((s) => s.selectNode);
   const selectColumn = useCanvasStore((s) => s.selectColumn);
 
@@ -71,6 +73,8 @@ function ERDCanvasInner() {
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
+      // A relationship's columns are chosen, or changed, by clicking it.
+      onEdgeClick={(_event, edge) => editEdgeColumns(edge.id)}
       onNodeClick={onNodeClick}
       onPaneClick={() => {
         selectNode(null);
@@ -95,6 +99,7 @@ export default function ERDCanvas() {
       <ReactFlowProvider>
         <ERDCanvasInner />
       </ReactFlowProvider>
+      <RelationshipColumnsModal />
     </div>
   );
 }

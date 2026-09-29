@@ -21,6 +21,7 @@
  * entities from narrow to very wide across the requested range.
  */
 
+import { relationshipToEdgeData } from '@/store/graphPayload';
 import type {
   Column,
   Entity,
@@ -165,13 +166,12 @@ export function makeLargeGraph({
   }));
 
   const edges: RelationshipEdge[] = relationships.map((rel, index) => {
-    const source = rel.from.split('.', 1)[0] ?? rel.from;
-    const target = rel.to.split('.', 1)[0] ?? rel.to;
+    const data = relationshipToEdgeData(rel);
     return {
-      id: `rel-${index}-${source}-${target}`,
-      source,
-      target,
-      data: { cardinality: rel.cardinality, from_ref: rel.from, to_ref: rel.to },
+      id: `rel-${index}-${data.from_ref}-${data.to_ref}`,
+      source: data.from_ref,
+      target: data.to_ref,
+      data,
     };
   });
 
