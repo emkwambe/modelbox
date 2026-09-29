@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `sprint-7/close`, with `main` at `e8d9ac1` (the
-`v1.11.1` tag) merged in. This file is rewritten at every stop, merge, deploy
+*Regenerated 2026-09-29 on `sprint-7/records`, branched from `main` at
+`627686d`. This file is rewritten at every stop, merge, deploy
 and tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,11 +9,11 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `e8d9ac1` | v1.11.1 (#12) on top of the v1.11.0 release (#9, #10); CI green (run 36516226968, ten jobs) |
+| `main` | `627686d` | the Verify Release workflow and release records (#11) on top of v1.11.1 (#12); CI green (run 36518253457, ten jobs) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36516574170: gate, backend and frontend images all green) |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-7/close` | this branch | the Verify Release workflow and the release records; pull request #11 |
-| `sprint-7/secure-by-default`, `release/v1.11.0`, `fix/v1.11.1` | kept | the records cite their commits and runs |
+| `sprint-7/records` | this branch | records the Verify Release run for v1.11.1 |
+| `sprint-7/secure-by-default`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
 Migration head: `0022_append_only_ledgers`.
 
@@ -60,5 +60,10 @@ Notes: `docs/RELEASE_NOTES_v1.11.1.md`, `docs/RELEASE_NOTES_v1.11.0.md`
 
 `.github/workflows/verify-release.yml` runs the black-box suite against the
 images a release published, pulled on a runner that never built them, after
-every successful release and on demand. It is dispatched for v1.11.1 once this
-branch is on `main`; the result is in that workflow's run history.
+every successful release and on demand.
+
+For v1.11.1 it ran on `main` at `627686d` (run 36518642808, success). The
+compose file matched the tag's. It pulled the backend and frontend images by the
+digests release run 36516574170 pushed and built none. Configuration A passed
+(1 test), B passed (13), the upgrade passed (1), the insecure profile had 8
+passed and 5 expected failures, and C passed (4).
