@@ -28,7 +28,7 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0022_append_only_ledgers`.
+Migration head: `0023_import_reconciliation` on this branch (`0022_append_only_ledgers` on `main`).
 
 ## Versions
 

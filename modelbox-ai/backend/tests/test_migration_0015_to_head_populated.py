@@ -187,7 +187,22 @@ async def _populate_and_upgrade(dsn: str, seeded: dict) -> None:
 
 async def test_the_database_reached_head(upgraded) -> None:
     rows = await _fetch(upgraded["dsn"], "SELECT version_num FROM alembic_version")
-    assert rows == [{"version_num": "0022_append_only_ledgers"}]
+    assert rows == [{"version_num": "0023_import_reconciliation"}]
+
+
+async def test_models_from_before_0023_are_not_marked_imported(upgraded) -> None:
+    """0023 adds no backfill: an existing model was not imported, and NULL says so."""
+    rows = await _fetch(
+        upgraded["dsn"],
+        "SELECT count(*) AS n FROM data_models "
+        "WHERE reconciliation_status IS NULL AND import_report IS NULL",
+    )
+    assert rows[0]["n"] == upgraded["models"]
+
+
+async def test_0023_refuses_an_unknown_reconciliation_status(upgraded) -> None:
+    with pytest.raises(sa.exc.IntegrityError, match="ck_data_models_reconciliation_status"):
+        await _execute(upgraded["dsn"], "UPDATE data_models SET reconciliation_status = 'partly'")
 
 
 async def test_models_and_ledger_rows_survive(upgraded) -> None:
