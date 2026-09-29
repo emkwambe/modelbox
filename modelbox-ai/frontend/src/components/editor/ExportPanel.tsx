@@ -270,6 +270,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
       <div style={controlRow}>
         {kind === 'artifact' && (
           <select
+            aria-label="Artifact format"
             value={format}
             onChange={(e) => setFormat(e.target.value as ExportFormat)}
             style={selectStyle}
@@ -348,6 +349,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
         )}
         {dialectRelevant && (
           <select
+            aria-label="SQL dialect"
             value={dialect}
             onChange={(e) => setDialect(e.target.value)}
             style={selectStyle}
