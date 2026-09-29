@@ -160,6 +160,11 @@ class Snapshot:
     rows: dict[FieldKey, FieldAttestation]
 
 
+async def read_model(session: AsyncSession, model_id: uuid.UUID) -> SynthesizedModel | None:
+    """The saved graph as a SynthesizedModel (also the drift report's design side)."""
+    return await _read(session, model_id)
+
+
 async def _read(session: AsyncSession, model_id: uuid.UUID) -> SynthesizedModel | None:
     from app.services.synthesis_engine import SynthesisEngine
 

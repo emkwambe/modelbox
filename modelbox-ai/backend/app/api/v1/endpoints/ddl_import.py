@@ -8,6 +8,7 @@ JSON.
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from pathlib import PurePath
 from typing import Annotated, Any, Literal
@@ -34,7 +35,8 @@ from app.api.v1.dependencies import (
     require_query_workspace_role,
 )
 from app.models.metadata_store import DataModel, User
-from app.services import audit_log
+from app.services import attestation, audit_log
+from app.services import drift_report as drift_report_service
 from app.services.attestation import Actor
 from app.services.ddl_import import report as report_render
 from app.services.ddl_import.dialects import IMPORT_DIALECTS
@@ -64,6 +66,25 @@ class ImportResponse(BaseModel):
     report: dict[str, Any]
 
 
+def _check_dialect(dialect: str) -> None:
+    if dialect not in IMPORT_DIALECTS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"dialect {dialect!r} is not importable; importable: {', '.join(IMPORT_DIALECTS)}",
+        )
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    """The upload, refused by name above the limit rather than read whole."""
+    raw = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"the file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+        )
+    return raw
+
+
 @router.get(
     "/import/dialects",
     response_model=list[ImportDialectInfo],
@@ -89,17 +110,8 @@ async def import_ddl_file(
     dialect: Annotated[str, Form(description="oracle, postgres or snowflake")],
     title: Annotated[str | None, Form(max_length=255)] = None,
 ) -> ImportResponse:
-    if dialect not in IMPORT_DIALECTS:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"dialect {dialect!r} is not importable; importable: {', '.join(IMPORT_DIALECTS)}",
-        )
-    raw = await file.read(MAX_UPLOAD_BYTES + 1)
-    if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"the file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
-        )
+    _check_dialect(dialect)
+    raw = await _read_upload(file)
     file_name = PurePath(file.filename or "upload.sql").name
     result = await run_in_threadpool(import_ddl, raw, dialect, file_name)
     if result.model is None:
@@ -159,3 +171,60 @@ async def get_import_report(
         return PlainTextResponse(report_render.to_json(model.import_report), media_type="application/json")
     return PlainTextResponse(report_render.to_markdown(model.import_report, model.title),
                              media_type="text/markdown; charset=utf-8")
+
+
+class DriftReportResponse(BaseModel):
+    model_id: uuid.UUID
+    format: Literal["markdown", "html", "json"]
+    summary: dict[str, int]
+    files: dict[str, str]
+
+
+@router.post(
+    "/model/{model_id}/drift",
+    response_model=DriftReportResponse,
+    summary="Compare a saved model with a freshly imported DDL file of the deployed schema (VIEWER+)",
+)
+async def drift_report(
+    session: SessionDep,
+    user: CurrentUserDep,
+    model: Annotated[DataModel, Depends(require_model_role("VIEWER"))],
+    file: Annotated[UploadFile, File(description="A DDL export of the deployed schema, UTF-8 or UTF-16")],
+    dialect: Annotated[str, Form(description="The file's dialect, as for /import/ddl")],
+    format: Annotated[Literal["markdown", "html", "json"], Form()] = "markdown",
+) -> DriftReportResponse:
+    """The saved model is the documented design; the file is imported in
+    memory, never saved, and compared with it. Columns are matched by name, so
+    a rename is a removal and an addition; every drift is classified by the
+    written rules, and one that touches a verified dictionary field says so.
+    """
+    _check_dialect(dialect)
+    raw = await _read_upload(file)
+    file_name = PurePath(file.filename or "upload.sql").name
+    imported_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+    result = await run_in_threadpool(import_ddl, raw, dialect, file_name)
+    if result.model is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"message": "nothing in the file could be imported", "report": result.report},
+        )
+    design = await attestation.read_model(session, model.model_id)
+    assert design is not None  # require_model_role loaded it
+    statuses = attestation.status_map(await attestation.statuses(session, model.model_id))
+    doc = drift_report_service.build(
+        design, result.model,
+        drift_report_service.Source("Design", model.title, model.reconciliation_status,
+                                    version=model.version_number, dialect=model.target_dialect,
+                                    model_id=str(model.model_id)),
+        drift_report_service.Source("Deployed", file_name, result.status, imported_at=imported_at,
+                                    dialect=dialect),
+        statuses, dialect,
+    )
+    await audit_log.record(
+        action="ARTIFACT_GENERATED", actor_user_id=user.user_id, actor_email=user.email,
+        workspace_id=model.workspace_id, resource_type="model", resource_id=str(model.model_id),
+        detail={"title": model.title, "artifact": "drift_report", "format": format, "dialect": dialect},
+    )
+    summary = {k: v for k, v in doc["summary"].items() if isinstance(v, int)}
+    return DriftReportResponse(model_id=model.model_id, format=format, summary=summary,
+                               files=drift_report_service.render(doc, format))
