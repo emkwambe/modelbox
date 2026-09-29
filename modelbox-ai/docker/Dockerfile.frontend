@@ -8,7 +8,11 @@ WORKDIR /app
 # `npm install` would silently repair it (CLAUDE.md, the @esbuild incident).
 # The lock is required, so no wildcard on it.
 COPY package.json package-lock.json ./
-RUN npm ci
+# Install scripts run only after every file is in place: `npm ci` alone ran
+# esbuild's install script, which executes the binary it just wrote, while that
+# file could still be open for writing (ETXTBSY, CI run 36514885073). The
+# installed set is the same; `npm ci` still refuses an incomplete lock.
+RUN npm ci --ignore-scripts && npm rebuild
 
 FROM node:20-alpine AS builder
 WORKDIR /app

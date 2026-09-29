@@ -19,7 +19,16 @@ import uuid
 import bcrypt
 import httpx
 import pytest
-from conftest import base_url, bearer, check, compose, sql_ok, token, wait_for_health
+from conftest import (
+    base_url,
+    bearer,
+    check,
+    compose,
+    remember_secret,
+    sql_ok,
+    token,
+    wait_for_health,
+)
 
 pytestmark = pytest.mark.upgrade
 
@@ -44,7 +53,7 @@ def test_designate_on_an_upgraded_database_reaches_the_owners_export() -> None:
     assert to_0019.returncode == 0, f"setup: alembic upgrade {PRE_UPGRADE}: {to_0019.stderr[-600:]}"
     assert sql_ok("SELECT version_num FROM alembic_version;") == PRE_UPGRADE
 
-    email, password = "upgraded-owner@blackbox.test", "bb-" + uuid.uuid4().hex
+    email, password = "upgraded-owner@blackbox.test", remember_secret("bb-" + uuid.uuid4().hex)
     sql_ok(
         _SEED_AT_0019,
         variables={
@@ -64,7 +73,8 @@ def test_designate_on_an_upgraded_database_reaches_the_owners_export() -> None:
 
     refused = compose(
         "exec", "-T", "modelbox-backend", "python", "-m", "app.cli", "create-owner",
-        "--email", "second@blackbox.test", "--password-stdin", input_text="bb-" + uuid.uuid4().hex + "\n",
+        "--email", "second@blackbox.test", "--password-stdin",
+        input_text=remember_secret("bb-" + uuid.uuid4().hex) + "\n",
     )
     check(refused.returncode == 1 and "An owner already exists" in refused.stderr,
           f"create-owner on an upgraded appliance: exit {refused.returncode}")

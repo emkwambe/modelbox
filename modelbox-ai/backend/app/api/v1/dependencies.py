@@ -22,7 +22,7 @@ from fastapi.security import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db_session
+from app.core.database import get_db_session, get_streaming_db_session
 from app.core.security import TokenError, decode_access_token, hash_api_key
 from app.models.metadata_store import (
     ApiKey,
@@ -36,7 +36,16 @@ from app.services.llm_gateway import LLMGateway, get_llm_gateway
 from app.services.paradigm_translator import ParadigmTranslator
 from app.services.synthesis_engine import SynthesisEngine
 
-SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
+# Function scope: the session commits, or fails, before the response is sent,
+# so a success response always describes committed work and a failed commit is
+# a 500. FastAPI's default ("request") ends the dependency after the response
+# (`tests/test_session_commit_order.py`).
+SessionDep = Annotated[AsyncSession, Depends(get_db_session, scope="function")]
+# For a response that reads from the database while it streams (the JSONL audit
+# exports): open until the response is sent, read-only, never committed.
+StreamingSessionDep = Annotated[
+    AsyncSession, Depends(get_streaming_db_session, scope="request")
+]
 GatewayDep = Annotated[LLMGateway, Depends(get_llm_gateway)]
 
 

@@ -1,6 +1,11 @@
 # ModelBox AI — v1.11.0 Release Notes
 
-**Tag:** `v1.11.0`, at `d5822f1` on `main`; images published by the gated release workflow  ·  **Carries:**
+> **Superseded by v1.11.1** (`RELEASE_NOTES_v1.11.1.md`). Upgrade to v1.11.1;
+> the `v1.11.0` tag and its images remain published. Everything below still
+> describes what v1.11.0 introduced, and v1.11.1 keeps all of it.
+
+**Tag:** `v1.11.0`, at `d5822f1` on `main`, published by release run
+36511971512  ·  **Carries:**
 Sprints 5, 6, 6.5 and 7, merged to `main` as `d81f569` (pull request #9, CI
 green)  ·  **Supersedes:** v1.10.0, which was never tagged.
 

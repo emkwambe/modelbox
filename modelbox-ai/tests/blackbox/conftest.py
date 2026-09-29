@@ -107,6 +107,75 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             )
 
 
+# --- No credential in a report --------------------------------------------------
+#
+# Every token, API key and password the suite obtains or makes is registered
+# here, and so is every secret in `.env` as it is read. A failure report is
+# redacted before pytest prints it: an assertion over a request that carried a
+# key would otherwise show the key, because pytest renders the expression.
+# `backend/tests/test_blackbox_redaction.py` runs a failing test through this
+# conftest and checks the output.
+
+REDACTED = "<redacted>"
+_SECRETS: set[str] = set()
+_ENV_SECRETS = ("JWT_SECRET", "ENCRYPTION_KEY", "POSTGRES_PASSWORD", "MODELBOX_APP_DB_PASSWORD")
+
+
+def remember_secret(value: str) -> str:
+    """Register ``value`` for redaction, and return it."""
+    if value and len(value) >= 8:
+        _SECRETS.add(value)
+    return value
+
+
+_MIN_FRAGMENT = 8
+
+
+def redact_secrets(text: str) -> str:
+    """``text`` with every registered secret, and every fragment of one down to
+    eight characters, replaced. pytest truncates long values in an assertion's
+    comparison (``{'X-API-Key':...ctMeR3dactMe'}``), so a whole-string replace
+    would leave the tail.
+
+    Linear in the text for the usual case: the secrets present are found by
+    their eight-character windows first, and only those are expanded.
+    """
+    windows = {
+        secret[start:start + _MIN_FRAGMENT]: secret
+        for secret in _SECRETS
+        for start in range(len(secret) - _MIN_FRAGMENT + 1)
+    }
+    present = {
+        windows[text[i:i + _MIN_FRAGMENT]]
+        for i in range(len(text) - _MIN_FRAGMENT + 1)
+        if text[i:i + _MIN_FRAGMENT] in windows
+    }
+    if not present:
+        return text
+    fragments = {
+        secret[start:start + size]
+        for secret in present
+        for size in range(_MIN_FRAGMENT, len(secret) + 1)
+        for start in range(len(secret) - size + 1)
+    }
+    for fragment in sorted(fragments, key=len, reverse=True):
+        if fragment in text:
+            text = text.replace(fragment, REDACTED)
+    return text
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> Iterator[None]:
+    outcome = yield
+    report = outcome.get_result()
+    if report.longrepr is not None and not isinstance(report.longrepr, tuple):
+        rendered = str(report.longrepr)
+        redacted = redact_secrets(rendered)
+        if redacted != rendered:
+            report.longrepr = redacted
+    report.sections = [(name, redact_secrets(content)) for name, content in report.sections]
+
+
 # --- The stack ------------------------------------------------------------------
 
 
@@ -116,6 +185,8 @@ def read_env() -> dict[str, str]:
         if line and not line.startswith("#") and "=" in line:
             key, _, value = line.partition("=")
             values[key.strip()] = value.strip()
+    for name in _ENV_SECRETS:
+        remember_secret(values.get(name, ""))
     return values
 
 
@@ -212,6 +283,7 @@ def client() -> Iterator[httpx.Client]:
 
 
 def login(client: httpx.Client, email: str, password: str) -> httpx.Response:
+    remember_secret(password)
     return client.post(
         "/api/v1/auth/token", data={"username": email, "password": password}
     )
@@ -220,7 +292,7 @@ def login(client: httpx.Client, email: str, password: str) -> httpx.Response:
 def token(client: httpx.Client, email: str, password: str) -> str:
     response = login(client, email, password)
     assert response.status_code == 200, f"setup login for {email} failed: {response.status_code}"
-    return response.json()["access_token"]
+    return remember_secret(response.json()["access_token"])
 
 
 def bearer(access_token: str) -> dict[str, str]:
@@ -254,7 +326,7 @@ def make_appliance_owner(client: httpx.Client) -> Account:
     made an OWNER, so `create-owner` refuses and the seeded account is
     designated, which is the upgrade path's command.
     """
-    email, password = "owner@blackbox.test", "bb-" + uuid.uuid4().hex
+    email, password = "owner@blackbox.test", remember_secret("bb-" + uuid.uuid4().hex)
     created = compose(
         "exec", "-T", "modelbox-backend", "python", "-m", "app.cli", "create-owner",
         "--email", email, "--workspace-name", "Blackbox A", "--password-stdin",
@@ -308,7 +380,7 @@ def world(client: httpx.Client) -> World:
     assert len(workspaces) == 1, f"fixture sanity: the owner starts in one workspace: {workspaces}"
     ws_a = workspaces[0]["workspace_id"]
     ws_b, model_a, model_b, viewer_id = (str(uuid.uuid4()) for _ in range(4))
-    viewer_password = "bb-" + uuid.uuid4().hex
+    viewer_password = remember_secret("bb-" + uuid.uuid4().hex)
     viewer_hash = bcrypt.hashpw(viewer_password.encode(), bcrypt.gensalt()).decode()
     sql_ok(
         _WORLD_SQL,

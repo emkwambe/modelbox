@@ -53,7 +53,7 @@ def real_client(
     that is the one override these tests exist to avoid.
     """
     from app.api.v1.dependencies import get_current_user
-    from app.core.database import get_db_session
+    from app.core.database import get_db_session, get_streaming_db_session
     from app.main import create_app
 
     overrides = overrides or {}
@@ -64,6 +64,8 @@ def real_client(
         yield session
 
     app.dependency_overrides[get_db_session] = _session
+    # The JSONL exports read through their own streaming session; same database.
+    app.dependency_overrides[get_streaming_db_session] = _session
     app.dependency_overrides.update(overrides)  # type: ignore[arg-type]
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
