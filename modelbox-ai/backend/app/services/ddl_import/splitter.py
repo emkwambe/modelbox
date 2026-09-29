@@ -136,10 +136,9 @@ def split(text: str, dialect: str) -> list[Statement]:
         if dialect == "oracle" and rest.strip() == "/":
             i = _line_end(text, i)  # a stray terminator after a ';'
             continue
-        if dialect == "oracle" and SQLPLUS_COMMANDS.match(rest):
-            end = _line_end(text, i)
-            kind, body = "client", text[i:end]
-        elif dialect == "postgres" and rest.startswith("\\"):
+        if (dialect == "oracle" and SQLPLUS_COMMANDS.match(rest)) or (
+            dialect == "postgres" and rest.startswith("\\")
+        ):
             end = _line_end(text, i)
             kind, body = "client", text[i:end]
         elif dialect == "oracle" and ORACLE_PROCEDURAL.match(rest):

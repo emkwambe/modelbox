@@ -48,8 +48,10 @@ def to_markdown(report: dict[str, Any], title: str | None = None) -> str:
         lines += [
             "## Counts",
             "",
-            "The source counts are read from the file by a counter that shares no code with the parser. "
-            "Partitions are counted apart from tables: a partition is metadata of its parent table.",
+            (
+                "The source counts are read from the file by a counter that shares no code with the parser. "
+                "Partitions are counted apart from tables: a partition is metadata of its parent table."
+            ),
             "",
             "| | Tables: source | Tables: imported | Partitions: source | Partitions: imported |",
             "| :-- | --: | --: | --: | --: |",

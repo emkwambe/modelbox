@@ -61,10 +61,10 @@ GUARDED_KINDS = ("create_table", "alter_table", "comment", "create_type")
 # HYBRID and TRANSIENT among them). The counter reads the same words.
 _TABLE_MODIFIERS = r"(?:(?:GLOBAL|LOCAL|TEMP|TEMPORARY|UNLOGGED|HYBRID|TRANSIENT|VOLATILE)\s+)*"
 _GUARDED = (
-    ("create_table", re.compile(rf"^CREATE\s+(?:OR\s+REPLACE\s+)?{_TABLE_MODIFIERS}TABLE\b", re.I)),
-    ("alter_table", re.compile(r"^ALTER\s+TABLE\b", re.I)),
-    ("comment", re.compile(r"^COMMENT\s+ON\b", re.I)),
-    ("create_type", re.compile(r"^CREATE\s+(?:OR\s+REPLACE\s+)?TYPE\b", re.I)),
+    ("create_table", re.compile(rf"^CREATE\s+(?:OR\s+REPLACE\s+)?{_TABLE_MODIFIERS}TABLE\b", re.IGNORECASE)),
+    ("alter_table", re.compile(r"^ALTER\s+TABLE\b", re.IGNORECASE)),
+    ("comment", re.compile(r"^COMMENT\s+ON\b", re.IGNORECASE)),
+    ("create_type", re.compile(r"^CREATE\s+(?:OR\s+REPLACE\s+)?TYPE\b", re.IGNORECASE)),
 )
 
 # Named skip rules: statements that are not part of a logical model. Each is
@@ -72,25 +72,25 @@ _GUARDED = (
 # ALTER forms only match when the whole statement is that one action.
 _NAME = r"(?:\"[^\"]+\"|[\w$#]+)(?:\s*\.\s*(?:\"[^\"]+\"|[\w$#]+))*"
 SKIP_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("session setting", re.compile(r"^(?:SET\s|RESET\s|SELECT\s+pg_catalog\.set_config\s*\()", re.I)),
+    ("session setting", re.compile(r"^(?:SET\s|RESET\s|SELECT\s+pg_catalog\.set_config\s*\()", re.IGNORECASE)),
     ("ownership", re.compile(
         rf"^ALTER\s+(?:TABLE|SCHEMA|SEQUENCE|VIEW|MATERIALIZED\s+VIEW|FUNCTION|PROCEDURE|AGGREGATE|TYPE|DOMAIN)"
-        rf"\s+(?:ONLY\s+)?{_NAME}(?:\s*\([^;]*\))?\s+OWNER\s+TO\s+\S+\s*;?\s*$", re.I)),
-    ("privileges", re.compile(r"^(?:GRANT|REVOKE)\s", re.I)),
-    ("index", re.compile(r"^(?:CREATE\s+(?:UNIQUE\s+|BITMAP\s+)?INDEX|ALTER\s+INDEX)\b", re.I)),
-    ("sequence", re.compile(r"^(?:CREATE|ALTER)\s+SEQUENCE\b", re.I)),
-    ("view", re.compile(r"^(?:CREATE\s+(?:OR\s+REPLACE\s+)?(?:FORCE\s+)?(?:MATERIALIZED\s+)?VIEW|ALTER\s+(?:MATERIALIZED\s+)?VIEW)\b", re.I)),
-    ("domain", re.compile(r"^(?:CREATE|ALTER)\s+DOMAIN\b", re.I)),
-    ("extension", re.compile(r"^(?:CREATE|ALTER|COMMENT\s+ON)\s+EXTENSION\b", re.I)),
-    ("schema", re.compile(r"^(?:CREATE\s+(?:OR\s+REPLACE\s+)?|ALTER\s+)SCHEMA\b", re.I)),
-    ("synonym", re.compile(r"^CREATE\s+(?:OR\s+REPLACE\s+)?(?:PUBLIC\s+)?SYNONYM\b", re.I)),
-    ("drop", re.compile(r"^DROP\s", re.I)),
+        rf"\s+(?:ONLY\s+)?{_NAME}(?:\s*\([^;]*\))?\s+OWNER\s+TO\s+\S+\s*;?\s*$", re.IGNORECASE)),
+    ("privileges", re.compile(r"^(?:GRANT|REVOKE)\s", re.IGNORECASE)),
+    ("index", re.compile(r"^(?:CREATE\s+(?:UNIQUE\s+|BITMAP\s+)?INDEX|ALTER\s+INDEX)\b", re.IGNORECASE)),
+    ("sequence", re.compile(r"^(?:CREATE|ALTER)\s+SEQUENCE\b", re.IGNORECASE)),
+    ("view", re.compile(r"^(?:CREATE\s+(?:OR\s+REPLACE\s+)?(?:FORCE\s+)?(?:MATERIALIZED\s+)?VIEW|ALTER\s+(?:MATERIALIZED\s+)?VIEW)\b", re.IGNORECASE)),
+    ("domain", re.compile(r"^(?:CREATE|ALTER)\s+DOMAIN\b", re.IGNORECASE)),
+    ("extension", re.compile(r"^(?:CREATE|ALTER|COMMENT\s+ON)\s+EXTENSION\b", re.IGNORECASE)),
+    ("schema", re.compile(r"^(?:CREATE\s+(?:OR\s+REPLACE\s+)?|ALTER\s+)SCHEMA\b", re.IGNORECASE)),
+    ("synonym", re.compile(r"^CREATE\s+(?:OR\s+REPLACE\s+)?(?:PUBLIC\s+)?SYNONYM\b", re.IGNORECASE)),
+    ("drop", re.compile(r"^DROP\s", re.IGNORECASE)),
 )
-_LOOKS_LIKE_TABLE = re.compile(r"^(?:CREATE|ALTER|COMMENT|DROP)\b[^;(]{0,120}?\bTABLE\b", re.I | re.S)
+_LOOKS_LIKE_TABLE = re.compile(r"^(?:CREATE|ALTER|COMMENT|DROP)\b[^;(]{0,120}?\bTABLE\b", re.IGNORECASE | re.DOTALL)
 _ATTACH = re.compile(
     rf"^ALTER\s+TABLE\s+(?:ONLY\s+)?(?P<parent>{_NAME})\s+ATTACH\s+PARTITION\s+(?P<child>{_NAME})\s+"
     r"(?P<bound>FOR\s+VALUES\s+.+|DEFAULT)\s*;?\s*$",
-    re.I | re.S,
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -156,7 +156,7 @@ def classify(statement: splitter.Statement) -> tuple[str, str | None]:
     for name, pattern in SKIP_RULES:
         if pattern.match(text):
             return "skipped", name
-    if _ATTACH.match(text) or re.match(r"^ALTER\s+TABLE\b[^;]*\bATTACH\s+PARTITION\b", text, re.I | re.S):
+    if _ATTACH.match(text) or re.match(r"^ALTER\s+TABLE\b[^;]*\bATTACH\s+PARTITION\b", text, re.IGNORECASE | re.DOTALL):
         return "attach_partition", None
     for kind, pattern in _GUARDED:
         if pattern.match(text):
@@ -168,7 +168,7 @@ def classify(statement: splitter.Statement) -> tuple[str, str | None]:
     return "skipped", "not a table-level statement"
 
 
-def parse_statement(text: str, dialect: str, kind: str) -> exp.Expression:
+def parse_statement(text: str, dialect: str, kind: str) -> exp.Expr:
     """Parse one statement; the only call into sqlglot in the importer.
 
     A guarded kind that parses to ``Command`` (or to nothing) is a failure,
@@ -235,7 +235,7 @@ class _Builder:
         else:
             raise ImportFailure(f"table constraint of an unsupported kind: {type(node).__name__}")
 
-    def create_table(self, tree: exp.Expression, statement: splitter.Statement, partitioning: str | None) -> None:
+    def create_table(self, tree: exp.Expr, statement: splitter.Statement, partitioning: str | None) -> None:
         if not isinstance(tree, exp.Create) or str(tree.args.get("kind", "")).upper() != "TABLE":
             raise ImportFailure(f"expected CREATE TABLE, parsed as {type(tree).__name__}")
         schema = tree.this
@@ -291,7 +291,7 @@ class _Builder:
             # not change the logical model and carry no constraint count.
         table.columns[column.name] = column
 
-    def alter_table(self, tree: exp.Expression, statement: splitter.Statement) -> None:
+    def alter_table(self, tree: exp.Expr, statement: splitter.Statement) -> None:
         if not isinstance(tree, exp.Alter) or str(tree.args.get("kind", "")).upper() != "TABLE":
             raise ImportFailure(f"expected ALTER TABLE, parsed as {type(tree).__name__}")
         target = _bare(tree.this)
@@ -310,7 +310,7 @@ class _Builder:
             else:
                 raise ImportFailure(f"ALTER TABLE action not imported: {type(action).__name__}")
 
-    def comment(self, tree: exp.Expression, statement: splitter.Statement) -> None:
+    def comment(self, tree: exp.Expr, statement: splitter.Statement) -> None:
         if not isinstance(tree, exp.Comment):
             raise ImportFailure(f"expected COMMENT, parsed as {type(tree).__name__}")
         text = tree.expression.this if isinstance(tree.expression, exp.Literal) else None
@@ -407,10 +407,10 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
                 if ref_col is not None:
                     relationships.append(RelationshipSchema.model_validate({
                         "from": f"{name}.{fk['columns'][0]}", "to": f"{target}.{ref_col}", "cardinality": "N:1"}))
-                    for column in columns:
-                        if column.name == fk["columns"][0]:
-                            column.is_foreign_key = True
-                            column.references = f"{target}.{ref_col}"
+                    for modelled in columns:
+                        if modelled.name == fk["columns"][0]:
+                            modelled.is_foreign_key = True
+                            modelled.references = f"{target}.{ref_col}"
                     continue
             reason = ("composite foreign key: the model holds single-column relationships"
                       if not simple else f"references {target!r}, which is not a table in this file")
@@ -482,7 +482,7 @@ def _reconcile(text: str, dialect: str, builder: _Builder, statements: list[spli
 
 
 def _mentions(name: str, statements: list[splitter.Statement]) -> list[dict[str, Any]]:
-    pattern = re.compile(rf"(?<![\w$#]){re.escape(name)}(?![\w$#])", re.I)
+    pattern = re.compile(rf"(?<![\w$#]){re.escape(name)}(?![\w$#])", re.IGNORECASE)
     return [{"index": s.index, "line": s.line, "statement": s.head}
             for s in statements if pattern.search(s.text)][:20]
 

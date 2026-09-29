@@ -131,7 +131,9 @@ def _body(text: str, start: int) -> tuple[str, int] | None:
 
 
 def _items(body: str) -> list[str]:
-    items, depth, current = [], 0, []
+    items: list[str] = []
+    current: list[str] = []
+    depth = 0
     for ch in body:
         if ch == "(":
             depth += 1

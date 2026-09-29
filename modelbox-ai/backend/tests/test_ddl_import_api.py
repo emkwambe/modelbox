@@ -20,7 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints import ddl_import as endpoint
 from app.models.metadata_store import AuditEvent, DataModel
-from tests._real_auth import bearer, make_user, make_workspace, real_client, sqlite_session
+from tests._real_auth import (
+    bearer,
+    make_user,
+    make_workspace,
+    real_client,
+    sqlite_session,
+)
 
 DDL = Path(__file__).resolve().parent / "fixtures" / "ddl"
 HR = (DDL / "oracle" / "hr.sql").read_bytes()

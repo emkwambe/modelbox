@@ -46,12 +46,12 @@ def decode(raw: bytes) -> tuple[str, str]:
                 return raw.decode(codec), label
             except UnicodeDecodeError as exc:
                 raise DecodeError(f"the file starts with a {label} mark but is not {label}: {exc}") from exc
-    codec = _utf16_without_bom(raw)
-    if codec is not None:
+    utf16 = _utf16_without_bom(raw)
+    if utf16 is not None:
         try:
-            return raw.decode(codec), f"{codec.upper()} without BOM"
+            return raw.decode(utf16), f"{utf16.upper()} without BOM"
         except UnicodeDecodeError as exc:
-            raise DecodeError(f"the file looks like {codec.upper()} but is not: {exc}") from exc
+            raise DecodeError(f"the file looks like {utf16.upper()} but is not: {exc}") from exc
     try:
         return raw.decode("utf-8"), "UTF-8 without BOM"
     except UnicodeDecodeError as exc:
