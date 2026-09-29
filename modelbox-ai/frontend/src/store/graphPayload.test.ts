@@ -38,10 +38,17 @@ const SERVED: SynthesizeResponse = {
       canvas_position_x: 10,
       canvas_position_y: 20,
       agg_time_column: 'placed_at',
+      // Dictionary fields (Step 4b): each must survive a load and a save.
+      business_name: 'Customer orders',
+      business_owner: 'Sales operations',
+      it_steward: 'Data platform',
+      authoritative_source: 'ERP',
       columns: [
         col('order_id', { is_primary_key: true, is_nullable: false }),
         col('region', { data_type: 'VARCHAR(8)', is_primary_key: true, is_nullable: false,
-          check_expression: "region IN ('EU', 'US')" }),
+          check_expression: "region IN ('EU', 'US')", business_name: 'Sales region',
+          permissible_values: ['EU', 'US'], unit: null, critical_data_element: false,
+          authoritative_source: 'ERP', classification_level_id: 'level-1' }),
         col('placed_at', { data_type: 'TIMESTAMP' }),
       ],
       primary_key: ['region', 'order_id'],
@@ -81,6 +88,10 @@ function expectedPayload() {
       tier: null,
       freshness_sla: null,
       agg_time_column: e.agg_time_column ?? null,
+      business_name: e.business_name ?? null,
+      business_owner: e.business_owner ?? null,
+      it_steward: e.it_steward ?? null,
+      authoritative_source: e.authoritative_source ?? null,
       canvas_position_x: e.canvas_position_x,
       canvas_position_y: e.canvas_position_y,
       columns: e.columns.map((c) =>
@@ -108,6 +119,13 @@ describe('a loaded model saves back as the same graph', () => {
     useCanvasStore.getState().loadModel(structuredClone(SERVED));
     const expected = expectedPayload();
     expected.entities[0]!.unique_constraints = [{ name: 'other', columns: ['placed_at', 'region'] }];
+    expect(useCanvasStore.getState().getGraphPayload()).not.toEqual(expected);
+  });
+
+  it('negative control: the comparison sees a dropped dictionary field', () => {
+    useCanvasStore.getState().loadModel(structuredClone(SERVED));
+    const expected = expectedPayload();
+    expected.entities[0]!.business_owner = null;
     expect(useCanvasStore.getState().getGraphPayload()).not.toEqual(expected);
   });
 

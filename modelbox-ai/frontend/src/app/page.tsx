@@ -208,6 +208,9 @@ export default function HomePage() {
           <Link href="/settings/egress" style={navLink}>
             Egress
           </Link>
+          <Link href="/settings/classification" style={navLink}>
+            Classification
+          </Link>
           <Link href="/docs" style={navLink}>
             Docs
           </Link>

@@ -18,6 +18,7 @@ import type {
   ApiKeyCreatedResponse,
   ApiKeyInfo,
   ArtifactStatusInfo,
+  ClassificationScale,
   ConnectionCreateRequest,
   ConnectionInfo,
   ContractExportResponse,
@@ -171,6 +172,40 @@ export async function gradeSubmission(payload: {
 export async function listWorkspaces(): Promise<WorkspaceInfo[]> {
   const { data } = await apiClient.get<WorkspaceInfo[]>('/workspaces');
   return data;
+}
+
+// --- Classification scale (Sprint 8 Step 4b) ---
+export async function getClassificationScale(workspaceId: string): Promise<ClassificationScale> {
+  const { data } = await apiClient.get<ClassificationScale>(`/workspaces/${workspaceId}/classification`);
+  return data;
+}
+
+export async function addClassificationLevel(
+  workspaceId: string,
+  name: string,
+): Promise<ClassificationScale> {
+  const { data } = await apiClient.post<ClassificationScale>(
+    `/workspaces/${workspaceId}/classification/levels`,
+    { name },
+  );
+  return data;
+}
+
+export async function updateClassificationLevel(
+  workspaceId: string,
+  levelId: string,
+  patch: { name?: string; rank?: number },
+): Promise<ClassificationScale> {
+  const { data } = await apiClient.patch<ClassificationScale>(
+    `/workspaces/${workspaceId}/classification/levels/${levelId}`,
+    patch,
+  );
+  return data;
+}
+
+/** Refused (409) while any column uses the level. */
+export async function deleteClassificationLevel(workspaceId: string, levelId: string): Promise<void> {
+  await apiClient.delete(`/workspaces/${workspaceId}/classification/levels/${levelId}`);
 }
 
 export async function listArtifactStatus(): Promise<ArtifactStatusInfo[]> {
