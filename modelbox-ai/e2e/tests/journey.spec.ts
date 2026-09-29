@@ -101,6 +101,25 @@ function columnRow(page: Page, entity: string, column: string): Locator {
   return node(page, entity).locator('li').filter({ has: name });
 }
 
+/** No two tables on the canvas overlap, measured in the browser. */
+async function expectNoOverlap(page: Page, count: number) {
+  const nodes = page.locator('.react-flow__node');
+  await expect(nodes).toHaveCount(count);
+  const boxes = await nodes.evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { id: el.getAttribute('data-id'), x: r.x, y: r.y, w: r.width, h: r.height };
+    }),
+  );
+  const overlapping = boxes.flatMap((a, i) =>
+    boxes
+      .slice(i + 1)
+      .filter((b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h)
+      .map((b) => `${a.id} and ${b.id}`),
+  );
+  expect(overlapping).toEqual([]);
+}
+
 /** The column editor sits over the canvas's lower left; close it before clicking a node. */
 async function closeEditor(page: Page) {
   await page.getByRole('button', { name: 'Close', exact: true }).click();
@@ -172,6 +191,8 @@ test('the engagement journey on the genuine Oracle HR export', async ({ page }) 
 
   await test.step('b. a column business name and a table owner survive save and reload', async () => {
     await page.goto(`/canvas/${modelId}`);
+    // An import stores no positions; the canvas lays the tables out on open.
+    await expectNoOverlap(page, 7);
     await columnRow(page, 'LOCATIONS', 'CITY').click();
     await page.getByLabel('Business name', { exact: true }).fill('Office city');
     await closeEditor(page);
@@ -181,6 +202,8 @@ test('the engagement journey on the genuine Oracle HR export', async ({ page }) 
     await save(page);
 
     await page.reload();
+    // The layout was saved with the edits.
+    await expectNoOverlap(page, 7);
     await columnRow(page, 'LOCATIONS', 'CITY').click();
     await expect(page.getByLabel('Business name', { exact: true })).toHaveValue('Office city');
     await closeEditor(page);

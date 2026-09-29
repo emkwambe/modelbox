@@ -36,6 +36,11 @@ one field or a selection and sees each of the three conditions as the server
 found it, and why a field stayed pending; a MEMBER or VIEWER sees no control.
 **Drift report** uploads a deployed schema's DDL and lists each drift with its
 class, rule and verified-field flag, an unreconciled import warned about first.
+Two defects the journey found are fixed: an imported model stored no
+positions and opened with every table stacked at one point (it is now laid
+out on open, an unsaved change that Save keeps), and the column editor grew
+past the top of the canvas once it held the dictionary fields, leaving its
+close button out of reach (both editors now scroll within the canvas).
 
 `e2e/` is a Playwright spec, run in CI by the new Engagement Journey job
 against the appliance in configuration B: import the genuine Oracle HR export

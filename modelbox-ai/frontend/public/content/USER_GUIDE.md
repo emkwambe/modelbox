@@ -78,7 +78,9 @@ from: the file is read on the appliance.
    beside what was imported, with partitions counted apart from tables. A
    difference, or a statement the parser did not understand, is listed with
    its statement number and line, and the model is saved **unreconciled**.
-4. **Open on the canvas**, or download the report as Markdown or JSON.
+4. **Open on the canvas**, or download the report as Markdown or JSON. A
+   DDL file holds no diagram positions, so the canvas lays the tables out
+   when the model first opens; **Save** keeps that layout.
 
 Not imported, and listed in the report: indexes, sequences, views, procedures,
 functions, triggers, ownership, privileges, session settings and `USE`. A
