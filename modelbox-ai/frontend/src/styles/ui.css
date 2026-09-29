@@ -1,0 +1,371 @@
+/*
+ * The component layer's stylesheet.
+ *
+ * This is the only file in the frontend where `:hover`, `:focus-visible` and
+ * `:disabled` exist. That is the whole reason it exists: the app is styled with
+ * inline `style` objects, and an inline style cannot express a pseudo-class.
+ * The workaround a codebase drifts into — `onMouseEnter` plus `useState` —
+ * cannot express `:focus-visible` at all, so it either draws a focus ring on
+ * every mouse click or draws none for keyboard users. The second is what
+ * shipped: there are zero focus declarations anywhere else in this frontend.
+ *
+ * Every colour, type size, radius and spacing step below is `var(--mb-…)`,
+ * emitted from `tokens.ts` by `cssVars.ts`. None of those may appear here as a
+ * literal — `ui.css.test.ts` fails on a variable that is not derived, and the
+ * point of the indirection is that this file cannot become a second source of
+ * truth. (Hairline borders, transition timings and a 2px optical inset are
+ * literals and are not design tokens.)
+ *
+ * State is a pseudo-class or a data attribute, never a modifier class. A
+ * JS-toggled `.mb-btn--hover` would put state back in JavaScript and undo the
+ * reason for the file.
+ *
+ * Note on precedence during adoption: an inline `style` attribute beats every
+ * rule here. A call site still passing its own padding keeps that padding while
+ * these hover/focus/disabled rules still apply — which is how adoption
+ * preserves the existing look one file at a time, and also why the look can be
+ * uneven mid-migration until the overrides are removed.
+ */
+
+/* --- Button ------------------------------------------------------------- */
+
+.mb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--mb-space-sm);
+  padding: var(--mb-btn-pad-md);
+  border-radius: var(--mb-radius-md);
+  border: 1px solid transparent;
+  font-family: var(--mb-font-sans);
+  font-size: var(--mb-type-body-small-size);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease,
+    color 120ms ease;
+}
+
+.mb-btn--sm {
+  padding: var(--mb-btn-pad-sm);
+  font-size: var(--mb-type-caption-size);
+}
+
+/*
+ * `--mb-btn-tone` is the accent override, set inline by the `tone` prop. It
+ * generalises `actionBtn(color)` on the canvas page — already the best-factored
+ * button in the codebase — and the hand-rolled purple, blue and green twins on
+ * the home and trainer pages. Falling back through `var(…, default)` means a
+ * button that passes no tone is byte-identical to one that never had the prop.
+ */
+.mb-btn--primary {
+  background: var(--mb-btn-tone, var(--mb-color-blue));
+  border-color: var(--mb-btn-tone, var(--mb-color-blue));
+  color: var(--mb-color-white);
+}
+
+.mb-btn--secondary {
+  background: var(--mb-color-white);
+  border-color: var(--mb-color-neutral-300);
+  color: var(--mb-btn-tone, var(--mb-color-neutral-700));
+}
+
+.mb-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--mb-btn-tone, var(--mb-color-neutral-600));
+}
+
+.mb-btn--danger {
+  background: var(--mb-color-white);
+  border-color: var(--mb-breaking-on-light);
+  color: var(--mb-breaking-on-light);
+}
+
+/* Hover is scoped away from the disabled state: a disabled control that still
+ * lights up on hover reads as interactive when it is not. */
+/* Darkened rather than swapped for a named colour, so the hover state follows
+ * whatever tone the button was given instead of only working for the default. */
+.mb-btn--primary:hover:not(:disabled) {
+  filter: brightness(0.92);
+}
+
+.mb-btn--secondary:hover:not(:disabled),
+.mb-btn--ghost:hover:not(:disabled) {
+  background: var(--mb-color-neutral-100);
+  border-color: var(--mb-color-neutral-300);
+}
+
+.mb-btn--danger:hover:not(:disabled) {
+  background: var(--mb-breaking-on-light);
+  color: var(--mb-color-white);
+}
+
+/* A pressed toggle. Four spellings of "this control is active" existed across
+ * the call sites; this is the one. */
+.mb-btn[data-pressed='true'] {
+  background: var(--mb-color-neutral-200);
+  border-color: var(--mb-color-neutral-400);
+  color: var(--mb-color-neutral-900);
+}
+
+.mb-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mb-btn[aria-busy='true'] {
+  cursor: progress;
+}
+
+.mb-btn:focus-visible {
+  outline: var(--mb-focus-outline);
+  outline-offset: var(--mb-focus-offset);
+}
+
+
+.mb-btn--icon {
+  padding: var(--mb-space-xs);
+  border-color: transparent;
+  background: transparent;
+  color: var(--mb-color-neutral-500);
+  line-height: 1;
+}
+
+.mb-btn--icon:hover:not(:disabled) {
+  background: var(--mb-color-neutral-100);
+  color: var(--mb-color-neutral-900);
+}
+
+/* --- Form controls ------------------------------------------------------ */
+
+/*
+ * One control class for input, select and textarea. The four style constants
+ * these replace were already shared between `input` and `select` elements, so
+ * the split by element name was fiction; the shape is the same.
+ */
+.mb-control {
+  width: 100%;
+  padding: var(--mb-field-pad);
+  border-radius: var(--mb-radius-md);
+  border: 1px solid var(--mb-color-neutral-300);
+  background: var(--mb-color-white);
+  color: var(--mb-color-neutral-900);
+  font-family: var(--mb-font-sans);
+  font-size: var(--mb-type-body-small-size);
+  line-height: var(--mb-type-body-small-line-height);
+}
+
+.mb-control:hover:not(:disabled) {
+  border-color: var(--mb-color-neutral-400);
+}
+
+.mb-control:focus-visible {
+  outline: var(--mb-focus-outline);
+  outline-offset: var(--mb-focus-offset);
+  border-color: var(--mb-color-blue);
+}
+
+.mb-control:disabled {
+  background: var(--mb-color-neutral-100);
+  color: var(--mb-color-neutral-500);
+  cursor: default;
+}
+
+.mb-control[aria-invalid='true'] {
+  border-color: var(--mb-breaking-on-light);
+}
+
+.mb-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mb-space-xs);
+}
+
+.mb-field__label {
+  font-size: var(--mb-type-ui-small-size);
+  font-weight: 600;
+  color: var(--mb-color-neutral-700);
+}
+
+.mb-field__required {
+  color: var(--mb-breaking-on-light);
+}
+
+.mb-field__description {
+  font-size: var(--mb-type-ui-x-small-size);
+  color: var(--mb-color-neutral-500);
+}
+
+.mb-field__error {
+  font-size: var(--mb-type-ui-x-small-size);
+  color: var(--mb-breaking-on-light);
+}
+
+/* --- Badge -------------------------------------------------------------- */
+
+.mb-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mb-space-xs);
+  padding: 2px var(--mb-space-sm);
+  border-radius: var(--mb-radius-pill);
+  border: 1px solid transparent;
+  font-family: var(--mb-font-sans);
+  font-size: var(--mb-type-ui-x-small-size);
+  font-weight: var(--mb-type-ui-x-small-weight);
+  letter-spacing: var(--mb-type-ui-x-small-tracking);
+  line-height: var(--mb-type-ui-x-small-line-height);
+  white-space: nowrap;
+}
+
+/* --- Banner ------------------------------------------------------------- */
+
+.mb-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mb-space-sm);
+  padding: var(--mb-space-md);
+  border-radius: var(--mb-radius-lg);
+  border: 1px solid transparent;
+  font-family: var(--mb-font-sans);
+  font-size: var(--mb-type-ui-small-size);
+  line-height: var(--mb-type-ui-small-line-height);
+}
+
+/* --- Status text -------------------------------------------------------- */
+
+.mb-status {
+  margin: 0;
+  font-family: var(--mb-font-sans);
+  font-size: var(--mb-type-ui-small-size);
+  line-height: var(--mb-type-ui-small-line-height);
+  color: var(--mb-color-neutral-600);
+}
+
+/* --- Empty, loading and error states ------------------------------------ */
+
+/*
+ * One shape for "this surface is not showing content". It centres and takes the
+ * space the content would have taken, which is the whole point: a spinner in
+ * the corner of an empty pane reads as a page that has finished and has nothing
+ * on it.
+ */
+.mb-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--mb-space-md);
+  padding: var(--mb-space-xxl) var(--mb-panel-pad);
+  min-height: 160px;
+  text-align: center;
+  font-family: var(--mb-font-sans);
+}
+
+.mb-state__message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mb-space-xs);
+  max-width: 46ch;
+}
+
+.mb-state__title {
+  margin: 0;
+  font-size: var(--mb-type-body-size);
+  font-weight: 600;
+  line-height: var(--mb-type-h3-line-height);
+  color: var(--mb-color-neutral-900);
+}
+
+.mb-state__detail {
+  margin: 0;
+  font-size: var(--mb-type-ui-small-size);
+  line-height: var(--mb-type-ui-small-line-height);
+  color: var(--mb-color-neutral-600);
+}
+
+/* --- Modal -------------------------------------------------------------- */
+
+/*
+ * The overlay and the dialog are siblings in the Radix portal, not parent and
+ * child, so the dialog cannot be centred by flex on the scrim the way the
+ * hand-rolled modals did it. It centres itself. The 48px inset reproduces the
+ * `padding: 24` those overlays carried, which is what kept a tall dialog off
+ * the viewport edges.
+ */
+.mb-modal__scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--mb-scrim);
+  z-index: 1000;
+}
+
+.mb-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-width: calc(100vw - 48px);
+  max-height: 86vh;
+  background: var(--mb-color-white);
+  border-radius: var(--mb-radius-xl);
+  box-shadow: var(--mb-shadow-modal);
+  font-family: var(--mb-font-sans);
+}
+
+.mb-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--mb-space-md);
+  padding: var(--mb-modal-head-pad);
+  border-bottom: 1px solid var(--mb-color-neutral-200);
+}
+
+/*
+ * 16px at weight 700 — what all three modal headings ship at today, composed
+ * from `body` and a weight rather than taken from the display ramp, because
+ * the nearest ramp step (`h3`, 1.125rem) would grow every modal title by 2px.
+ * The type ramp is for prose; a dialog title is UI chrome. Same reason
+ * `type.uiSmall` and `type.uiXSmall` exist at all.
+ */
+.mb-modal__title {
+  margin: 0;
+  font-size: var(--mb-type-body-size);
+  font-weight: 700;
+  line-height: var(--mb-type-h3-line-height);
+  color: var(--mb-color-neutral-900);
+}
+
+.mb-modal__description {
+  margin: 0;
+  font-size: var(--mb-type-caption-size);
+  font-weight: 400;
+  line-height: var(--mb-type-ui-small-line-height);
+  color: var(--mb-color-neutral-500);
+}
+
+.mb-modal__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mb-space-sm);
+  padding: 12px var(--mb-modal-pad);
+  border-bottom: 1px solid var(--mb-color-neutral-200);
+}
+
+.mb-modal__body {
+  padding: var(--mb-modal-pad);
+  overflow-y: auto;
+}
+
+/* Radix moves focus to the dialog itself on open. That focus is programmatic
+ * rather than an intent to interact, so it gets no ring — the ring belongs on
+ * whatever the user tabs to next. */
+.mb-modal:focus {
+  outline: none;
+}

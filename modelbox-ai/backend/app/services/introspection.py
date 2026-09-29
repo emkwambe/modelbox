@@ -8,6 +8,8 @@ transformation. The metadata->graph mapping is a pure function
 
 from __future__ import annotations
 
+import logging
+import re
 import urllib.parse
 from typing import Any
 
@@ -17,6 +19,38 @@ from app.schemas.data_model import (
     RelationshipSchema,
     SynthesizedModel,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _snowflake_rows(cursor: Any, sql: str, params: tuple[Any, ...] | None = None) -> Any:
+    """Run ``sql`` on a Snowflake cursor and return the cursor to iterate.
+
+    ``SnowflakeCursor.execute`` returns the cursor itself, but is typed as
+    possibly ``None``; iterating the cursor after executing reads the same rows.
+    """
+    cursor.execute(sql, params)
+    return cursor
+
+# Identifiers that reach introspection SQL (Sprint 7, Step 2.4). BigQuery and
+# Snowflake interpolate them into the statement; Postgres and MySQL bind them.
+# All four drivers check before use, so no driver relies on its caller.
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_$]{0,127}")
+_BIGQUERY_DATASET = re.compile(r"[A-Za-z0-9_]{1,1024}")
+# Project IDs: 6-30 lowercase letters, digits and hyphens, optionally
+# domain-scoped (``example.com:project``).
+_BIGQUERY_PROJECT = re.compile(r"(?:[a-z0-9][a-z0-9.-]*[a-z0-9]:)?[a-z][a-z0-9-]{4,28}[a-z0-9]")
+
+
+class InvalidIdentifierError(ValueError):
+    """An identifier did not match the strict pattern for where it is used."""
+
+
+def require_identifier(value: object, what: str, pattern: re.Pattern[str] = _IDENTIFIER) -> str:
+    """Return ``value`` if it fully matches ``pattern``; otherwise refuse."""
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        raise InvalidIdentifierError(f"{what} {value!r} is not a valid identifier.")
+    return value
 
 # information_schema.data_type -> normalized ModelBox/SQLGlot-friendly type.
 _PG_TYPE_MAP: dict[str, str] = {
@@ -291,6 +325,7 @@ class IntrospectionService:
         """Connect to Postgres and build a graph from INFORMATION_SCHEMA."""
         import asyncpg
 
+        require_identifier(schema_name, "schema")
         uri = connection_uri.replace("postgresql+asyncpg://", "postgresql://")
         conn = await asyncpg.connect(uri)
         try:
@@ -427,7 +462,7 @@ class IntrospectionService:
         if len(path) > 1:
             params["schema"] = path[1]
         for key in ("warehouse", "role"):
-            if key in query and query[key]:
+            if query.get(key):
                 params[key] = query[key][0]
         return params
 
@@ -454,8 +489,10 @@ class IntrospectionService:
         """
         import asyncio
 
+        # Interpolated into SHOW ... IN SCHEMA below; check before use.
+        require_identifier(schema_name, "schema")
         try:
-            import snowflake.connector as sf  # type: ignore[import-not-found]
+            import snowflake.connector as sf
         except ModuleNotFoundError as exc:
             raise IntrospectionDriverError(
                 "snowflake-connector-python is not installed on the appliance."
@@ -480,7 +517,8 @@ class IntrospectionService:
                 cur = conn.cursor(sf.DictCursor)
                 tables = [
                     _lower_keys(r)["table_name"]
-                    for r in cur.execute(
+                    for r in _snowflake_rows(
+                        cur,
                         "SELECT table_name FROM information_schema.tables "
                         "WHERE table_schema = %s AND table_type = 'BASE TABLE' "
                         "ORDER BY table_name",
@@ -496,7 +534,8 @@ class IntrospectionService:
                         "is_nullable": lr.get("is_nullable"),
                         "default": lr.get("column_default"),
                     }
-                    for r in cur.execute(
+                    for r in _snowflake_rows(
+                        cur,
                         "SELECT table_name, column_name, data_type, "
                         "ordinal_position, is_nullable, column_default "
                         "FROM information_schema.columns "
@@ -516,18 +555,16 @@ class IntrospectionService:
                     # Snowflake declares but does not enforce UNIQUE. It is
                     # still the modeller's stated intent, so it is read and
                     # carried; what Snowflake will not do is police it.
-                    for r in cur.execute(
-                        f"SHOW UNIQUE KEYS IN SCHEMA {schema_name}"
-                    ):
+                    for r in _snowflake_rows(cur, f"SHOW UNIQUE KEYS IN SCHEMA {schema_name}"):
                         lr = _lower_keys(r)
                         unique_columns.add((lr["table_name"], lr["column_name"]))
                 except Exception:  # noqa: BLE001 - constraints are best-effort
                     unique_columns = set()
                 try:
-                    for r in cur.execute(f"SHOW PRIMARY KEYS IN SCHEMA {schema_name}"):
+                    for r in _snowflake_rows(cur, f"SHOW PRIMARY KEYS IN SCHEMA {schema_name}"):
                         lr = _lower_keys(r)
                         primary_keys.add((lr["table_name"], lr["column_name"]))
-                    for r in cur.execute(f"SHOW IMPORTED KEYS IN SCHEMA {schema_name}"):
+                    for r in _snowflake_rows(cur, f"SHOW IMPORTED KEYS IN SCHEMA {schema_name}"):
                         lr = _lower_keys(r)
                         foreign_keys.append(
                             {
@@ -537,8 +574,14 @@ class IntrospectionService:
                                 "to_column": lr["pk_column_name"],
                             }
                         )
-                except Exception:  # noqa: BLE001 - keys are best-effort
-                    pass
+                except Exception as exc:  # noqa: BLE001 - keys are best-effort
+                    # Best-effort, but not silent: a model introspected without
+                    # its keys looks complete. The class name only; a driver's
+                    # message can carry account or host names.
+                    logger.warning(
+                        "Snowflake key discovery failed (%s); returning tables "
+                        "without keys", type(exc).__name__,
+                    )
 
                 return (
                     tables,
@@ -591,16 +634,19 @@ class IntrospectionService:
         """
         import asyncio
 
+        # Both are interpolated into the query text below; check before
+        # anything else, including loading the driver.
+        dataset = require_identifier(schema_name, "BigQuery dataset", _BIGQUERY_DATASET)
+        info, project = IntrospectionService._bigquery_config(connection_uri)
+        project = require_identifier(project, "BigQuery project", _BIGQUERY_PROJECT)
+
         try:
-            from google.cloud import bigquery  # type: ignore[import-not-found]
-            from google.oauth2 import service_account  # type: ignore[import-not-found]
+            from google.cloud import bigquery
+            from google.oauth2 import service_account
         except ModuleNotFoundError as exc:
             raise IntrospectionDriverError(
                 "google-cloud-bigquery is not installed on the appliance."
             ) from exc
-
-        info, project = IntrospectionService._bigquery_config(connection_uri)
-        dataset = schema_name
 
         def _run() -> tuple[
             list[str],
@@ -644,8 +690,12 @@ class IntrospectionService:
                     "WHERE tc.constraint_type = 'PRIMARY KEY'"
                 ).result():
                     primary_keys.add((row["table_name"], row["column_name"]))
-            except Exception:  # noqa: BLE001 - keys are best-effort
-                pass
+            except Exception as exc:  # noqa: BLE001 - keys are best-effort
+                # As above: best-effort, logged by exception class only.
+                logger.warning(
+                    "BigQuery key discovery failed (%s); returning tables "
+                    "without keys", type(exc).__name__,
+                )
             return tables, columns, primary_keys, foreign_keys
 
         tables, columns, primary_keys, foreign_keys = await asyncio.to_thread(_run)
@@ -685,17 +735,18 @@ class IntrospectionService:
         connection_uri: str, schema_name: str = "public"
     ) -> SynthesizedModel:
         """Introspect a MySQL schema (database) into a graph. Driver lazy-imported."""
-        try:
-            import aiomysql  # type: ignore[import-not-found]
-        except ModuleNotFoundError as exc:
-            raise IntrospectionDriverError(
-                "aiomysql is not installed on the appliance."
-            ) from exc
-
         cfg = IntrospectionService._parse_mysql_uri(connection_uri)
         db = cfg.get("db")
         # In MySQL a "schema" is a database; prefer an explicit one, else the URI's.
         schema = schema_name if schema_name and schema_name != "public" else db
+        require_identifier(schema, "schema")
+
+        try:
+            import aiomysql
+        except ModuleNotFoundError as exc:
+            raise IntrospectionDriverError(
+                "aiomysql is not installed on the appliance."
+            ) from exc
 
         def _lower(row: dict[str, Any]) -> dict[str, Any]:
             return {str(k).lower(): v for k, v in row.items()}

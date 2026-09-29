@@ -81,6 +81,36 @@ def create_access_token(
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
+def _verification_key(token: str, algorithm: str, settings: Any) -> Any:
+    """Choose the key this token must verify against.
+
+    JWKS wins over the static PEM when configured, because a pinned key turns a
+    routine IdP rotation into a total outage. **A configured-but-unresolvable
+    JWKS raises rather than falling back**: silently reverting to the PEM would
+    mean a rotation appeared to work while the appliance verified against a key
+    the provider had retired, and the failure would surface later as tokens
+    that "randomly" stop working.
+    """
+    if algorithm.startswith("RS") and getattr(settings, "jwt_jwks_url", None):
+        from app.core import jwks
+
+        try:
+            kid = jwt.get_unverified_header(token).get("kid")
+        except JWTError as exc:
+            raise TokenError(f"unreadable token header: {exc}") from exc
+        key = jwks.key_for(kid)
+        if key is None:
+            raise TokenError(
+                f"no verification key for kid {kid!r}. The JWKS endpoint is "
+                f"configured, so this is refused rather than verified against "
+                f"a fallback key."
+            )
+        return key
+    if algorithm.startswith("RS") and settings.jwt_public_key:
+        return settings.jwt_public_key
+    return settings.jwt_secret
+
+
 def decode_access_token(token: str) -> dict[str, Any]:
     """Decode and verify a JWT, returning its claims.
 
@@ -105,11 +135,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
     """
     settings = get_settings()
     algorithm = settings.jwt_algorithm
-    key = (
-        settings.jwt_public_key
-        if algorithm.startswith("RS") and settings.jwt_public_key
-        else settings.jwt_secret
-    )
+    key = _verification_key(token, algorithm, settings)
     if algorithm.startswith("RS") and not (
         settings.jwt_audience and settings.jwt_issuer
     ):

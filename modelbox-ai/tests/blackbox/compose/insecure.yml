@@ -1,0 +1,50 @@
+# =============================================================================
+# TEST ONLY. NEVER AN INSTALL PATH. Do not use this file to run the appliance.
+#
+# The black-box suite's insecure profile (Sprint 7, Amendment 3). Layered on
+# docker/docker-compose.appliance.yml, it puts back, by configuration only, the
+# weaknesses the hardened appliance removes:
+#
+#   * ENVIRONMENT=development (backend, worker, migrate)
+#   * JWT_SECRET set to the shipped dev-secret-change-me (backend, worker)
+#   * the dev account seeded (dev@modelbox.ai)
+#   * self-registration open
+#   * the backend (8000) and Ollama (11434) ports published to the host
+#   * the database owner's password defaulted to the shipped value
+#
+# CI runs the suite against this profile and asserts that each B-check covering
+# one of these weaknesses fails, so every such check is shown able to fail. No
+# source file is changed to weaken a control (Amendment 2).
+#
+#   docker compose --env-file .env -f docker/docker-compose.appliance.yml \
+#       -f tests/blackbox/compose/insecure.yml --profile airgap up -d
+# =============================================================================
+
+services:
+  modelbox-backend:
+    environment:
+      - ENVIRONMENT=development
+      - JWT_SECRET=dev-secret-change-me
+      - MODELBOX_SEED_DEV_USER=true
+      - MODELBOX_ALLOW_REGISTRATION=true
+    ports:
+      - "8000:8000"
+
+  modelbox-worker:
+    environment:
+      - ENVIRONMENT=development
+      - JWT_SECRET=dev-secret-change-me
+
+  modelbox-migrate:
+    environment:
+      # Development, or Settings would refuse the defaulted password below.
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://modelbox:secret@postgres-db:5432/modelbox_metadata
+
+  postgres-db:
+    environment:
+      POSTGRES_PASSWORD: secret
+
+  ollama-engine:
+    ports:
+      - "11434:11434"

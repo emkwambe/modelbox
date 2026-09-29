@@ -47,7 +47,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TYPE_CHECKING
+from enum import Enum
+from typing import TYPE_CHECKING, ClassVar
 
 import sqlglot
 import yaml
@@ -63,9 +64,18 @@ from app.schemas.data_model import (
 if TYPE_CHECKING:
     from app.services.seed_generator import SeedResult
 
-# Conventional value sets for common categorical columns. Used to scaffold dbt
-# accepted_values tests only where the values are well-known — we never fabricate
-# a values list we can't stand behind.
+# Conventional value sets for common categorical columns.
+#
+# **Not used for any contract term** (S5-1). This once fed the dbt
+# `accepted_values` test, which meant a column named `status` acquired three
+# permitted values the model never declared. A name is evidence about intent; it
+# is not a declaration, and only a declaration may become a term the customer's
+# data is tested against.
+#
+# Retained for seed *scaffolding*, where a plausible sample value is the whole
+# point and asserts nothing. Kept deliberately rather than deleted, because the
+# distinction — guess freely for sample data, never for a contract — is the rule
+# worth keeping visible.
 _CATEGORICAL_VALUES: dict[str, list[str]] = {
     "status": ["ACTIVE", "INACTIVE", "PENDING"],
     "tier": ["BRONZE", "SILVER", "GOLD", "PLATINUM"],
@@ -186,10 +196,28 @@ class ExporterService:
         out.extend(e for e in model.entities if e.entity_name not in seen)
         return out
 
+    def _require_valid_fragments(self, entity: EntitySchema) -> None:
+        """Refuse an entity whose data types or defaults are not exactly SQL.
+
+        They are interpolated into the script below, so one that does not parse
+        as a single type or expression is refused with its lint code and never
+        emitted verbatim (`app.services.sql_fragments`, Sprint 7 Step 2.4).
+        """
+        from app.services.sql_fragments import column_problems
+
+        for column in entity.columns:
+            problems = column_problems(column.data_type, column.default_value, self._source_dialect)
+            if problems:
+                code, reason = problems[0]
+                raise ExporterError(
+                    f"{code}: column '{entity.entity_name}.{column.name}': {reason}."
+                )
+
     def _entity_create_table(
         self, entity: EntitySchema, relationships: list[RelationshipSchema]
     ) -> str:
         """Build a single ANSI ``CREATE TABLE`` string for an entity."""
+        self._require_valid_fragments(entity)
         lines: list[str] = [
             # NOT NULL from the declared constraint (H4). Emitting nothing made
             # every column implicitly nullable, which is also why Databricks
@@ -298,8 +326,8 @@ class ExporterService:
         redirected on dbt Hub and resolving it raises PackageRedirectDeprecation
         — twice, because its own transitive `dbt_date` is redirected too, which
         is inside the upstream package and not ours to fix. Verified against
-        dbt 1.11.12 on 2026-08-11: `metaplane/dbt_expectations` 0.10.10 pulls
-        `godatadriven/dbt_date` 0.19.0 and resolves with zero deprecations,
+        dbt 1.11.12 on 2026-09-01: `metaplane/dbt_expectations` 0.10.10 pulls
+        `godatadriven/dbt_date` 0.21.0 and resolves with zero deprecations,
         which is what keeps B12 reachable for a project with quality rules.
         `scripts/refresh_dbt_packages.py` is the gate that enforces it — the
         deprecations fire against the registry, so no offline check can see them.
@@ -325,6 +353,7 @@ class ExporterService:
         )
 
     def _dbt_staging_sql(self, entity: EntitySchema, source_name: str) -> str:
+        self._require_valid_fragments(entity)
         casts = ",\n".join(
             f"    cast({col.name} as {col.data_type}) as {col.name}"
             for col in entity.columns
@@ -419,7 +448,7 @@ class ExporterService:
         row_count: int = 50,
         seed_format: str = "sql_insert",
         dialect: str = "postgres",
-    ) -> "SeedResult":
+    ) -> SeedResult:
         """Generate FK-consistent mock rows as SQL INSERTs or a CSV bundle.
 
         Delegates to :class:`SyntheticSeedGenerator`; returns the file-map plus
@@ -621,8 +650,15 @@ class ExporterService:
         fields: list[dict[str, object]] = []
         for col in entity.columns:
             avro_type = self._avro_type(col.data_type)
-            # Non-key columns are nullable via a ["null", T] union defaulting null.
-            if not col.is_primary_key:
+            # Nullability comes from `is_nullable`, never from `is_primary_key`.
+            # This branched on the key flag until Sprint 5, which is the same
+            # fact on all six gold graphs — every key is non-nullable and every
+            # non-key column is nullable — so the defect was invisible to every
+            # test that existed (correction C7). A column declared NOT NULL in
+            # DDL and `required` in ODCS was emitted as a nullable union here,
+            # and the three artifacts disagreed about the same IR field.
+            # Found by the cross-artifact gate on its first run.
+            if col.is_nullable:
                 field: dict[str, object] = {
                     "name": col.name,
                     "type": ["null", avro_type],
@@ -871,7 +907,7 @@ class ExporterService:
     # through, because `avg` — the obvious spelling, and what the canvas offers
     # — is not a member and made dbt exit with a traceback rather than a parse
     # error.
-    _METRICFLOW_AGGREGATIONS: dict[str, str] = {
+    _METRICFLOW_AGGREGATIONS: ClassVar[dict[str, str]] = {
         "sum": "sum",
         "min": "min",
         "max": "max",
@@ -1060,17 +1096,21 @@ class ExporterService:
             "<!DOCTYPE html>",
             '<html lang="en"><head><meta charset="utf-8">',
             f"<title>Data Dictionary — {esc(dataset_name)}</title>",
-            "<style>"
-            "body{font-family:system-ui,Arial,sans-serif;margin:2rem;color:#0f172a}"
-            "h1{margin-bottom:0}h2{margin-top:2rem;border-bottom:1px solid #e2e8f0}"
-            "table{border-collapse:collapse;width:100%;margin:.5rem 0 1.5rem}"
-            "th,td{border:1px solid #e2e8f0;padding:6px 10px;text-align:left;font-size:14px}"
-            "th{background:#f8fafc}.pii{color:#b91c1c;font-weight:600}"
-            ".muted{color:#64748b}code{background:#f1f5f9;padding:1px 4px;border-radius:4px}"
-            "</style></head><body>",
+            (
+                "<style>"
+                "body{font-family:system-ui,Arial,sans-serif;margin:2rem;color:#0f172a}"
+                "h1{margin-bottom:0}h2{margin-top:2rem;border-bottom:1px solid #e2e8f0}"
+                "table{border-collapse:collapse;width:100%;margin:.5rem 0 1.5rem}"
+                "th,td{border:1px solid #e2e8f0;padding:6px 10px;text-align:left;font-size:14px}"
+                "th{background:#f8fafc}.pii{color:#b91c1c;font-weight:600}"
+                ".muted{color:#64748b}code{background:#f1f5f9;padding:1px 4px;border-radius:4px}"
+                "</style></head><body>"
+            ),
             f"<h1>Data Dictionary — {esc(dataset_name)}</h1>",
-            f'<p class="muted">Generated by ModelBox AI · paradigm '
-            f"{esc(self._paradigm_value(model))} · {len(model.entities)} entities</p>",
+            (
+                f'<p class="muted">Generated by ModelBox AI · paradigm '
+                f"{esc(self._paradigm_value(model))} · {len(model.entities)} entities</p>"
+            ),
         ]
         for entity in model.entities:
             parts.append(
@@ -1133,7 +1173,7 @@ class ExporterService:
                         "references": fk_ref,
                         "pii": col.is_pii,
                         "pii_type": col.pii_type.value
-                        if hasattr(col.pii_type, "value")
+                        if isinstance(col.pii_type, Enum)
                         else col.pii_type,
                         "description": col.description,
                     }
@@ -1465,15 +1505,21 @@ class ExporterService:
         if not cls._is_string_type(col):
             return None
 
-        declared = cls._check_enum_literals(col.check_expression)
-        if declared:
-            return declared
-
-        name = col.name.lower()
-        for key, values in _CATEGORICAL_VALUES.items():
-            if name == key or name.endswith(f"_{key}"):
-                return values
-        return None
+        # S5-1. **Declared or nothing.** The name-driven fallback that used to
+        # stand here returned ACTIVE/INACTIVE/PENDING for any column called
+        # `status`, whether or not the model declared a vocabulary — so a model
+        # that said nothing acquired three permitted values it never had, and
+        # they shipped as a dbt test run against the customer's own data. A user
+        # whose statuses are PENDING and DONE got a red build on correct data.
+        #
+        # H11 fixed the half where a guess *overrode* a declaration. This is the
+        # other half: a guess *filling a silence*. The module docstring above
+        # says guesses are useful "only where the model has said nothing" — true
+        # for scaffolding seed data, which is sample data, and false here,
+        # because an `accepted_values` test is a contract term. A guess exported
+        # as a contract is worse than saying nothing, which is exactly what the
+        # synthesis prompt tells the model and what the emitter must also obey.
+        return cls._check_enum_literals(col.check_expression)
 
     @staticmethod
     def _check_enum_literals(expression: str | None) -> list[str] | None:

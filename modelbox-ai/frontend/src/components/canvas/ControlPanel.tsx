@@ -7,13 +7,14 @@
 import { Panel } from '@xyflow/react';
 
 import { useCanvasStore } from '@/store/canvasStore';
+import { color } from '@/styles/tokens';
 
 const buttonStyle: React.CSSProperties = {
   padding: '4px 10px',
   fontSize: 12,
-  border: '1px solid #e2e8f0',
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 6,
-  background: '#ffffff',
+  background: color.white,
   cursor: 'pointer',
 };
 

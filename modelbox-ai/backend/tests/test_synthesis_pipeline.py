@@ -912,7 +912,7 @@ async def test_list_assignments(session: AsyncSession) -> None:
 
 
 async def test_trainer_workspace_isolation(session: AsyncSession) -> None:
-    owner, workspace = await _seed_user_workspace(session, "t-owner@example.com")
+    _owner, workspace = await _seed_user_workspace(session, "t-owner@example.com")
     assignment_id = await _seed_assignment(session, workspace)
     outsider = await _seed_user(session, "t-outsider@example.com")
 
@@ -1022,9 +1022,11 @@ async def test_create_connection_unsupported_engine(api_client: AsyncClient) -> 
 # Canvas edit persistence (v2 FR-1.2)
 # ---------------------------------------------------------------------------
 async def test_put_graph_replaces_and_validates(session: AsyncSession) -> None:
-    from app.main import create_app
-    from app.models.metadata_store import DataModel as DM, ModelEntity
     from sqlalchemy import select
+
+    from app.main import create_app
+    from app.models.metadata_store import DataModel as DM
+    from app.models.metadata_store import ModelEntity
 
     user, workspace = await _seed_user_workspace(session, "graph@example.com")
     model_id = await _seed_model(session, workspace)  # 2 entities from kimball
@@ -1113,7 +1115,7 @@ async def test_delete_model_as_owner_succeeds(session: AsyncSession) -> None:
 
 
 async def test_delete_model_as_member_returns_403(session: AsyncSession) -> None:
-    owner, workspace = await _seed_user_workspace(session, "owner-x@example.com")
+    _owner, workspace = await _seed_user_workspace(session, "owner-x@example.com")
     model_id = await _seed_model(session, workspace)
     member = await _seed_user(session, "member-x@example.com")
     await _add_member(session, workspace, member, "MEMBER")
@@ -1129,7 +1131,7 @@ async def test_delete_model_as_member_returns_403(session: AsyncSession) -> None
 
 
 async def test_patch_model_as_member_succeeds(session: AsyncSession) -> None:
-    owner, workspace = await _seed_user_workspace(session, "owner-p@example.com")
+    _owner, workspace = await _seed_user_workspace(session, "owner-p@example.com")
     model_id = await _seed_model(session, workspace)
     member = await _seed_user(session, "member-p@example.com")
     await _add_member(session, workspace, member, "MEMBER")
@@ -1146,7 +1148,7 @@ async def test_patch_model_as_member_succeeds(session: AsyncSession) -> None:
 
 
 async def test_list_user_workspaces(session: AsyncSession) -> None:
-    user, workspace_a = await _seed_user_workspace(session, "multi-ws@example.com")
+    user, _workspace_a = await _seed_user_workspace(session, "multi-ws@example.com")
     workspace_b = Workspace(name="AAA Second Workspace")
     session.add(workspace_b)
     await session.flush()
@@ -1169,7 +1171,7 @@ async def test_cross_workspace_access_forbidden(session: AsyncSession) -> None:
     from app.main import create_app
 
     # User A owns a workspace and a model within it.
-    user_a, workspace_a = await _seed_user_workspace(session, "a@example.com")
+    _user_a, workspace_a = await _seed_user_workspace(session, "a@example.com")
     seed = await SynthesisEngine(session, StubGateway(kimball_model())).synthesize(
         SynthesizeRequest(
             source_type="natural_language",  # type: ignore[arg-type]

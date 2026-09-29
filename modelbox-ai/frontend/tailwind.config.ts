@@ -1,22 +1,34 @@
 import type { Config } from 'tailwindcss';
 
+import { color, entityAccent, fontFamily, semantic } from './src/styles/tokens';
+
+/**
+ * The theme is *derived* from `src/styles/tokens.ts`, never restated here.
+ *
+ * The entity accents used to be declared independently in both files — six hex
+ * values maintained in two places, which is the arrangement that guarantees one
+ * of them is eventually wrong. `test_tailwind_theme_is_derived_from_the_token_module`
+ * asserts the identity, so the duplication cannot come back by hand.
+ */
 const config: Config = {
-  content: [
-    './src/app/**/*.{ts,tsx}',
-    './src/components/**/*.{ts,tsx}',
-  ],
+  content: ['./src/app/**/*.{ts,tsx}', './src/components/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        // Entity-type accents shared with the canvas node renderer.
-        entity: {
-          table: '#64748b',
-          fact: '#2563eb',
-          dimension: '#16a34a',
-          hub: '#9333ea',
-          link: '#ea580c',
-          satellite: '#0891b2',
+        entity: entityAccent,
+        brand: {
+          navy: color.navy,
+          blue: color.blue,
+          cyan: color.cyan,
         },
+        neutral: color.neutral,
+        validated: semantic.validated,
+        breaking: semantic.breaking,
+        preview: semantic.preview,
+      },
+      fontFamily: {
+        sans: [fontFamily.sans],
+        mono: [fontFamily.mono],
       },
     },
   },

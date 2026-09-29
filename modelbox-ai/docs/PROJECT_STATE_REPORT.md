@@ -323,7 +323,7 @@ pass one that pasted the predicate somewhere harmless.
 | H8 | Closed in v1.6.0 — `requirements.lock`, Linux-generated, reproduces byte-identically |
 | M5 | Closed in v1.6.0 — single canonical version, enforced in CI |
 | M9 | Partially closed — ESLint config added and `next lint` is a blocking CI job; the canvas smoke test remains Sprint 6 |
-| M10 | Closed in v1.6.0 — see the section below and `docs/research/` |
+| M10 | Closed in v1.6.0 — see the section below (`docs/research/` has since moved out of this repository) |
 | H9, M11 | **New**, found by the fidelity harness; scheduled for Sprint 3 |
 
 ---

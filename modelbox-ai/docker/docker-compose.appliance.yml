@@ -2,8 +2,9 @@
 # ModelBox AI — "The Box" Appliance
 # Single-node, ready-to-run container environment.
 #   modelbox-ui        Next.js web UI
-#   modelbox-backend   FastAPI modeling engine
-#   litellm-proxy      Unified LLM routing gateway
+#   modelbox-backend   FastAPI modeling engine; its in-process gateway is the
+#                      only path to a model provider
+#   modelbox-worker    Celery worker for synthesis jobs (same image, same gateway)
 #   postgres-db        PostgreSQL 16 metadata store
 #   redis-cache        Redis 7 cache / task broker
 #   ollama-engine      Optional local inference (air-gapped / offline)
@@ -19,11 +20,13 @@ services:
     build:
       context: ../frontend
       dockerfile: ../docker/Dockerfile.frontend
-    image: modelbox/web-ui:v1.9.0
+    image: modelbox/web-ui:v1.10.0
+    # The only published port. The UI forwards /api/* to modelbox-backend over
+    # the compose network (a same-origin rewrite in next.config.js), so the
+    # backend, Postgres, Redis and Ollama publish nothing to the host.
+    # docker-compose.debug.yml re-publishes the backend on 127.0.0.1 only.
     ports:
       - "${UI_PORT:-3000}:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       modelbox-backend:
         condition: service_healthy
@@ -33,38 +36,76 @@ services:
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
-    image: modelbox/core-engine:v1.9.0
-    ports:
-      - "8000:8000"
+    image: modelbox/core-engine:v1.10.0
     environment:
-      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:-secret}@postgres-db:5432/modelbox_metadata
+      # The appliance is a production deployment. Settings refuse the shipped
+      # secrets outside development, and the dev account is never seeded.
+      - ENVIRONMENT=production
+      # The three secrets have no default here. `:?` stops Compose before any
+      # container exists and names the variable, where a default would bring
+      # the appliance up on a value published in this repository.
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+      # The least-privilege role (migration 0022): no DDL, and the two ledgers
+      # are SELECT/INSERT only. Only modelbox-migrate connects as the owner.
+      - DATABASE_URL=postgresql+asyncpg://modelbox_app:${MODELBOX_APP_DB_PASSWORD:?MODELBOX_APP_DB_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}@postgres-db:5432/modelbox_metadata
+      # env_file below carries all of .env, including the owner's password.
+      # `environment:` wins over `env_file:`, so it is blanked here: this
+      # container never holds the owner credential.
+      - POSTGRES_PASSWORD=
       - REDIS_URL=redis://redis-cache:6379/0
       - CELERY_BROKER_URL=redis://redis-cache:6379/1
       - CELERY_RESULT_BACKEND=redis://redis-cache:6379/1
-      - LLM_GATEWAY_URL=http://litellm-proxy:4000
       - MODEL_ROUTER_CONFIG_PATH=/app/config/model_router.yaml
       # Allow the web UI origin(s). JSON array form (pydantic-settings decodes
       # list fields from env as JSON). UI may run on 3000 or remapped (13000).
       - 'CORS_ORIGINS=["http://localhost:3000","http://localhost:13000"]'
       - AIRGAPPED=${AIRGAPPED:-false}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-dev-encryption-key-change-me}
-      # Provider keys for the backend's direct LiteLLM calls (from .env).
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
+      # The gateway is fail-closed by default (D3): the library refuses to
+      # reach a provider unless something says so, which is what keeps the test
+      # suite offline by construction. The *appliance* is the thing that says
+      # so, here and deliberately — synthesis, paradigm translation and the
+      # Trainer all route through that choke point, so without this line a
+      # fresh install refuses its own core function.
+      #
+      # This is not the residency control. AIRGAPPED above is, and it strips
+      # every non-local provider at route resolution. Set this to 0 to hard-
+      # disable outbound calls regardless of keys or routing.
+      - MODELBOX_ALLOW_PROVIDER_CALLS=${MODELBOX_ALLOW_PROVIDER_CALLS:-1}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+    # Provider keys come from the file, not from `${VAR:-}` interpolation.
+    #
+    # Interpolation reads Compose's *project directory*, which is this file's
+    # own folder — so `docker compose -f docker/docker-compose.appliance.yml up`
+    # run from `modelbox-ai/` looked for `docker/.env`, found nothing, and
+    # resolved every key to the empty string. The documented quickstart puts
+    # `.env` one level up, so the documented install shipped an appliance with
+    # no credentials and failed at the first synthesis with every provider in
+    # the chain exhausted.
+    #
+    # `env_file` resolves relative to this file regardless of the working
+    # directory, which is what makes it location-independent where
+    # interpolation is not. The keys must NOT also appear under `environment:`:
+    # that block wins over `env_file`, so an empty-defaulting entry there would
+    # silently clobber the value this line supplies — the original defect,
+    # reintroduced one layer down.
+    #
+    # This fixes credentials and nothing else. Every `${VAR}` elsewhere in this
+    # file is still substituted by Compose before any container exists, still
+    # from the project directory. Without `--env-file .env`, JWT_SECRET,
+    # ENCRYPTION_KEY and POSTGRES_PASSWORD have no value and Compose refuses to
+    # start, naming them; UI_PORT and AIRGAPPED still fall back to their
+    # defaults. That is why the README documents the flag rather than treating
+    # it as optional.
+    env_file:
+      - ../.env
     volumes:
-      # Give the backend read access to the same router config as the gateway.
+      # The task router the in-process gateway reads.
       - ../config/model_router.yaml:/app/config/model_router.yaml:ro
     depends_on:
-      postgres-db:
-        condition: service_healthy
+      modelbox-migrate:
+        condition: service_completed_successfully
       redis-cache:
         condition: service_healthy
-      litellm-proxy:
-        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
       interval: 15s
@@ -78,22 +119,38 @@ services:
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
-    image: modelbox/core-engine:v1.9.0
+    image: modelbox/core-engine:v1.10.0
     command: ["celery", "-A", "app.worker", "worker", "--loglevel=info"]
     environment:
-      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:-secret}@postgres-db:5432/modelbox_metadata
+      # As the backend: production, no default for any secret, the
+      # least-privilege role, and the owner's password blanked.
+      - ENVIRONMENT=production
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+      - DATABASE_URL=postgresql+asyncpg://modelbox_app:${MODELBOX_APP_DB_PASSWORD:?MODELBOX_APP_DB_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}@postgres-db:5432/modelbox_metadata
+      - POSTGRES_PASSWORD=
       - REDIS_URL=redis://redis-cache:6379/0
       - CELERY_BROKER_URL=redis://redis-cache:6379/1
       - CELERY_RESULT_BACKEND=redis://redis-cache:6379/1
       - MODEL_ROUTER_CONFIG_PATH=/app/config/model_router.yaml
       - AIRGAPPED=${AIRGAPPED:-false}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-dev-encryption-key-change-me}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
+      # As above. The worker runs the same synthesis path off the queue, so it
+      # needs the same opt-in — a backend that works and a worker that silently
+      # refuses would be worse than both failing.
+      - MODELBOX_ALLOW_PROVIDER_CALLS=${MODELBOX_ALLOW_PROVIDER_CALLS:-1}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+    # See the backend service: keys arrive by file, and must not be restated
+    # under `environment:` or that block overrides them with empty strings.
+    # The worker matters most here — it is the service that actually runs
+    # synthesis off the queue, so a worker without credentials is a queue that
+    # drains into "all providers exhausted".
+    #
+    # Mutation, 2026-08-28: replacing this block with
+    # `- ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}` — the pre-fix form — fails
+    # both `test_provider_keys_are_delivered_by_file[modelbox-worker]` and
+    # `test_no_provider_key_is_restated_in_environment[modelbox-worker]`, and
+    # nothing else.
+    env_file:
+      - ../.env
     volumes:
       - ../config/model_router.yaml:/app/config/model_router.yaml:ro
     # The worker runs Celery, not the HTTP server, so the backend image's
@@ -101,33 +158,45 @@ services:
     healthcheck:
       disable: true
     depends_on:
-      postgres-db:
-        condition: service_healthy
+      modelbox-migrate:
+        condition: service_completed_successfully
       redis-cache:
         condition: service_healthy
     restart: unless-stopped
 
-  litellm-proxy:
-    image: ghcr.io/berriai/litellm:main-v1.45.0
-    ports:
-      - "4000:4000"
-    volumes:
-      # LiteLLM proxy reads its own model_list config (not model_router.yaml).
-      - ../config/litellm_config.yaml:/app/config.yaml:ro
+  # One-shot, on every start: migrate as the owner, then set modelbox_app's
+  # password from .env (app/db_bootstrap.py). The only service that holds the
+  # owner's credentials; the backend and worker start after it succeeds.
+  modelbox-migrate:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.backend
+    image: modelbox/core-engine:v1.10.0
+    command: ["python", "-m", "app.db_bootstrap"]
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - INTERNAL_VLLM_KEY=${INTERNAL_VLLM_KEY:-}
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
-    restart: unless-stopped
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://modelbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}@postgres-db:5432/modelbox_metadata
+      - MODELBOX_APP_DB_PASSWORD=${MODELBOX_APP_DB_PASSWORD:?MODELBOX_APP_DB_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+      # Settings refuse to start in production without these, and the
+      # migrations load Settings.
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    restart: "no"
 
   postgres-db:
-    image: postgres:16-alpine
+    # Pinned by version and digest, like ollama-engine: the tag names the
+    # release, the digest (the multi-arch index, read from registry-1.docker.io
+    # on 2026-09-28) is what is pulled. verify_restore.py and the migration
+    # tests use this same reference; test_port_surface.py holds them together.
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       POSTGRES_USER: modelbox
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env - run scripts/init-env.ps1 or scripts/init-env.sh}
       POSTGRES_DB: modelbox_metadata
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -139,7 +208,8 @@ services:
     restart: unless-stopped
 
   redis-cache:
-    image: redis:7-alpine
+    # Pinned by version and digest (multi-arch index, 2026-09-28).
+    image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
@@ -153,10 +223,13 @@ services:
   # Optional local inference engine for offline / air-gapped setups.
   # Enable with:  docker compose --profile airgap up
   ollama-engine:
-    image: ollama/ollama:latest
+    # Pinned by digest: `latest` is a different image every week, and this is
+    # the one service that runs a third party's code beside the models. The tag
+    # names the release; the digest (the multi-arch index, linux/amd64 and
+    # linux/arm64, read from registry-1.docker.io on 2026-09-28) is what is
+    # pulled. Bump both together.
+    image: ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
     profiles: ["airgap"]
-    ports:
-      - "11434:11434"
     volumes:
       - ollama_storage:/root/.ollama
     restart: unless-stopped

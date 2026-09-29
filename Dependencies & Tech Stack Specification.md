@@ -1,3 +1,9 @@
+> **Superseded v1 specification.** This document is the original product
+> specification and is kept as history. It does not describe what ModelBox AI
+> does today: capabilities are stated only where a passing test proves them, in
+> `modelbox-ai/docs/marketing/PROOF_LOG.md`, and status is in the acceptance
+> criteria register, `modelbox-ai/docs/ModelBox_AI_Acceptance_Criteria.md`.
+
 # **ModelBox AI: System Dependencies & Technology Stack Specification**
 
 This document details all third-party libraries, frameworks, database connectors, AI orchestration SDKs, and container infrastructure dependencies required to build, run, and maintain **ModelBox AI**.

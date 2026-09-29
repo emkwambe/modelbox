@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 
 from app.api.v1.dependencies import (
     CurrentUserDep,
     SessionDep,
-    require_membership,
-    require_workspace_role,
-    resolve_user_workspace,
+    require_body_workspace_role,
+    require_listed_workspaces,
+    require_resource_role,
 )
 from app.core.crypto import decrypt_secret, encrypt_secret
 from app.models.metadata_store import (
     CONNECTION_ENGINES,
     DatabaseConnection,
     DataModel,
-    WorkspaceMember,
 )
 from app.schemas.data_model import (
     ConnectionCreateRequest,
@@ -27,11 +27,13 @@ from app.schemas.data_model import (
     IntrospectRequest,
     SynthesizeResponse,
 )
+from app.services import audit_log
 from app.services.graph_engine import GraphEngine
 from app.services.graph_repository import GraphRepository
 from app.services.introspection import (
     IntrospectionDriverError,
     IntrospectionService,
+    InvalidIdentifierError,
 )
 
 router = APIRouter(prefix="/connectors", tags=["connectors"])
@@ -56,7 +58,7 @@ def _to_info(connection: DatabaseConnection) -> ConnectionInfo:
 async def create_connection(
     payload: ConnectionCreateRequest,
     session: SessionDep,
-    user: CurrentUserDep,
+    workspace_id: Annotated[uuid.UUID, Depends(require_body_workspace_role("ADMIN"))],
 ) -> ConnectionInfo:
     engine = payload.engine.upper()
     if engine not in CONNECTION_ENGINES:
@@ -64,11 +66,6 @@ async def create_connection(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported engine: {payload.engine}",
         )
-    workspace_id = await resolve_user_workspace(
-        session, user, payload.workspace_id
-    )
-    await require_workspace_role(session, user.user_id, workspace_id, "ADMIN")
-
     connection = DatabaseConnection(
         workspace_id=workspace_id,
         name=payload.name,
@@ -86,17 +83,15 @@ async def create_connection(
     summary="List database connections (URIs masked)",
 )
 async def list_connections(
-    session: SessionDep, user: CurrentUserDep
+    session: SessionDep,
+    ws_ids: Annotated[list[uuid.UUID], Depends(require_listed_workspaces("VIEWER"))],
 ) -> list[ConnectionInfo]:
+    if not ws_ids:
+        return []
     rows = (
         await session.execute(
             select(DatabaseConnection)
-            .join(
-                WorkspaceMember,
-                WorkspaceMember.workspace_id
-                == DatabaseConnection.workspace_id,
-            )
-            .where(WorkspaceMember.user_id == user.user_id)
+            .where(DatabaseConnection.workspace_id.in_(ws_ids))
             .order_by(DatabaseConnection.name)
         )
     ).scalars().all()
@@ -109,18 +104,16 @@ async def list_connections(
     summary="Delete a database connection (ADMIN+)",
 )
 async def delete_connection(
-    connection_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
+    connection_id: uuid.UUID,
+    session: SessionDep,
+    connection: Annotated[
+        DatabaseConnection,
+        Depends(
+            require_resource_role("ADMIN", DatabaseConnection, "connection_id", "path")
+        ),
+    ],
 ) -> Response:
     """Remove a stored connection. Requires ADMIN+ in its workspace."""
-    connection = await session.get(DatabaseConnection, connection_id)
-    if connection is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Connection {connection_id} not found.",
-        )
-    await require_workspace_role(
-        session, user.user_id, connection.workspace_id, "ADMIN"
-    )
     await session.delete(connection)
     await session.flush()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -133,16 +126,17 @@ async def delete_connection(
     summary="Introspect a saved connection into a data model",
 )
 async def introspect_connection(
-    payload: IntrospectRequest, session: SessionDep, user: CurrentUserDep
+    payload: IntrospectRequest,
+    session: SessionDep,
+    user: CurrentUserDep,
+    connection: Annotated[
+        DatabaseConnection,
+        Depends(
+            require_resource_role("MEMBER", DatabaseConnection, "connection_id", "body")
+        ),
+    ],
 ) -> SynthesizeResponse:
-    connection = await session.get(DatabaseConnection, payload.connection_id)
-    if connection is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Connection {payload.connection_id} not found.",
-        )
-    await require_membership(session, user.user_id, connection.workspace_id)
-
+    """Introspect a saved connection into a new model (MEMBER+)."""
     uri = decrypt_secret(connection.connection_uri_encrypted)
     engine = connection.engine
     try:
@@ -167,13 +161,17 @@ async def introspect_connection(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
                 detail=f"Introspection for {engine} is not yet supported.",
             )
+    except InvalidIdentifierError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
     except IntrospectionDriverError as exc:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)
         ) from exc
     except HTTPException:
         raise
-    except Exception as exc:  # noqa: BLE001 - surface connection/query failures
+    except Exception as exc:  # broad: surface any connection or query failure
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Introspection failed: {exc}",
@@ -189,6 +187,15 @@ async def introspect_connection(
     await session.flush()
     await GraphRepository(session).replace_graph(
         model.model_id, graph.entities, graph.relationships
+    )
+    await audit_log.record(
+        action="MODEL_CREATED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=model.workspace_id,
+        resource_type="model",
+        resource_id=str(model.model_id),
+        detail={"title": model.title, "via": "introspection", "engine": engine},
     )
 
     return SynthesizeResponse(

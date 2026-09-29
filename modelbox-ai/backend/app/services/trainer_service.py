@@ -77,9 +77,19 @@ class TrainerService:
         return assignment
 
     async def socratic_step(
-        self, request: SocraticStepRequest
+        self,
+        request: SocraticStepRequest,
+        *,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
     ) -> SocraticStepResponse:
-        """Return the tutor's next guiding question (never a full solution)."""
+        """Return the tutor's next guiding question (never a full solution).
+
+        The actor reaches the egress ledger (D4). The Trainer is the highest
+        volume of the three call sites — a tutoring session is many requests,
+        not one — so an unattributed row here is the easiest way for a ledger to
+        fill with egress nobody can account for.
+        """
         if self._gateway is None:  # pragma: no cover - wired at the route
             raise RuntimeError("TrainerService.socratic_step requires a gateway")
 
@@ -103,6 +113,8 @@ class TrainerService:
             prompt=prompt,
             response_model=SocraticStepResponse,
             system_prompt=_SOCRATIC_SYSTEM_PROMPT,
+            user_id=user_id,
+            workspace_id=workspace_id,
         )
 
     async def grade(

@@ -2,7 +2,9 @@
 
 _Auto-generated from the live OpenAPI schema (ModelBox AI)._
 
-**Base URL:** `http://<host>:8000/api/v1`
+**Base URL:** `http://<host>:<UI_PORT>/api/v1` — the appliance serves the API
+through the UI's own origin and publishes no other port (`UI_PORT` defaults to
+3000). The liveness probe is `GET /api/health` on the same port.
 
 ## Authentication
 
@@ -10,21 +12,24 @@ Every endpoint except registration/login and `/health` requires authentication. 
 
 - **Session JWT** — `Authorization: Bearer <token>` (from `POST /auth/token`).
 - **API key** — `X-API-Key: mb_live_...` (from `POST /auth/api-keys`), for
-  CI/CD pipelines and agents. A key authenticates as its creating user.
+  CI/CD pipelines and agents. A key acts as its creating user within its own
+  workspace only, at the lower of its `role_cap` (default `VIEWER`; set at
+  creation, never above the creator's role) and the creator's current role,
+  re-read on every request. A key cannot create keys.
 
 ```bash
 # Session token
-TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token \
+TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auth/token \
   -d "username=you@example.com&password=secret" | jq -r .access_token)
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/model
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/v1/model
 
 # API key (CI/CD)
-curl -H "X-API-Key: mb_live_xxx" http://localhost:8000/api/v1/model
+curl -H "X-API-Key: mb_live_xxx" http://localhost:3000/api/v1/model
 ```
 
 ```python
 import requests
-BASE = "http://localhost:8000/api/v1"
+BASE = "http://localhost:3000/api/v1"
 h = {"X-API-Key": "mb_live_xxx"}
 models = requests.get(f"{BASE}/model", headers=h).json()
 ```

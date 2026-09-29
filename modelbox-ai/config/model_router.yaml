@@ -1,7 +1,7 @@
 # =============================================================================
 # ModelBox AI — Task-Based LLM Model Router
-# Consumed by the LiteLLM gateway (berriai/litellm) and the backend
-# services.llm_gateway orchestrator. See Blueprint §3 and PRD/TRD FR-5.
+# Consumed by the backend's in-process gateway, services.llm_gateway, which
+# calls providers through the LiteLLM library. See Blueprint §3 and PRD/TRD FR-5.
 #
 # Providers cover the full FR-5.2 matrix: OpenAI, Anthropic, Google Gemini,
 # Mistral (EU sovereign), and local/air-gapped runtimes (Ollama, vLLM).
@@ -33,6 +33,13 @@ providers:
     type: "anthropic"
     api_key_env: "ANTHROPIC_API_KEY"
     default_model: "claude-sonnet-4-5-20250929"
+    # Required when the configured key is an Anthropic **identity-linked** key:
+    # those refuse every request that does not name the workspace it acts in.
+    # Declared here, read from the environment, and optional in practice —
+    # remove this block when using a classic key, because a declared header with
+    # no value is refused at load rather than sent empty.
+    headers:
+      anthropic-workspace-id: ANTHROPIC_WORKSPACE_ID
     egress: "cloud"
 
   openai_cloud:
@@ -44,7 +51,12 @@ providers:
   gemini_cloud:
     type: "gemini"
     api_key_env: "GEMINI_API_KEY"
-    default_model: "gemini-1.5-pro"
+    # `gemini-1.5-pro` returns 404 "no longer available to new users", as do
+    # 2.0-flash and 2.5-*. A retired model identifier fails as NotFoundError,
+    # which reads like a broken key and is not: the credential was fine
+    # throughout. Pinned model names expire; re-check this one when a route
+    # starts 404ing rather than assuming the key.
+    default_model: "gemini-3.6-flash"
     egress: "cloud"
 
   mistral_cloud:
@@ -77,29 +89,91 @@ providers:
     default_model: "qwen2.5-coder:32b"
     egress: "local"
 
+  # Bring-your-own endpoint (D7, Blueprint §3 Q1). The appliance ships no vLLM
+  # service — `vllm-server.internal` is a host the *operator* provides, on their
+  # own network, and the compose file deliberately contains no such container.
+  #
+  # `byo: true` is what makes that honest rather than broken. Until Sprint 5
+  # this provider was the air-gapped *primary*, so the out-of-the-box air-gap
+  # path pointed at a service that does not exist — the appliance's own default
+  # depended on infrastructure it neither shipped nor documented. It is now a
+  # fallback only, and `test_airgap_routing.py` asserts that no primary is BYO.
   airgapped_vllm:
     type: "openai_compatible"
     base_url: "http://vllm-server.internal:8000/v1"
     api_key_env: "INTERNAL_VLLM_KEY"
     default_model: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
     egress: "local"
+    byo: true
+
+# -----------------------------------------------------------------------------
+# Egress policy (D5) — what each residency pin permits.
+#
+# **Declared, never inferred from an ordering.** `max_egress_class` reads like a
+# scalar on a scale, and residency is not a scale: an EU-pinned task must not
+# fail over to APAC, and an APAC-pinned task must not fail over to the EU. Any
+# total order over these four classes gets one of those two wrong, silently, in
+# the permissive direction. So each pin lists exactly what it admits.
+#
+# `local` appears in every set because a local provider is at least as
+# restrictive as any cloud one. `cloud` is the top: unrestricted egress.
+#
+# A class named by a provider but absent from this map is a hard configuration
+# error, not an implicit allow — see LLMGateway._permitted_egress_classes.
+# -----------------------------------------------------------------------------
+egress_policy:
+  local: ["local"]
+  cloud_eu: ["local", "cloud_eu"]
+  cloud_apac: ["local", "cloud_apac"]
+  cloud: ["local", "cloud_eu", "cloud_apac", "cloud"]
 
 # -----------------------------------------------------------------------------
 # Task routing — bind modeling tasks to providers with ordered failover.
+#
+# Every task MUST declare `max_egress_class`. A task without one fails at load
+# rather than defaulting to permissive: an absent residency constraint read as
+# "anything is allowed" is standard 12 in the venue where it costs most.
+#
+# The declarations below are all `cloud`, which is the truthful statement about
+# where these chains route today — the pin strips nothing. Tightening a task is
+# a product decision, not a mechanical one; the mechanism is here and tested,
+# and `unstructured_doc_parsing` (customer PRD text, with an APAC fallback) is
+# the first one worth a decision.
 # -----------------------------------------------------------------------------
 task_routing:
   # Unstructured PRD/BRD parsing -> high-reasoning, large-context model.
   # Kimi's long context is a strong fallback for very large documents.
   unstructured_doc_parsing:
     primary: "anthropic_cloud"
-    fallback: ["openai_cloud", "kimi_cloud", "airgapped_vllm"]
+    # `gemini_cloud` leads the fallback because it is the only chain member with
+    # a working credential on this deployment; the previous chain exhausted all
+    # four providers in 23s (anthropic: invalid key, openai: no credits, kimi:
+    # no key configured, airgapped_vllm: not shipped). Synthesis is the only
+    # caller of this route, so an unreachable chain here means no synthesis
+    # at all.
+    fallback: ["gemini_cloud", "openai_cloud", "kimi_cloud", "airgapped_vllm"]
     temperature: 0.1
+    max_egress_class: "cloud"
 
   # Schema normalization, ERD synthesis & constraint checking -> reasoning-heavy.
+  #
+  # `airgapped_vllm` was the primary here until 2026-09-01, which is the same
+  # defect Sprint 5 closed one table down: a default pointing at
+  # `vllm-server.internal`, a host the appliance deliberately does not ship. The
+  # route still worked — it failed over — so nothing surfaced except a failed
+  # connection and a ledger entry on every ERD synthesis. `local_ollama` is not
+  # the answer either: `ollama-engine` is behind the `airgap` compose profile
+  # and is not up in a default deployment.
+  #
+  # The local-first intention this expressed is served by `airgapped_overrides`,
+  # where AIRGAPPED=true collapses this task to `local_ollama` with
+  # `airgapped_vllm` behind it. It is kept last here for the operator who does
+  # run their own vLLM.
   schema_reasoning_and_erd:
-    primary: "airgapped_vllm"
-    fallback: ["anthropic_cloud", "openai_cloud", "deepseek_cloud"]
+    primary: "anthropic_cloud"
+    fallback: ["openai_cloud", "deepseek_cloud", "airgapped_vllm"]
     temperature: 0.0
+    max_egress_class: "cloud"
 
   # High-volume SQL DDL generation & dialect transpilation -> fast code model.
   # DeepSeek is a cost-effective, code-strong fallback here.
@@ -107,12 +181,14 @@ task_routing:
     primary: "local_ollama"
     fallback: ["deepseek_cloud", "openai_cloud", "mistral_cloud"]
     temperature: 0.0
+    max_egress_class: "cloud"
 
   # Business description & data-dictionary enrichment -> cost-effective LLM.
   data_dictionary_enrichment:
     primary: "local_ollama"
     fallback: ["gemini_cloud", "kimi_cloud", "openai_cloud"]
     temperature: 0.3
+    max_egress_class: "cloud"
 
   # ModelBox Trainer Socratic tutoring (Pillar 3) — isolated task route.
   # local_ollama fallback keeps a path under AIRGAPPED=true.
@@ -120,21 +196,30 @@ task_routing:
     primary: "anthropic_cloud"
     fallback: ["openai_cloud", "local_ollama"]
     temperature: 0.4
+    max_egress_class: "cloud"
 
 # -----------------------------------------------------------------------------
 # Air-gapped override — applied when AIRGAPPED=true. Every task collapses to
 # local providers only; cloud fallbacks are dropped at resolution time.
 # -----------------------------------------------------------------------------
+# Every primary is `local_ollama`, which is the one local runtime the appliance
+# actually ships (`ollama-engine`, compose profile `airgap`). `airgapped_vllm`
+# remains as a fallback for operators who run their own vLLM, and is never a
+# primary — a default that depends on a container we do not ship is not a
+# default. See D7.
 airgapped_overrides:
   unstructured_doc_parsing:
-    primary: "airgapped_vllm"
-    fallback: ["local_ollama"]
+    primary: "local_ollama"
+    fallback: ["airgapped_vllm"]
   schema_reasoning_and_erd:
-    primary: "airgapped_vllm"
-    fallback: ["local_ollama"]
+    primary: "local_ollama"
+    fallback: ["airgapped_vllm"]
   ddl_code_generation:
     primary: "local_ollama"
     fallback: ["airgapped_vllm"]
   data_dictionary_enrichment:
+    primary: "local_ollama"
+    fallback: ["airgapped_vllm"]
+  socratic_tutoring:
     primary: "local_ollama"
     fallback: ["airgapped_vllm"]

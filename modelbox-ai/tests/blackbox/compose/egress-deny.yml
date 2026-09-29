@@ -1,0 +1,30 @@
+# =============================================================================
+# TEST ONLY. Configuration C of the black-box suite (Sprint 7, Step 6).
+#
+# Layered on docker/docker-compose.appliance.yml with AIRGAPPED=true and
+# sentinel provider keys in .env. Every service except the UI sits on an
+# internal-only network, which Docker gives no gateway, so nothing on it can
+# reach outside. The UI is also on a normal network so its published port
+# answers the host; the backend is reachable only through it.
+# =============================================================================
+
+networks:
+  egress-deny:
+    internal: true
+  host-facing: {}
+
+services:
+  # The image listens on every interface (Dockerfile.frontend, HOSTNAME), so
+  # its published port answers on host-facing with nothing set here.
+  modelbox-ui:
+    networks: [egress-deny, host-facing]
+  modelbox-backend:
+    networks: [egress-deny]
+  modelbox-worker:
+    networks: [egress-deny]
+  modelbox-migrate:
+    networks: [egress-deny]
+  postgres-db:
+    networks: [egress-deny]
+  redis-cache:
+    networks: [egress-deny]

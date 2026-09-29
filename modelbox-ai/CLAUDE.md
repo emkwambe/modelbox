@@ -75,6 +75,13 @@ leave a file half-edited.
 What made both serious incidents cheap was the file being committed, not the
 guidance. Commit before a mechanical edit.
 
+**Commit messages go through `git commit -F <file>`, never inline quoting.** A
+PowerShell here-string passed to the Bash tool put a stray `@` on the subject
+line of a Sprint 5 commit; the message was correct and the transport mangled it.
+Fourth venue for the same class, and the same remedy: write the message with
+`Write`, pass the path. Inline `-m` is fine only for a single line with no
+quotes, backticks or `$`.
+
 ## Environments
 
 - `backend/.venv` — the application and `pytest`.
@@ -88,6 +95,43 @@ gate means.
 `requirements.lock` is generated inside `python:3.11-slim`, never on a
 developer machine — a Windows-generated lock pins Windows packages and omits
 environment markers.
+
+**The same rule binds `frontend/package-lock.json`, and it was learned the
+expensive way.** After changing frontend dependencies, verify the lock with
+`npm ci --dry-run` before committing. Never take `npm install` succeeding as
+evidence that the lock is complete.
+
+`npm install` repairs an incomplete lock silently; `npm ci` refuses it. So a
+lock missing its per-platform optional packages — the `@esbuild/*` set is the
+one that bit us — works forever on the machine that wrote it and can never be
+installed anywhere else. Adding vitest in `ea38547` (2026-08-29) did exactly
+that, and CI was red from that commit until 2026-09-02 without anyone being able
+to see it, because the branch was never pushed. Four days and twenty-odd commits
+of green local `vitest` and `next lint` runs were all executed against a
+`node_modules` tree that `npm ci` could not have produced.
+
+Two lessons, and the second is the general one:
+
+- A lock file is a claim about *other* machines, so it cannot be verified by the
+  machine that wrote it. `npm ci --dry-run` is the cheapest way to ask a
+  different question than the one `npm install` answers.
+- **Work that is never pushed is never verified.** The failure was not subtle
+  and CI would have caught it the first time; nothing ran because nothing left
+  the laptop. Push early enough that CI can disagree with you.
+
+**After every branch switch, delete `frontend/.next` before running `tsc` or
+`next build`.** Generated route type stubs survive a checkout, so `tsc` fails
+on routes that exist only on the previous branch.
+
+## Migrations
+
+**Once a migration has run on any database that is kept, it is never edited
+again; a change goes in a new migration.** Alembic records only the revision
+id, so a database that ran the old text reports itself at head while its
+schema differs from one that ran the new text, and nothing will ever tell them
+apart. "Kept" means anything beyond a disposable test container: a developer's
+database, a demo, a customer appliance, any released version. Before that point
+a migration may still be corrected in place, and the commit says so and why.
 
 ## The fidelity harness
 
@@ -133,9 +177,34 @@ graphs; the assertion needed a mutated copy to mean anything (correction C7).
 - Documentation is updated in the same PR as the behaviour it describes. If the
   code does not do it, the doc does not say it.
 
+## Security fixes in public text
+
+**Commit messages, code comments, docstrings and docs describe a security fix
+neutrally: what the code does now, never how the previous behaviour could be
+exploited.** "Keys act only in their own workspace", not "a key could read
+another workspace". This repository and its branches are public, and a
+description of the old behaviour is a description of every deployment still
+running it, including released versions, until they upgrade. Exploit detail,
+if it needs recording at all, belongs in the private repository. A commit
+message cannot be changed without rewriting history, which this repository
+does not do, so the rule is applied before pushing, not after.
+
+## Authorization
+
+**Every route declares its minimum role in `backend/app/api/v1/route_policy.py`,
+and enforces it with a dependency from `app.api.v1.dependencies`**, never with
+a check inside the handler body. `tests/test_route_policy.py` walks every route
+through every included router and reads the role off the dependency chain; a
+handler-body check is invisible to it. A new route fails that test until it has an entry,
+and public routes must also be in `PUBLIC_ALLOWLIST`.
+
+Authorization tests authenticate with real credentials (`tests/_real_auth.py`).
+A test that overrides `get_current_user` skips the code that decides who the
+caller is, and is not evidence for an authorization claim.
+
 ## Gold graphs
 
-The five reference models are **extracted** from `frontend/src/lib/templates.ts`
+The six reference models are **extracted** from `frontend/src/lib/templates.ts`
 into `backend/tests/fixtures/gold/`, never transcribed, with a drift guard that
 re-extracts and diffs. They are a curriculum and marketing asset: do not seed
 them with defects, and do not edit them to satisfy an emitter. Defect

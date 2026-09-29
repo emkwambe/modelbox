@@ -1,0 +1,189 @@
+{
+  "id": "m4_lab2_integration_review",
+  "module": 4,
+  "edition": "quality",
+  "title": "Spot the Flaw: Integration Review",
+  "difficulty": "advanced",
+  "brief": "Two teams modelled the claims domain separately and someone merged the files the night before a review. The merge parses, loads and looks plausible on the canvas — which is the problem. Four faults survived it: a table nobody wired in, a foreign key pointing at a name that was refactored away, a pair of tables that reference each other in a loop, and a reference code whose format rule cannot fit the column it is declared on. That last one is real history: it is the contradiction that produced this appliance's PATTERN_EXCEEDS_LENGTH check, after a synthetic-data generator was asked to satisfy a VARCHAR(6) column and an eight-character pattern at the same time and could only choose which constraint to break. Find all four and re-validate.",
+  "graph": {
+    "entities": [
+      {
+        "entity_name": "dim_policy",
+        "entity_type": "DIMENSION",
+        "grain": null,
+        "description": "An insurance policy as sold, one row per policy version.",
+        "columns": [
+          {
+            "name": "policy_sk",
+            "data_type": "INTEGER",
+            "is_primary_key": true,
+            "is_foreign_key": false,
+            "is_pii": false,
+            "is_metric": false,
+            "description": "Surrogate key for the policy."
+          },
+          {
+            "name": "policy_reference",
+            "data_type": "VARCHAR(6)",
+            "is_primary_key": false,
+            "is_foreign_key": false,
+            "is_pii": false,
+            "is_metric": false,
+            "regex_pattern": "^[A-Z]{3}-\\d{4}$",
+            "description": "Business reference printed on the policy document."
+          },
+          {
+            "name": "product_sk",
+            "data_type": "INTEGER",
+            "is_primary_key": false,
+            "is_foreign_key": true,
+            "is_pii": false,
+            "is_metric": false,
+            "description": "The product this policy was sold under."
+          }
+        ]
+      },
+      {
+        "entity_name": "dim_product",
+        "entity_type": "DIMENSION",
+        "grain": null,
+        "description": "The insurance products available to sell.",
+        "columns": [
+          {
+            "name": "product_sk",
+            "data_type": "INTEGER",
+            "is_primary_key": true,
+            "is_foreign_key": false,
+            "is_pii": false,
+            "is_metric": false,
+            "description": "Surrogate key for the product."
+          },
+          {
+            "name": "product_name",
+            "data_type": "VARCHAR(120)",
+            "is_primary_key": false,
+            "is_foreign_key": false,
+            "is_pii": false,
+            "is_metric": false,
+            "description": "Marketing name of the product."
+          },
+          {
+            "name": "flagship_policy_sk",
+            "data_type": "INTEGER",
+            "is_primary_key": false,
+            "is_foreign_key": true,
+            "is_pii": false,
+            "is_metric": false,
+            "description": "The policy the other team used as this product's exemplar."
+          }
+        ]
+      },
+      {
+        "entity_name": "fact_claim",
+        "entity_type": "FACT",
+        "grain": "One row per claim submitted against a policy.",
+        "description": "Claims raised by policyholders.",
+        "columns": [
+          {
+            "name": "claim_sk",
+            "data_type": "INTEGER",
+            "is_primary_key": true,
+            "is_foreign_key": false,
+            "is_pii": false,
+            "is_metric": false,
+            "description": "Surrogate key for the claim."
+          },
+          {
+            "name": "policy_contract_sk",
+            "data_type": "INTEGER",
+            "is_primary_key": false,
+            "is_foreign_key": true,
+            "is_pii": false,
+            "is_metric": false,
+            "description": "The policy this claim was raised against."
+          },
+          {
+            "name": "settled_amount",
+            "data_type": "NUMBER(12,2)",
+            "is_primary_key": false,
+            "is_foreign_key": false,
+            "is_pii": false,
+            "is_metric": true,
+            "aggregation": "SUM",
+            "description": "Amount settled on the claim."
+          }
+        ]
+      },
+      {
+        "entity_name": "dim_adjuster",
+        "entity_type": "DIMENSION",
+        "grain": null,
+        "description": "Loss adjusters who assess claims.",
+        "columns": [
+          {
+            "name": "adjuster_sk",
+            "data_type": "INTEGER",
+            "is_primary_key": true,
+            "is_foreign_key": false,
+            "is_pii": false,
+            "is_metric": false,
+            "description": "Surrogate key for the adjuster."
+          },
+          {
+            "name": "adjuster_grade",
+            "data_type": "VARCHAR(16)",
+            "is_primary_key": false,
+            "is_foreign_key": false,
+            "is_pii": false,
+            "is_metric": false,
+            "description": "Seniority grade used to route complex claims."
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "from": "fact_claim.policy_contract_sk",
+        "to": "dim_policy_contract.policy_sk",
+        "cardinality": "N:1"
+      },
+      {
+        "from": "dim_policy.product_sk",
+        "to": "dim_product.product_sk",
+        "cardinality": "N:1"
+      },
+      {
+        "from": "dim_product.flagship_policy_sk",
+        "to": "dim_policy.policy_sk",
+        "cardinality": "N:1"
+      }
+    ]
+  },
+  "expected_flaws": [
+    {
+      "code": "PATTERN_EXCEEDS_LENGTH",
+      "target": "dim_policy",
+      "hint": "Count the characters the pattern on policy_reference demands, then read the column's declared length.",
+      "fix": "The pattern needs eight characters (AAA-1234) and the column allows six, so no value can satisfy both. Widen the column to VARCHAR(8) if the format is genuinely required — and if the requirements never stated that format, delete the pattern instead. A guessed format ships as a contract term your customer's data is tested against."
+    },
+    {
+      "code": "DANGLING_REF",
+      "target": "fact_claim -> dim_policy_contract",
+      "hint": "Every table named on the right of a relationship should also be on the canvas.",
+      "fix": "The claims team wrote its foreign key against dim_policy_contract, a name the other team refactored to dim_policy. Repoint the relationship at dim_policy.policy_sk. Nothing warns you at load time: the reference is only wrong relative to a table that is not there."
+    },
+    {
+      "code": "ORPHAN_ENTITY",
+      "target": "dim_adjuster",
+      "hint": "One table has no line drawn to it at all.",
+      "fix": "dim_adjuster arrived with the merge and was never joined to anything. Either relate it to fact_claim through an adjuster foreign key on the fact, or remove it — an unreachable dimension is either a missing join or dead weight, and both are decisions worth making deliberately."
+    },
+    {
+      "code": "CYCLIC_FK",
+      "target": "dim_policy -> dim_product",
+      "hint": "Follow the arrows from dim_policy and see where you end up.",
+      "fix": "dim_policy points at dim_product, and dim_product points back at dim_policy through flagship_policy_sk. There is no order in which these two tables can be loaded. Break the loop: the flagship policy is an attribute of the product's marketing, not a structural dependency, so drop that foreign key or move the association to a separate bridge table."
+    }
+  ],
+  "solution_notes": "The lesson is that a merged model can be syntactically perfect and structurally impossible. Three of these four faults are invisible in any single file — they exist only in the relationships between files, which is exactly what a review of merged work has to look at.\n\nOn the reference code: this is the appliance's own history. The synthetic-data generator clamps a value it generated to a declared VARCHAR(n), but refuses to clamp one produced from a regex, because truncating that value breaks the pattern it was generated to satisfy. That refusal is correct, and it leaves a contradiction with nowhere to go — the generator can only pick which constraint to violate. The check exists because a generator is the wrong place to discover a modelling error.\n\nExpected end state: the claims relationship repointed at dim_policy, the product-to-policy loop broken, dim_adjuster either joined to fact_claim or removed, and policy_reference either widened to VARCHAR(8) or stripped of a pattern nobody asked for. Re-validate and the model is clean."
+}

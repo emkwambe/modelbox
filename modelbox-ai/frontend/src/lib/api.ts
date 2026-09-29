@@ -17,6 +17,7 @@ import type {
 import type {
   ApiKeyCreatedResponse,
   ApiKeyInfo,
+  ArtifactStatusInfo,
   ConnectionCreateRequest,
   ConnectionInfo,
   ContractExportResponse,
@@ -25,6 +26,7 @@ import type {
   DictionaryFormat,
   DiffRequest,
   DiffResponse,
+  EgressLedgerPage,
   Entity,
   ExportFormat,
   ExportResponse,
@@ -45,11 +47,12 @@ import type {
   WorkspaceInfo,
 } from '@/types/schema';
 
-const baseURL =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+// Same origin: the UI's server forwards /api/* to the backend (next.config.js),
+// so the browser never needs the backend's address and none is built in.
+export const API_BASE_PATH = '/api/v1';
 
 export const apiClient = axios.create({
-  baseURL: `${baseURL}/api/v1`,
+  baseURL: API_BASE_PATH,
   headers: { 'Content-Type': 'application/json' },
   timeout: 120_000,
 });
@@ -114,6 +117,8 @@ export async function listApiKeys(): Promise<ApiKeyInfo[]> {
 
 export async function createApiKey(payload: {
   name: string;
+  workspace_id?: string;
+  role_cap?: string;
   expires_at?: string | null;
 }): Promise<ApiKeyCreatedResponse> {
   const { data } = await apiClient.post<ApiKeyCreatedResponse>(
@@ -163,6 +168,22 @@ export async function gradeSubmission(payload: {
 // --- Workspaces & model management (RBAC) ---
 export async function listWorkspaces(): Promise<WorkspaceInfo[]> {
   const { data } = await apiClient.get<WorkspaceInfo[]>('/workspaces');
+  return data;
+}
+
+export async function listArtifactStatus(): Promise<ArtifactStatusInfo[]> {
+  const { data } = await apiClient.get<ArtifactStatusInfo[]>('/export/status');
+  return data;
+}
+
+export async function listEgressEvents(params?: {
+  provider?: string;
+  event?: string;
+  limit?: number;
+}): Promise<EgressLedgerPage> {
+  const { data } = await apiClient.get<EgressLedgerPage>('/egress/events', {
+    params: { limit: 200, ...params },
+  });
   return data;
 }
 

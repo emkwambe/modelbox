@@ -12,12 +12,26 @@ import json
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn, field_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    PostgresDsn,
+    RedisDsn,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 CostOptimizationMode = Literal[
     "performance", "balanced", "cost_optimized", "air_gapped"
 ]
+
+# The values this repository ships. Public by definition, so outside
+# development each one is treated as no secret at all.
+DEFAULT_JWT_SECRET = "dev-secret-change-me"
+DEFAULT_ENCRYPTION_KEY = "dev-encryption-key-change-me"
+DEFAULT_POSTGRES_PASSWORD = "secret"
+MIN_JWT_SECRET_BYTES = 32
 
 
 class Settings(BaseSettings):
@@ -32,6 +46,10 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        # A validation error otherwise echoes its input — every secret this
+        # class holds — into the startup log, truncated to a head and a tail
+        # that are both real characters of real values.
+        hide_input_in_errors=True,
     )
 
     # --- Service metadata -----------------------------------------------------
@@ -39,18 +57,37 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     environment: Literal["development", "staging", "production"] = "development"
     debug: bool = False
+    # The dev account's password is in this repository, so creating it is an
+    # explicit request, and only honoured in development (see app.main).
+    seed_dev_user: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MODELBOX_SEED_DEV_USER", "seed_dev_user"),
+        description="Create dev@modelbox.ai at startup. Development only.",
+    )
+    # Open self-registration (POST /auth/register). Under single-organisation
+    # tenancy a production appliance adds people through an owner, SCIM or
+    # OIDC, so there it is off unless explicitly turned on (owner decision H3,
+    # Sprint 7). The first owner comes from `python -m app.cli create-owner`.
+    allow_registration: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MODELBOX_ALLOW_REGISTRATION", "allow_registration"),
+        description="Permit POST /auth/register when ENVIRONMENT=production.",
+    )
 
     # --- Datastores -----------------------------------------------------------
     # Async SQLAlchemy engine URL, e.g.
     #   postgresql+asyncpg://modelbox:secret@postgres-db:5432/modelbox_metadata
+    # Defaults are written as the declared types so the declarations type-check.
+    # Behaviour is unchanged: pydantic-settings validates defaults
+    # (validate_default=True), so a string default became a PostgresDsn anyway.
     database_url: PostgresDsn = Field(
-        default=(
+        default=PostgresDsn(
             "postgresql+asyncpg://modelbox:secret@localhost:5432/modelbox_metadata"
         ),
         description="Async PostgreSQL 16 metadata store DSN.",
     )
     redis_url: RedisDsn = Field(
-        default="redis://localhost:6379/0",
+        default=RedisDsn("redis://localhost:6379/0"),
         description="Redis 7 cache / task-broker DSN.",
     )
     # Celery broker/result backend (async synthesis jobs — FR-1.1).
@@ -63,10 +100,8 @@ class Settings(BaseSettings):
     db_max_overflow: int = 20
 
     # --- LLM gateway & governance --------------------------------------------
-    llm_gateway_url: str = Field(
-        default="http://localhost:4000",
-        description="Base URL of the LiteLLM routing gateway.",
-    )
+    # The gateway is in-process (app.services.llm_gateway); there is no
+    # separate routing service and so no gateway URL to configure.
     model_router_config_path: str = Field(
         default="/app/config/model_router.yaml",
         description="Path to the task-based model router YAML.",
@@ -92,14 +127,40 @@ class Settings(BaseSettings):
     )
     cost_optimization_mode: CostOptimizationMode = "balanced"
 
+    # Fail-closed egress (D3). Nothing reaches a provider unless the deployment
+    # has said so — the only construction under which "you know what leaves your
+    # network" is a property rather than a hope. The gateway is the single path
+    # out, enforced by an import scan, so this one flag governs all of it.
+    allow_provider_calls: bool = Field(
+        default=False,
+        # AliasChoices, not a bare validation_alias: a bare alias *replaces* the
+        # field name, so `Settings(allow_provider_calls=True)` silently bound
+        # nothing and returned the default. A security flag that cannot be set
+        # is safe; one that appears set and is not would be worse than absent.
+        validation_alias=AliasChoices(
+            "MODELBOX_ALLOW_PROVIDER_CALLS", "allow_provider_calls"
+        ),
+        description="Permit outbound LLM provider calls. Off by default.",
+    )
+
     # --- Authentication (Slice 3A) -------------------------------------------
     jwt_secret: str = Field(
-        default="dev-secret-change-me",
+        default=DEFAULT_JWT_SECRET,
         description="HS256 signing/verification secret for local & test tokens.",
     )
     jwt_algorithm: str = Field(
         default="HS256",
         description="JWT algorithm: HS256 (local/test) or RS256 (OIDC).",
+    )
+    # JWKS endpoint for RS256/OIDC verification (G8). Preferred over the static
+    # PEM below: identity providers rotate signing keys, and a pinned PEM turns
+    # a routine rotation into a total authentication outage that looks like a
+    # signature attack and is fixed by editing configuration. When set, this
+    # wins — and if it is configured and unreachable, verification refuses
+    # rather than falling back, which is the D2 posture.
+    jwt_jwks_url: str | None = Field(
+        default=None,
+        description="IdP JWKS URL. Takes precedence over jwt_public_key.",
     )
     # PEM public key for RS256/OIDC verification (enterprise identity).
     jwt_public_key: str | None = None
@@ -113,6 +174,26 @@ class Settings(BaseSettings):
         default=None,
         description="Expected `aud` claim. Required when jwt_algorithm is RS*.",
     )
+    # Bearer token an IdP presents to the SCIM endpoints (G9). None disables
+    # SCIM entirely — the fail-closed default, and the right one: an
+    # unauthenticated user-provisioning API is a way to create administrators.
+    # Deliberately separate from every other credential here, because a SCIM
+    # token is machine-to-machine, lives in an IdP's configuration, and must be
+    # revocable without disturbing a single human login.
+    scim_token: str | None = Field(
+        default=None,
+        description="Bearer token for /scim/v2. Unset disables SCIM.",
+    )
+    # Issuers permitted to create users on first sign-in (G8). Empty means
+    # just-in-time provisioning is OFF, which is the fail-closed default: a
+    # deployment that configured a signing key has said what it trusts to
+    # *sign*, not what it trusts to *enrol*. Without this, every principal a
+    # shared IdP will sign for — other tenants, service accounts, guests —
+    # creates an account here on first contact.
+    oidc_allowed_issuers: list[str] = Field(
+        default_factory=list,
+        description="Issuers allowed to provision users just-in-time.",
+    )
     jwt_issuer: str | None = Field(
         default=None,
         description="Expected `iss` claim. Required when jwt_algorithm is RS*.",
@@ -120,7 +201,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     # Key material for AES-256-GCM encryption of stored secrets (connection URIs).
     encryption_key: str = Field(
-        default="dev-encryption-key-change-me",
+        default=DEFAULT_ENCRYPTION_KEY,
         description="Secret used to derive the AES-256-GCM key for stored creds.",
     )
 
@@ -170,6 +251,42 @@ class Settings(BaseSettings):
                 "docs/RELEASE_NOTES_v1.6.0.md."
             )
         return value
+
+    @model_validator(mode="after")
+    def _refuse_shipped_secrets(self) -> Settings:
+        """Outside development, refuse to start on a secret this repo publishes.
+
+        A default that ships in source is known to everyone who can read it,
+        so a token signed with it or a credential encrypted under it protects
+        nothing. The error names the variable and never its value: startup
+        errors reach logs, and a log is not where a secret should appear, even
+        a wrong one.
+        """
+        if self.environment == "development":
+            return self
+        problems: list[str] = []
+        if self.jwt_secret == DEFAULT_JWT_SECRET:
+            problems.append("JWT_SECRET is the shipped default")
+        elif len(self.jwt_secret.encode("utf-8")) < MIN_JWT_SECRET_BYTES:
+            problems.append(
+                f"JWT_SECRET is shorter than {MIN_JWT_SECRET_BYTES} bytes"
+            )
+        if self.encryption_key == DEFAULT_ENCRYPTION_KEY:
+            problems.append("ENCRYPTION_KEY is the shipped default")
+        passwords = [host.get("password") for host in self.database_url.hosts()]
+        if DEFAULT_POSTGRES_PASSWORD in passwords:
+            problems.append(
+                "POSTGRES_PASSWORD (the password in DATABASE_URL) is the "
+                "shipped default"
+            )
+        if problems:
+            raise ValueError(
+                f"Refusing to start with ENVIRONMENT={self.environment}: "
+                + "; ".join(problems)
+                + ". Generate a new .env with scripts/init-env.ps1 or "
+                "scripts/init-env.sh."
+            )
+        return self
 
     @property
     def is_airgapped(self) -> bool:

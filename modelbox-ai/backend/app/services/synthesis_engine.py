@@ -34,6 +34,7 @@ from app.schemas.data_model import (
     SynthesizedModel,
     SynthesizeRequest,
     SynthesizeResponse,
+    ValidationIssue,
     ValidationReport,
 )
 from app.services.graph_engine import GraphEngine
@@ -64,13 +65,113 @@ _SYSTEM_PROMPT = (
     "- is_unique: true only for a natural or business key that must not "
     "repeat.\n"
     "- default_value, check_expression: only when the requirements state one.\n"
+    # S5-2. These three were absent from this list while the IR accepted them,
+    # so a model inventing a 0-120 age range or an email regex was obeying the
+    # prompt — the instruction simply did not cover them. They are also the
+    # fields that become ODCS quality terms, which makes them the worst place
+    # for a silent guess: an invented rule ships as a contract the customer's
+    # data is tested against.
+    "- min_value, max_value: only for a range the requirements actually give. "
+    "Do not infer one from the column's name or from what is physically "
+    "plausible — an age is not automatically 0-120.\n"
+    "- regex_pattern: only for a format the requirements state. Do not supply a "
+    "conventional pattern for a name like 'email' or 'phone'; a wrong pattern "
+    "rejects the customer's own valid data.\n"
     "- references: the qualified 'entity.column' that a foreign key points at.\n"
+    # S5-2 again, at entity level, found by the first conformance run. The
+    # gold graphs declare no tier at all, yet MISSING_SLA fired on all 5 of the
+    # candidate graphs that run scored — the gold set was five at the time, and
+    # this number is that run's, not a current count — which it can only do when
+    # a candidate entity claims a critical
+    # or important tier and gives no SLA. The model was inventing the tier. A
+    # tier is a governance classification that reaches the ODCS contract and
+    # the linter, so it is exactly the kind of term the omission rule exists
+    # for; the instruction simply did not cover it.
+    "- tier, freshness_sla (on the entity): only when the requirements state "
+    "how critical the asset is or how fresh it must be. Do not infer criticality "
+    "from a table's importance to the model — a tier is a governance commitment "
+    "the business makes, not a property you can read off a schema, and claiming "
+    "one obliges an SLA nobody agreed to.\n"
     "- agg_time_column (on the entity, not the column): the name of the date "
     "or time column this entity's measures are aggregated over. It must be one "
     "of that entity's own columns and must be a date or time type. Omit it "
     "when the entity has none — that is normal for a dimension.\n"
     "Never set stable_id; the server assigns it.\n"
     "Return ONLY the structured schema."
+)
+
+
+_REPAIRABLE_CODES: frozenset[str] = frozenset(
+    {
+        "CYCLIC_FK",
+        "DANGLING_REF",
+        "MISSING_PK",
+        "INVALID_RANGE",
+        "INVALID_REGEX",
+        "PATTERN_EXCEEDS_LENGTH",
+    }
+)
+"""The lint codes a model is asked to fix, and nothing else.
+
+**Not "errors only", though that was the intention.** The obvious rule — feed
+back `severity == "error"` — does not survive contact with the linter: four of
+its fifteen codes are errors, `CYCLIC_FK`, `DANGLING_REF`, and since Sprint 7
+`INVALID_DATA_TYPE` and `INVALID_DEFAULT`. Missing
+primary keys and the whole invented-constraint family are *warnings*, so
+severity would have excluded the most mechanically fixable defects there are
+while including nothing else.
+
+(Sprint 7 added two error codes, `INVALID_DATA_TYPE` and `INVALID_DEFAULT`.
+They are deliberately not in this set: they guard what reaches SQL, and
+widening what the repair pass asks a model to fix is a change to the pass,
+not to the guard.)
+
+So the partition is drawn where it actually lies: **a code is repairable when a
+correct answer is objectively checkable from the graph alone.** A cycle either
+exists or does not. A reference either resolves or does not. A regex either fits
+inside the column's length or does not.
+
+Everything excluded is excluded because it invites invention rather than
+correction:
+
+- `MISSING_SLA` and `NAMING_CONVENTION` are the S5-2 defect's own venue. The
+  first fires when an entity claims a tier and gives no SLA, so "fix it" reads
+  as "supply an SLA" — a governance term the requirements never stated, going
+  into a data contract as fact. That is the exact failure the system prompt
+  above was rewritten to suppress; re-introducing it through a repair loop would
+  be the same bug arriving by the back door.
+- `MISSING_DESCRIPTION`, `MISSING_GRAIN` and `FAN_OUT_RISK` ask for prose or a
+  modelling judgement, neither of which the graph can check afterwards.
+- `PII_EXPOSURE` is arguably objective and is deliberately still out: asking a
+  model to classify what is personal data is a governance decision a user should
+  make, and a silently auto-classified column is worse than a flagged one.
+- `ORPHAN_ENTITY` is frequently correct — a legitimately standalone table.
+
+The three constraint codes are here for a reason worth stating: an invented
+`0-120` age range or a wrong email pattern is repaired by *removing* it. Those
+are the one family where the fix direction is subtraction, which is the safest
+thing a repair pass can be asked to do.
+"""
+
+_REPAIR_PROMPT = (
+    "You produced a data model that violates rules the target warehouse will "
+    "enforce. Return the SAME model with ONLY those violations fixed.\n"
+    "\n"
+    "Rules for the repair:\n"
+    "- Do not rename entities or columns that are not named below.\n"
+    "- Do not add entities, columns, constraints or descriptions that the "
+    "listed violations do not require. In particular, do not supply a tier, an "
+    "SLA, a description, or a grain — their absence is not what you are fixing.\n"
+    "- INVALID_RANGE, INVALID_REGEX and PATTERN_EXCEEDS_LENGTH are fixed by "
+    "*removing* the offending constraint unless the requirements state a "
+    "correct one. A constraint you cannot justify from the requirements is "
+    "worse than no constraint: it is exported into a data contract as fact.\n"
+    "- MISSING_PK is fixed by marking an existing identifying column as the "
+    "primary key where one exists, and by adding a surrogate key only where "
+    "none does.\n"
+    "- DANGLING_REF is fixed either by pointing the reference at the entity "
+    "that was meant, or by removing the foreign key if no such entity belongs "
+    "in the model.\n"
 )
 
 
@@ -87,8 +188,36 @@ class SynthesisEngine:
         self._gateway = gateway
         self._graph = graph_engine or GraphEngine()
 
-    async def synthesize(self, request: SynthesizeRequest) -> SynthesizeResponse:
-        """Run synthesis end-to-end and persist the result."""
+    @staticmethod
+    def _described_columns(model: SynthesizedModel) -> int:
+        return sum(1 for e in model.entities for c in e.columns if c.description)
+
+    async def build_graph(
+        self,
+        request: SynthesizeRequest,
+        *,
+        user_id: uuid.UUID | None = None,
+        telemetry: dict[str, object] | None = None,
+    ) -> tuple[SynthesizedModel, ValidationReport]:
+        """Everything that produces the graph, and nothing that stores it.
+
+        **Extracted so a harness can measure the product rather than a piece of
+        it.** `run_provider_conformance` called `structured_completion` directly
+        and therefore scored step one of four: no cardinality normalisation, no
+        linter, no repair pass. Two shipped mechanisms aimed squarely at the
+        axes that failed had never been evaluated on provider output, and the
+        published numbers described a bare model with a good prompt.
+
+        The reason it was bypassed is visible in `synthesize`'s signature: the
+        rest of that method resolves a workspace and persists, so calling it
+        needs a database, and a batch experiment does not want one. Splitting
+        the graph-producing half out removes the excuse — these four steps need
+        no session, and they are the product.
+
+        Persistence is deliberately *not* here. It assigns ids and writes rows;
+        it does not change the graph, so a measurement that stops at this
+        boundary is measuring everything that could affect a score.
+        """
         prompt = self._build_prompt(request)
         synthesized = await self._gateway.structured_completion(
             task="unstructured_doc_parsing",
@@ -96,6 +225,8 @@ class SynthesisEngine:
             response_model=SynthesizedModel,
             system_prompt=_SYSTEM_PROMPT,
             llm_override=request.llm_override,
+            user_id=user_id,
+            workspace_id=request.workspace_id,
         )
 
         # Deterministically normalize Fact<->Dimension cardinality/direction so
@@ -104,11 +235,90 @@ class SynthesisEngine:
             synthesized.entities, synthesized.relationships
         )
 
-        # Validate the graph; log issues but do not hard-fail synthesis so the
+        # Validate the graph; issues do not hard-fail synthesis, because the
         # user can fix them interactively on the canvas (FR-2.3).
         report = self._graph.validate(
             synthesized.entities, synthesized.relationships
         )
+
+        # One repair round, if the linter found something objectively wrong.
+        #
+        # The report used to be computed, counted into a log line, and dropped.
+        # It reached the canvas for a human to fix by hand and never reached the
+        # model that produced it — which is the whole of this pass: the linter
+        # is *external* deterministic feedback, and that is the only kind of
+        # feedback self-correction is documented to benefit from. A model asked
+        # to critique itself gets worse.
+        before_model, before_report = synthesized, report
+        synthesized, report = await self._repair_once(
+            synthesized, report, request, user_id=user_id
+        )
+
+        if telemetry is not None:
+            # **Derived here rather than returned by `_repair_once`**, so its
+            # signature and its twelve tests are untouched. Everything below is
+            # already in scope: the pre-repair pair, and the post-repair pair
+            # that is *identically* the pre-repair pair when the gate rejected —
+            # which is what `repair_accepted` reads, the same identity the
+            # existing tests assert on.
+            #
+            # This exists because the first run of the size x domain experiment
+            # could not answer the question it was built for. One AML draw came
+            # back with 17 findings against a typical 3 and 79 of 158 columns
+            # missing descriptions, and there was no way to tell whether the
+            # repair pass had done it or the draw was simply bad. Bare and
+            # pipeline are independent samples, so the comparison cannot settle
+            # it and no amount of re-reading the output would have.
+            #
+            # `described_columns` is here for that specific hypothesis. The gate
+            # counts *repairable* codes only, and `MISSING_DESCRIPTION` is not
+            # one — so a repair can strip half the descriptions in the model,
+            # reduce a repairable code by one, and be accepted. The surface
+            # check added alongside refuses lost entities and columns; it says
+            # nothing about what those columns still carry.
+            repairable_before = self._repairable(before_report)
+            telemetry.update(
+                {
+                    "repair_fired": bool(repairable_before),
+                    "repair_accepted": synthesized is not before_model,
+                    "repairable_before": len(repairable_before),
+                    "repairable_after": len(self._repairable(report)),
+                    "findings_before": len(before_report.issues),
+                    "findings_after": len(report.issues),
+                    "codes_before": sorted(i.code for i in before_report.issues),
+                    "codes_after": sorted(i.code for i in report.issues),
+                    "entities_before": len(before_model.entities),
+                    "entities_after": len(synthesized.entities),
+                    "columns_before": sum(len(e.columns) for e in before_model.entities),
+                    "columns_after": sum(len(e.columns) for e in synthesized.entities),
+                    "described_columns_before": self._described_columns(before_model),
+                    "described_columns_after": self._described_columns(synthesized),
+                }
+            )
+
+        return synthesized, report
+
+    async def synthesize(
+        self,
+        request: SynthesizeRequest,
+        *,
+        user_id: uuid.UUID | None = None,
+    ) -> SynthesizeResponse:
+        """Run synthesis end-to-end and persist the result.
+
+        ``user_id`` is threaded to the egress ledger (D4). The ledger has
+        recorded *what* left and *when* since Task 1; without an actor it
+        cannot answer *who*, which is half of the question the criterion asks
+        an operator to answer from the UI.
+
+        No ``model_id`` is passed, and that is not an omission: synthesis is
+        the call that brings the model into existence, so at the moment the
+        request leaves there is nothing to name. Recording the id assigned
+        afterwards would date the row to a model that did not exist when the
+        prompt was sent.
+        """
+        synthesized, report = await self.build_graph(request, user_id=user_id)
+
         if not report.is_valid:
             logger.warning(
                 "Synthesized model has %d validation error(s).",
@@ -122,6 +332,9 @@ class SynthesisEngine:
             dialect=request.dialect,
             synthesized=synthesized,
         )
+        # Here rather than in the route: the Celery worker persists through
+        # this same call, and a model it creates is created all the same.
+        await self._record_created(model, user_id)
 
         return SynthesizeResponse(
             model_id=model.model_id,
@@ -130,6 +343,21 @@ class SynthesisEngine:
             relationships=synthesized.relationships,
             suggested_metrics=synthesized.suggested_metrics,
             validation=report,
+        )
+
+    async def _record_created(self, model: DataModel, user_id: uuid.UUID | None) -> None:
+        from app.models.metadata_store import User
+        from app.services import audit_log
+
+        user = await self._session.get(User, user_id) if user_id else None
+        await audit_log.record(
+            action="MODEL_CREATED",
+            actor_user_id=user_id,
+            actor_email=user.email if user else None,
+            workspace_id=model.workspace_id,
+            resource_type="model",
+            resource_id=str(model.model_id),
+            detail={"title": model.title, "via": "synthesis"},
         )
 
     async def get_model(self, model_id: uuid.UUID) -> SynthesizeResponse | None:
@@ -227,6 +455,141 @@ class SynthesisEngine:
         return response.validation
 
     # -- internals ----------------------------------------------------------
+    @staticmethod
+    def _repairable(report: ValidationReport) -> list[ValidationIssue]:
+        return [i for i in report.issues if i.code in _REPAIRABLE_CODES]
+
+    # **A severity-ordered gate was written here and backed out.** Counting
+    # repairable issues treats one error as interchangeable with one warning, so
+    # trading a `DANGLING_REF` for two `MISSING_PK`s scores as a regression.
+    # Ordering on `(errors, warnings)` instead would accept that trade — which
+    # is arguably right, since a dangling reference does not build and a missing
+    # primary key does.
+    #
+    # It is not, however, *hardening*: it makes the gate strictly more
+    # permissive, and `test_a_repair_that_trades_one_defect_for_two_is_discarded`
+    # exists because someone decided the opposite on purpose. Loosening an
+    # acceptance test as a side effect of closing an unrelated hole in it is the
+    # move this file's own history argues against. Left as a decision, recorded
+    # in `docs/BUILD_EVIDENCE_REVIEW.md`.
+
+    @staticmethod
+    def _surface(model: SynthesizedModel) -> tuple[set[str], set[tuple[str, str]]]:
+        """The entity and (entity, column) names a model declares.
+
+        Used to refuse a repair that deletes rather than repairs.
+        """
+        entities = {e.entity_name for e in model.entities}
+        columns = {(e.entity_name, c.name) for e in model.entities for c in e.columns}
+        return entities, columns
+
+    async def _repair_once(
+        self,
+        synthesized: SynthesizedModel,
+        report: ValidationReport,
+        request: SynthesizeRequest,
+        *,
+        user_id: uuid.UUID | None,
+    ) -> tuple[SynthesizedModel, ValidationReport]:
+        """One repair attempt, kept only if it strictly improves the graph.
+
+        **The gate is the point, not the prompt.** A repair pass with no
+        acceptance test is a second chance to make the model worse, and there is
+        no reason to assume a provider's second answer beats its first — the
+        published result for *un*gated self-correction is that quality falls.
+        So the repaired graph replaces the original only when it carries
+        strictly fewer repairable issues, and the original is returned
+        unchanged in every other case, including an exception.
+
+        **One round, not a loop.** A loop needs a termination argument this has
+        no evidence for, and each turn is a real provider call recorded in the
+        egress ledger. Twice the egress for an unbounded gain is not a trade a
+        governance product should make silently.
+        """
+        before = self._repairable(report)
+        if not before:
+            return synthesized, report
+
+        listing = "\n".join(
+            f"- [{i.code}] {i.message}"
+            + (f" (entity: {i.entity_name})" if i.entity_name else "")
+            + (f" (column: {i.column_name})" if i.column_name else "")
+            for i in before
+        )
+        prompt = (
+            f"{self._build_prompt(request)}\n\n"
+            f"The model you produced:\n{synthesized.model_dump_json()}\n\n"
+            f"Violations to fix:\n{listing}"
+        )
+
+        try:
+            repaired = await self._gateway.structured_completion(
+                task="unstructured_doc_parsing",
+                prompt=prompt,
+                response_model=SynthesizedModel,
+                system_prompt=_REPAIR_PROMPT,
+                llm_override=request.llm_override,
+                user_id=user_id,
+                workspace_id=request.workspace_id,
+            )
+        except Exception:
+            # A failed repair is not a failed synthesis. The user still gets the
+            # model they asked for, with the issues shown on the canvas exactly
+            # as before this pass existed.
+            logger.warning("Repair pass failed; keeping the original model.", exc_info=True)
+            return synthesized, report
+
+        repaired.relationships = self._normalize_relationships(
+            repaired.entities, repaired.relationships
+        )
+        repaired_report = self._graph.validate(
+            repaired.entities, repaired.relationships
+        )
+        # **Deleting the table is not repairing it.**
+        #
+        # `ORPHAN_ENTITY`, `CYCLIC_FK` and `MISSING_PK` are all satisfiable by
+        # removing the entity that carries them, and the old gate — a count of
+        # repairable issues, strictly fewer than before — accepted that. It
+        # counted findings without looking at what the findings were attached
+        # to, so the cheapest way to pass it was to delete the evidence. Nothing
+        # here suggests a provider does that on purpose; the point is that the
+        # gate could not have told us if it did, and the conformance instrument
+        # has the same hole (`GraphScore.lint_delta_per_entity`).
+        #
+        # Additions are fine — a repair for `MISSING_PK` adds a key column. Only
+        # losses are refused, so this is a subset check, not equality.
+        before_entities, before_columns = self._surface(synthesized)
+        after_entities, after_columns = self._surface(repaired)
+        lost_entities = before_entities - after_entities
+        lost_columns = before_columns - after_columns
+        if lost_entities or lost_columns:
+            logger.info(
+                "Repair pass dropped %d entities and %d columns; keeping the "
+                "original. Lost entities: %s",
+                len(lost_entities),
+                len(lost_columns),
+                sorted(lost_entities) or "none",
+            )
+            return synthesized, report
+
+        after = self._repairable(repaired_report)
+
+        if len(after) >= len(before):
+            logger.info(
+                "Repair pass did not improve the graph (%d -> %d repairable "
+                "issues); keeping the original.",
+                len(before),
+                len(after),
+            )
+            return synthesized, report
+
+        logger.info(
+            "Repair pass fixed %d of %d repairable issues.",
+            len(before) - len(after),
+            len(before),
+        )
+        return repaired, repaired_report
+
     @staticmethod
     def _build_prompt(request: SynthesizeRequest) -> str:
         return (

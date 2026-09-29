@@ -17,7 +17,11 @@ import {
   introspectConnection,
   listConnections,
 } from '@/lib/api';
-import { useAuthStore } from '@/store/authStore';
+import { ErrorState, LoadingState, StatusText } from '@/components/ui';
+import { color, semantic } from '@/styles/tokens';
+import { errMessage, errorKind } from '@/lib/errors';
+import type { ErrorKind } from '@/lib/errors';
+import { useAuthStatus, useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { ConnectionEngine, ConnectionInfo } from '@/types/schema';
 
@@ -28,6 +32,24 @@ const ENGINES: { value: ConnectionEngine; label: string; enabled: boolean }[] = 
   { value: 'MYSQL', label: 'MySQL', enabled: true },
 ];
 
+/**
+ * A list load has three outcomes, and "empty" is not one of the first two.
+ *
+ * Inferring "still loading" from `items.length === 0` conflates an unfinished
+ * request with a genuinely empty account, which is how this page came to tell
+ * users with keys that they had none.
+ */
+type ListState =
+  | { status: 'loading' }
+  | { status: 'ready' }
+  | { status: 'failed'; kind: ErrorKind; message: string };
+
+// One heading style, used by the loading frame and the loaded page alike.
+// Spelling it twice is how the two drift apart, and it is also two more
+// hand-written type declarations against F1's budget — which is exactly how
+// the type walk caught this change.
+const pageHeading = { fontSize: 28, fontWeight: 700, marginTop: 8 } as const;
+
 export default function ConnectorsPage() {
   const router = useRouter();
   const token = useAuthStore((s) => s.token);
@@ -35,8 +57,8 @@ export default function ConnectorsPage() {
   const activeWorkspaceId = useAuthStore((s) => s.activeWorkspaceId);
   const loadModel = useCanvasStore((s) => s.loadModel);
 
-  const [mounted, setMounted] = useState(false);
   const [connections, setConnections] = useState<ConnectionInfo[]>([]);
+  const [listState, setListState] = useState<ListState>({ status: 'loading' });
   const [name, setName] = useState('');
   const [engine, setEngine] = useState<ConnectionEngine>('POSTGRESQL');
   const [uri, setUri] = useState('');
@@ -44,14 +66,21 @@ export default function ConnectorsPage() {
   const [introspectingId, setIntrospectingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => setMounted(true), []);
-  const signedIn = mounted && Boolean(token);
+  const authStatus = useAuthStatus();
+  const signedIn = authStatus === 'signed-in';
 
   const refresh = useCallback(async () => {
+    setListState({ status: 'loading' });
     try {
       setConnections(await listConnections());
+      setListState({ status: 'ready' });
     } catch (e) {
-      setError(errMessage(e));
+      // Separate from `error`, which belongs to create, delete and introspect.
+      setListState({
+        status: 'failed',
+        kind: errorKind(e),
+        message: errMessage(e, 'The connections could not be loaded.'),
+      });
     }
   }, []);
 
@@ -110,22 +139,34 @@ export default function ConnectorsPage() {
     }
   }
 
-  if (!mounted) return null;
+  // The page frame renders even before the session is known, so a slow
+  // hydration reads as a page that is loading rather than as a blank window.
+  // `return null` here drew nothing at all — see `useAuthStatus`.
+  if (authStatus === 'unknown') {
+    return (
+      <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px' }}>
+        <h1 style={pageHeading}>
+          Connectors
+        </h1>
+        <LoadingState label="Checking your session…" />
+      </main>
+    );
+  }
 
   return (
     <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
         <Link
           href="/"
-          style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}
+          style={{ color: color.blue, fontWeight: 600, textDecoration: 'none' }}
         >
           ← ModelBox AI
         </Link>
       </div>
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>
+      <h1 style={pageHeading}>
         Database Connectors
       </h1>
-      <p style={{ color: '#475569', marginTop: 4 }}>
+      <p style={{ color: color.neutral[600], marginTop: 4 }}>
         Register an encrypted connection, then reverse-engineer its schema
         directly onto the canvas. Connection URIs are stored AES-256-GCM
         encrypted and never shown in the clear.
@@ -133,7 +174,7 @@ export default function ConnectorsPage() {
 
       {!signedIn && (
         <div style={panelStyle}>
-          <p style={{ margin: 0, color: '#475569' }}>
+          <p style={{ margin: 0, color: color.neutral[600] }}>
             Sign in to manage connectors.
           </p>
           <button type="button" onClick={openModal} style={primaryBtn}>
@@ -192,15 +233,27 @@ export default function ConnectorsPage() {
           <h2 style={{ fontSize: 16, fontWeight: 700, marginTop: 28 }}>
             Connections
           </h2>
-          {connections.length === 0 ? (
-            <p style={{ color: '#94a3b8' }}>No connections yet.</p>
+          {listState.status === 'loading' ? (
+            <LoadingState label="Loading connections…" />
+          ) : listState.status === 'failed' ? (
+            <ErrorState
+              kind={listState.kind}
+              title="Your connections could not be loaded"
+              onRetry={() => void refresh()}
+            >
+              {listState.message}
+            </ErrorState>
+          ) : connections.length === 0 ? (
+            // Only reachable once the request has finished; before this the
+            // empty state was shown while the first fetch was still open.
+            <p style={{ color: color.neutral[500] }}>No connections yet.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {connections.map((conn) => (
                 <div key={conn.connection_id} style={rowStyle}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{conn.name}</div>
-                    <div style={{ fontSize: 12, color: '#64748b' }}>
+                    <div style={{ fontSize: 12, color: color.neutral[500] }}>
                       {conn.engine} · {conn.uri_masked ?? 'postgresql://***'}
                     </div>
                   </div>
@@ -233,25 +286,14 @@ export default function ConnectorsPage() {
       )}
 
       {error && (
-        <p style={{ color: '#dc2626', marginTop: 16, fontSize: 13 }}>{error}</p>
+        <div style={{ marginTop: 16 }}>
+          {/* Announced as well as shown, and in the brand's error colour rather
+              than Tailwind's `#dc2626`. */}
+          <StatusText tone="breaking">{error}</StatusText>
+        </div>
       )}
     </main>
   );
-}
-
-function errMessage(e: unknown): string {
-  if (
-    typeof e === 'object' &&
-    e !== null &&
-    'response' in e &&
-    typeof (e as { response?: unknown }).response === 'object'
-  ) {
-    const detail = (
-      e as { response?: { data?: { detail?: unknown } } }
-    ).response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-  }
-  return e instanceof Error ? e.message : 'Request failed.';
 }
 
 const panelStyle: React.CSSProperties = {
@@ -260,9 +302,9 @@ const panelStyle: React.CSSProperties = {
   gap: 12,
   marginTop: 20,
   padding: 16,
-  border: '1px solid #e2e8f0',
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 8,
-  background: '#f8fafc',
+  background: color.neutral[50],
 };
 
 const rowStyle: React.CSSProperties = {
@@ -271,9 +313,9 @@ const rowStyle: React.CSSProperties = {
   justifyContent: 'space-between',
   gap: 12,
   padding: '12px 14px',
-  border: '1px solid #e2e8f0',
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 8,
-  background: '#ffffff',
+  background: color.white,
 };
 
 const fieldStyle: React.CSSProperties = {
@@ -287,22 +329,22 @@ const fieldStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
-  color: '#475569',
+  color: color.neutral[600],
 };
 
 const inputStyle: React.CSSProperties = {
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  border: `1px solid ${color.neutral[300]}`,
   fontSize: 14,
 };
 
 const primaryBtn: React.CSSProperties = {
   padding: '8px 14px',
   borderRadius: 6,
-  border: '1px solid #2563eb',
-  background: '#2563eb',
-  color: '#ffffff',
+  border: `1px solid ${color.blue}`,
+  background: color.blue,
+  color: color.white,
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
@@ -312,9 +354,9 @@ const primaryBtn: React.CSSProperties = {
 const dangerBtn: React.CSSProperties = {
   padding: '8px 12px',
   borderRadius: 6,
-  border: '1px solid #dc2626',
-  background: '#ffffff',
-  color: '#dc2626',
+  border: `1px solid ${semantic.breaking.onLight}`,
+  background: color.white,
+  color: semantic.breaking.onLight,
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',

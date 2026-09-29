@@ -11,6 +11,7 @@
 
 import { useCanvasStore } from '@/store/canvasStore';
 import type { AssetTier } from '@/types/schema';
+import { color } from '@/styles/tokens';
 
 const TIERS: { value: AssetTier | ''; label: string }[] = [
   { value: '', label: '— none —' },
@@ -39,7 +40,7 @@ export default function EntitySettingsEditor() {
       <div style={header}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: 13 }}>Entity settings</div>
-          <div style={{ fontSize: 12, color: '#64748b' }}>
+          <div style={{ fontSize: 12, color: color.neutral[500] }}>
             <code>{d.entity_name}</code> · {d.entity_type}
           </div>
         </div>
@@ -138,14 +139,14 @@ export default function EntitySettingsEditor() {
               </option>
             ))}
         </select>
-        <span style={{ fontSize: 11, color: '#94a3b8' }}>
+        <span style={{ fontSize: 11, color: color.neutral[500] }}>
           {d.columns.some((c) => isTemporal(c.data_type))
             ? 'The default time axis for this entity’s measures.'
             : 'No date or time column, so this entity has no time axis.'}
         </span>
       </label>
 
-      <p style={{ fontSize: 11, color: '#94a3b8', margin: '8px 0 0' }}>
+      <p style={{ fontSize: 11, color: color.neutral[500], margin: '8px 0 0' }}>
         Save to persist. Tier &amp; SLA flow into ODCS + dbt exports; a Tier 1/2
         asset without an SLA is flagged.
       </p>
@@ -159,10 +160,12 @@ const card: React.CSSProperties = {
   bottom: 16,
   width: 288,
   zIndex: 30,
-  background: '#ffffff',
-  border: '1px solid #e2e8f0',
+  background: color.white,
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 10,
-  boxShadow: '0 8px 24px rgba(15,23,42,0.16)',
+  // `neutral-900` at 0.16, written as a hex-alpha suffix so the value stays
+  // derived rather than being a second spelling of the same colour.
+  boxShadow: `0 8px 24px ${color.neutral[900]}29`,
   padding: 14,
   display: 'flex',
   flexDirection: 'column',
@@ -193,13 +196,13 @@ const field: React.CSSProperties = {
 const lbl: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
-  color: '#475569',
+  color: color.neutral[600],
 };
 
 const input: React.CSSProperties = {
   padding: '7px 10px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  border: `1px solid ${color.neutral[300]}`,
   fontSize: 13,
 };
 
@@ -207,7 +210,7 @@ const closeBtn: React.CSSProperties = {
   border: 'none',
   background: 'transparent',
   fontSize: 15,
-  color: '#64748b',
+  color: color.neutral[500],
   cursor: 'pointer',
   lineHeight: 1,
 };

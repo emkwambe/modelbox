@@ -24,9 +24,10 @@ import EntityNode from '@/components/canvas/EntityNode';
 import ValidationPanel from '@/components/canvas/ValidationPanel';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { EntityNode as EntityNodeType } from '@/types/schema';
+import { semantic } from '@/styles/tokens';
 
 const nodeTypes: NodeTypes = { entity: EntityNode };
-const CYCLE_EDGE_STYLE = { stroke: '#dc2626', strokeWidth: 2 };
+const CYCLE_EDGE_STYLE = { stroke: semantic.breaking.onLight, strokeWidth: 2 };
 
 /** Inner canvas — must live within a ReactFlowProvider. */
 function ERDCanvasInner() {

@@ -187,11 +187,53 @@ export interface WorkspaceInfo {
   role: string;
 }
 
+/**
+ * What the appliance has verified about one exportable artifact (F5).
+ *
+ * Served by `GET /export/status`. The UI must not carry its own copy — that is
+ * how the certified-dialect list came to be maintained in two places, kept in
+ * step by a test that read this codebase as text.
+ */
+export interface ArtifactStatusInfo {
+  variant: string;
+  family: string;
+  status: 'CERTIFIED' | 'PREVIEW' | 'UNVERIFIED';
+  reason: string;
+}
+
+/** One row of the egress ledger (D4). Metadata only — never the prompt text. */
+export interface EgressEvent {
+  egress_id: string;
+  attempt_id: string;
+  event: string;
+  task: string;
+  provider: string;
+  egress_class: string;
+  prompt_sha256: string;
+  prompt_chars: number;
+  model_id: string | null;
+  user_id: string | null;
+  workspace_id: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  error: string | null;
+  occurred_at: string;
+}
+
+export interface EgressLedgerPage {
+  events: EgressEvent[];
+  total: number;
+  /** Rows carrying no workspace, which scoping can return to nobody. */
+  unattributed: number;
+}
+
 export interface ApiKeyInfo {
   api_key_id: string;
   workspace_id: string;
   name: string;
   key_prefix: string;
+  /** The most the key may do; it acts at the lower of this and its creator's role. */
+  role_cap?: string;
   created_at: string;
   expires_at?: string | null;
   last_used_at?: string | null;

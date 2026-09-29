@@ -10,16 +10,41 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 
-import { createApiKey, listApiKeys, revokeApiKey } from '@/lib/api';
-import { useAuthStore } from '@/store/authStore';
-import type { ApiKeyInfo } from '@/types/schema';
+import { createApiKey, listApiKeys, listWorkspaces, revokeApiKey } from '@/lib/api';
+import { capsUpTo } from '@/lib/roles';
+import { ErrorState, LoadingState, StatusText, toneColor, toneTint } from '@/components/ui';
+import { color, fontFamily, semantic, surface } from '@/styles/tokens';
+import { errMessage, errorKind } from '@/lib/errors';
+import type { ErrorKind } from '@/lib/errors';
+import { useAuthStatus, useAuthStore } from '@/store/authStore';
+import type { ApiKeyInfo, WorkspaceInfo } from '@/types/schema';
+
+/**
+ * A list load has three outcomes, and "empty" is not one of the first two.
+ *
+ * Inferring "still loading" from `items.length === 0` conflates an unfinished
+ * request with a genuinely empty account, which is how this page came to tell
+ * users with keys that they had none.
+ */
+type ListState =
+  | { status: 'loading' }
+  | { status: 'ready' }
+  | { status: 'failed'; kind: ErrorKind; message: string };
+
+// One heading style, used by the loading frame and the loaded page alike.
+// Spelling it twice is how the two drift apart, and it is also two more
+// hand-written type declarations against F1's budget — which is exactly how
+// the type walk caught this change.
+const pageHeading = { fontSize: 28, fontWeight: 700, marginTop: 8 } as const;
 
 export default function ApiKeysPage() {
-  const token = useAuthStore((s) => s.token);
   const openModal = useAuthStore((s) => s.openModal);
+  const activeWorkspaceId = useAuthStore((s) => s.activeWorkspaceId);
 
-  const [mounted, setMounted] = useState(false);
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
+  const [cap, setCap] = useState('VIEWER');
+  const [listState, setListState] = useState<ListState>({ status: 'loading' });
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,14 +52,24 @@ export default function ApiKeysPage() {
   const [newSecret, setNewSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => setMounted(true), []);
-  const signedIn = mounted && Boolean(token);
+  const authStatus = useAuthStatus();
+  const signedIn = authStatus === 'signed-in';
 
   const refresh = useCallback(async () => {
+    setListState({ status: 'loading' });
     try {
       setKeys(await listApiKeys());
+      setListState({ status: 'ready' });
     } catch (e) {
-      setError(errMessage(e));
+      // Kept apart from `error`, which is for the create and revoke actions. A
+      // list that failed to load and a revoke that failed are different
+      // failures in different places, and merging them put a message about one
+      // at the bottom of a page still showing the other's stale content.
+      setListState({
+        status: 'failed',
+        kind: errorKind(e),
+        message: errMessage(e, 'The API keys could not be loaded.'),
+      });
     }
   }, []);
 
@@ -42,14 +77,32 @@ export default function ApiKeysPage() {
     if (signedIn) void refresh();
   }, [signedIn, refresh]);
 
+  useEffect(() => {
+    if (!signedIn) return;
+    listWorkspaces()
+      .then(setWorkspaces)
+      .catch(() => setWorkspaces([]));
+  }, [signedIn]);
+
+  // The key is created in one named workspace, and its cap options come from
+  // the creator's role in that same workspace, so the two cannot disagree.
+  const target =
+    workspaces.find((w) => w.workspace_id === activeWorkspaceId) ?? workspaces[0];
+  const caps = capsUpTo(target?.role);
+  const chosenCap = caps.includes(cap as (typeof caps)[number]) ? cap : 'VIEWER';
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || !target || caps.length === 0) return;
     setBusy(true);
     setError(null);
     setNewSecret(null);
     try {
-      const created = await createApiKey({ name: name.trim() });
+      const created = await createApiKey({
+        name: name.trim(),
+        workspace_id: target.workspace_id,
+        role_cap: chosenCap,
+      });
       setNewSecret(created.api_key);
       setName('');
       await refresh();
@@ -79,25 +132,37 @@ export default function ApiKeysPage() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  if (!mounted) return null;
+  // The page frame renders even before the session is known, so a slow
+  // hydration reads as a page that is loading rather than as a blank window.
+  // `return null` here drew nothing at all — see `useAuthStatus`.
+  if (authStatus === 'unknown') {
+    return (
+      <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px' }}>
+        <h1 style={pageHeading}>
+          API Keys
+        </h1>
+        <LoadingState label="Checking your session…" />
+      </main>
+    );
+  }
 
   return (
     <main style={{ maxWidth: 820, margin: '0 auto', padding: '48px 24px' }}>
       <Link
         href="/"
-        style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}
+        style={{ color: color.blue, fontWeight: 600, textDecoration: 'none' }}
       >
         ← ModelBox AI
       </Link>
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>API Keys</h1>
-      <p style={{ color: '#475569', marginTop: 4 }}>
+      <h1 style={pageHeading}>API Keys</h1>
+      <p style={{ color: color.neutral[600], marginTop: 4 }}>
         Programmatic access for CI/CD pipelines and agents. Send the key as an{' '}
         <code>X-API-Key</code> header. The secret is shown once — store it safely.
       </p>
 
       {!signedIn && (
         <div style={panelStyle}>
-          <p style={{ margin: 0, color: '#475569' }}>Sign in to manage API keys.</p>
+          <p style={{ margin: 0, color: color.neutral[600] }}>Sign in to manage API keys.</p>
           <button type="button" onClick={openModal} style={primaryBtn}>
             Sign in
           </button>
@@ -108,10 +173,10 @@ export default function ApiKeysPage() {
         <>
           {newSecret && (
             <div style={secretPanel}>
-              <div style={{ fontWeight: 700, color: '#0f172a' }}>
+              <div style={{ fontWeight: 700, color: color.neutral[900] }}>
                 Your new API key — copy it now
               </div>
-              <div style={{ fontSize: 12, color: '#64748b' }}>
+              <div style={{ fontSize: 12, color: color.neutral[500] }}>
                 You won&apos;t be able to see this secret again.
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -141,7 +206,22 @@ export default function ApiKeysPage() {
                 placeholder="e.g. CI pipeline"
                 style={{ ...inputStyle, flex: 1, minWidth: 220 }}
               />
-              <button type="submit" disabled={busy} style={primaryBtn}>
+              {/* Up to the creator's own role in this workspace, never above;
+                  the server refuses a higher cap regardless. */}
+              <select
+                aria-label="Key access"
+                value={chosenCap}
+                onChange={(e) => setCap(e.target.value)}
+                disabled={caps.length === 0}
+                style={inputStyle}
+              >
+                {caps.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+              <button type="submit" disabled={busy || caps.length === 0} style={primaryBtn}>
                 {busy ? 'Generating…' : 'Generate key'}
               </button>
             </div>
@@ -150,16 +230,31 @@ export default function ApiKeysPage() {
           <h2 style={{ fontSize: 16, fontWeight: 700, marginTop: 28 }}>
             Active keys
           </h2>
-          {keys.length === 0 ? (
-            <p style={{ color: '#94a3b8' }}>No API keys yet.</p>
+          {listState.status === 'loading' ? (
+            <LoadingState label="Loading API keys…" />
+          ) : listState.status === 'failed' ? (
+            <ErrorState
+              kind={listState.kind}
+              title="Your API keys could not be loaded"
+              onRetry={() => void refresh()}
+            >
+              {listState.message}
+            </ErrorState>
+          ) : keys.length === 0 ? (
+            // Only reachable once the request has finished. Before this the
+            // page said "No API keys yet" while the first fetch was still open,
+            // so a user with keys was told they had none and then watched it
+            // change.
+            <p style={{ color: color.neutral[500] }}>No API keys yet.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {keys.map((key) => (
                 <div key={key.api_key_id} style={rowStyle}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{key.name}</div>
-                    <div style={{ fontSize: 12, color: '#64748b' }}>
-                      <code>{key.key_prefix}…</code> · created{' '}
+                    <div style={{ fontSize: 12, color: color.neutral[500] }}>
+                      <code>{key.key_prefix}…</code> · {key.role_cap ?? 'VIEWER'} access ·
+                      created{' '}
                       {fmtDate(key.created_at)}
                       {key.last_used_at
                         ? ` · last used ${fmtDate(key.last_used_at)}`
@@ -182,7 +277,12 @@ export default function ApiKeysPage() {
       )}
 
       {error && (
-        <p style={{ color: '#dc2626', marginTop: 16, fontSize: 13 }}>{error}</p>
+        <div style={{ marginTop: 16 }}>
+          {/* `#dc2626` — Tailwind's red, not the brand's — and no `role`, so
+              this was one of the three error sites in eight that displayed a
+              failure and announced it to nobody. */}
+          <StatusText tone="breaking">{error}</StatusText>
+        </div>
       )}
     </main>
   );
@@ -193,29 +293,15 @@ function fmtDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
 }
 
-function errMessage(e: unknown): string {
-  if (
-    typeof e === 'object' &&
-    e !== null &&
-    'response' in e &&
-    typeof (e as { response?: unknown }).response === 'object'
-  ) {
-    const detail = (e as { response?: { data?: { detail?: unknown } } }).response
-      ?.data?.detail;
-    if (typeof detail === 'string') return detail;
-  }
-  return e instanceof Error ? e.message : 'Request failed.';
-}
-
 const panelStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 12,
   marginTop: 20,
   padding: 16,
-  border: '1px solid #e2e8f0',
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 8,
-  background: '#f8fafc',
+  background: surface.page,
 };
 
 const secretPanel: React.CSSProperties = {
@@ -223,9 +309,9 @@ const secretPanel: React.CSSProperties = {
   flexDirection: 'column',
   marginTop: 20,
   padding: 16,
-  border: '1px solid #fde68a',
+  border: `1px solid ${toneColor('preview', 'light')}`,
   borderRadius: 8,
-  background: '#fffbeb',
+  background: toneTint('preview', 'light'),
 };
 
 const secretCode: React.CSSProperties = {
@@ -235,9 +321,9 @@ const secretCode: React.CSSProperties = {
   whiteSpace: 'nowrap',
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid #e2e8f0',
-  background: '#ffffff',
-  fontFamily: 'monospace',
+  border: `1px solid ${color.neutral[200]}`,
+  background: color.white,
+  fontFamily: fontFamily.mono,
   fontSize: 13,
 };
 
@@ -247,24 +333,24 @@ const rowStyle: React.CSSProperties = {
   justifyContent: 'space-between',
   gap: 12,
   padding: '12px 14px',
-  border: '1px solid #e2e8f0',
+  border: `1px solid ${color.neutral[200]}`,
   borderRadius: 8,
-  background: '#ffffff',
+  background: color.white,
 };
 
 const inputStyle: React.CSSProperties = {
   padding: '8px 10px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  border: `1px solid ${color.neutral[300]}`,
   fontSize: 14,
 };
 
 const primaryBtn: React.CSSProperties = {
   padding: '8px 14px',
   borderRadius: 6,
-  border: '1px solid #2563eb',
-  background: '#2563eb',
-  color: '#ffffff',
+  border: `1px solid ${color.blue}`,
+  background: color.blue,
+  color: color.white,
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
@@ -273,9 +359,9 @@ const primaryBtn: React.CSSProperties = {
 const ghostBtn: React.CSSProperties = {
   padding: '6px 12px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
-  background: '#ffffff',
-  color: '#334155',
+  border: `1px solid ${color.neutral[300]}`,
+  background: color.white,
+  color: color.neutral[700],
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
@@ -284,9 +370,9 @@ const ghostBtn: React.CSSProperties = {
 const dangerBtn: React.CSSProperties = {
   padding: '8px 12px',
   borderRadius: 6,
-  border: '1px solid #dc2626',
-  background: '#ffffff',
-  color: '#dc2626',
+  border: `1px solid ${semantic.breaking.onLight}`,
+  background: color.white,
+  color: semantic.breaking.onLight,
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',

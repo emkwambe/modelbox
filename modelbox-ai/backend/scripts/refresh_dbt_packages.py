@@ -42,8 +42,8 @@ from pathlib import Path
 _BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_BACKEND))
 
-from app.schemas.data_model import SynthesizedModel  # noqa: E402
-from app.services.exporter_service import ExporterService  # noqa: E402
+from app.schemas.data_model import SynthesizedModel
+from app.services.exporter_service import ExporterService
 
 CACHE_DIR = _BACKEND / ".dbt-packages"
 LOCK_FIXTURE = _BACKEND / "tests" / "fixtures" / "dbt" / "package-lock.yml"
@@ -96,6 +96,9 @@ def main() -> int:
             capture_output=True,
             text=True,
             cwd=root,
+            # Checked below, after dbt's output is printed: check=True would
+            # raise first and discard the deprecations this step exists to show.
+            check=False,
         )
         output = proc.stdout + proc.stderr
         print(output)

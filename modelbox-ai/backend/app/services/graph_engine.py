@@ -17,6 +17,7 @@ service class — API handlers only orchestrate it.
 from __future__ import annotations
 
 import re
+from enum import Enum
 
 import networkx as nx
 
@@ -204,7 +205,7 @@ class GraphEngine:
         # 3. Relationships pointing at unknown entities.
         for rel in relationships:
             from_entity, from_col = self._split_ref(rel.from_ref)
-            to_entity, to_col = self._split_ref(rel.to_ref)
+            to_entity, _to_col = self._split_ref(rel.to_ref)
 
             # A foreign key on an existing entity pointing at a missing target.
             if to_entity not in entity_names:
@@ -249,6 +250,7 @@ class GraphEngine:
         issues.extend(self._lint_fan_out(entities, relationships))
         issues.extend(self._lint_sla(entities))
         issues.extend(self._lint_quality(entities))
+        issues.extend(self._lint_sql_fragments(entities))
 
         is_valid = not any(issue.severity == "error" for issue in issues)
         return ValidationReport(is_valid=is_valid, issues=issues)
@@ -464,7 +466,7 @@ class GraphEngine:
         issues: list[ValidationIssue] = []
         for entity in entities:
             tier = entity.tier
-            tier_value = tier.value if hasattr(tier, "value") else str(tier)
+            tier_value = tier.value if isinstance(tier, Enum) else str(tier)
             if tier_value in critical and not (
                 entity.freshness_sla and entity.freshness_sla.strip()
             ):
@@ -562,6 +564,32 @@ class GraphEngine:
                                 column_name=column.name,
                             )
                         )
+        return issues
+
+    @staticmethod
+    def _lint_sql_fragments(entities: list[EntitySchema]) -> list[ValidationIssue]:
+        """INVALID_DATA_TYPE / INVALID_DEFAULT — fragments the emitters would interpolate.
+
+        Errors, not warnings: the DDL and dbt emitters refuse a model carrying
+        either, so a graph with one cannot be exported and must not replace a
+        stored graph (see `app.services.sql_fragments`).
+        """
+        from app.services.sql_fragments import column_problems
+
+        issues: list[ValidationIssue] = []
+        for entity in entities:
+            for column in entity.columns:
+                for code, reason in column_problems(column.data_type, column.default_value):
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            code=code,
+                            message=f"Column '{entity.entity_name}.{column.name}': {reason}.",
+                            entities=[entity.entity_name],
+                            entity_name=entity.entity_name,
+                            column_name=column.name,
+                        )
+                    )
         return issues
 
     @staticmethod

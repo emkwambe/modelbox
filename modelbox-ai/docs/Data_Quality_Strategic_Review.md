@@ -1,6 +1,6 @@
 # Data Quality Engineering — Strategic Review
 
-**Input:** `Data_Quality_Engineering_Breakdown.md`
+**Input:** `Data_Quality_Engineering_Breakdown.md` (since moved out of this repository)
 **Reviewer question:** genuine appliance addition vs. already-shipped vs. creep;
 course impact (Module 4).
 **Date:** 2026-08-10
@@ -61,5 +61,6 @@ Range/Regex addition:
 All three research reviews (semantic, governance, quality) converge on **one
 pattern**: declare metadata on the model → persist → propagate to exports and
 lints. Semantic (measures) is shipped; governance (tier/SLA) and quality
-(range/regex) are the remaining picks and share the same machinery. See
-`Unified_Sprint_Plan.md`.
+(range/regex) are the remaining picks and share the same machinery, and were
+scheduled together in a unified sprint plan that has since moved out of this
+repository.

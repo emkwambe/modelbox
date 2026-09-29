@@ -8,61 +8,146 @@
  */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { memo, useMemo } from 'react';
 
+import { toneTint } from '@/components/ui';
 import { useCanvasStore } from '@/store/canvasStore';
-import type { EntityNode as EntityNodeType, EntityType } from '@/types/schema';
+import { color, entityAccent, semantic } from '@/styles/tokens';
+import type {
+  EntityNode as EntityNodeType,
+  EntityType,
+  ValidationIssue,
+} from '@/types/schema';
 
-/** Accent colour per entity type for quick visual scanning. */
-export const ENTITY_ACCENT: Record<EntityType, string> = {
-  TABLE: '#64748b',
-  FACT: '#2563eb',
-  DIMENSION: '#16a34a',
-  HUB: '#9333ea',
-  LINK: '#ea580c',
-  SATELLITE: '#0891b2',
-};
+/**
+ * One frozen empty array, shared.
+ *
+ * `?? []` allocates a fresh array every time the selector runs, and zustand
+ * compares selector results with `Object.is` — so the literal was enough on its
+ * own to re-render every node on every store write, including when there was no
+ * validation report at all. A shared constant is `Object.is`-equal to itself.
+ */
+const NO_ISSUES: readonly ValidationIssue[] = Object.freeze<ValidationIssue[]>([]);
 
-const ERROR_COLOR = '#dc2626';
-const WARNING_COLOR = '#f59e0b';
+/**
+ * Accent colour per entity type, re-exported from the token module.
+ *
+ * These six values used to be declared here *and* in `tailwind.config.ts`,
+ * independently. Two hand-maintained copies of the same palette is the
+ * arrangement that guarantees one of them is eventually wrong, and nothing
+ * would have reported it — the canvas would simply have drawn a colour the
+ * theme did not know about.
+ */
+export const ENTITY_ACCENT: Record<EntityType, string> = entityAccent;
 
-export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
-  const accent = ENTITY_ACCENT[data.entity_type] ?? '#64748b';
+// The node body is white, so status markers take the on-light variants. The
+// brand's own Emerald and Amber measure 2.54:1 and 2.15:1 here and would be
+// decorative rather than legible.
+const ERROR_COLOR = semantic.breaking.onLight;
+const WARNING_COLOR = semantic.preview.onLight;
+
+/**
+ * Row tints, from the same helper the badges and banners use.
+ *
+ * These four grounds were `#fef2f2`, `#fffbeb` and `#dbeafe` — Tailwind's 50
+ * and 100 steps, none of them in the ramp, and each chosen against a foreground
+ * nobody measured them with. `toneTint` derives the ground from the foreground
+ * at an alpha `Badge.test.tsx` holds to the contrast floor, so the pair cannot
+ * drift apart.
+ */
+const ERROR_TINT = toneTint('breaking', 'light');
+const WARNING_TINT = toneTint('preview', 'light');
+const SELECTED_TINT = toneTint('accent', 'light');
+
+/**
+ * The node's elevation, at the two depths it ships. `rgba(15, 23, 42, …)` is
+ * `neutral-900` written out — the hex-alpha suffix keeps it derived, at 0.102
+ * and 0.078 rather than 0.10 and 0.08.
+ */
+const SHADOW_SELECTED = `0 4px 14px ${color.neutral[900]}1A`;
+const SHADOW_RESTING = `0 2px 8px ${color.neutral[900]}14`;
+
+/**
+ * The physical data type beside each column name.
+ *
+ * It was `#94a3b8`, which is `neutral-400` exactly — and `neutral-400` measures
+ * **2.56:1** on the white node body, well under the 4.5:1 body floor, at 12px.
+ * Converting it to the token it matched would have put a contrast failure
+ * behind a token name and made it look sanctioned, so it moves one step:
+ * `neutral-500` is 4.76:1, the lightest step in the ramp that clears the floor,
+ * and it is what the grain row above already uses.
+ */
+const TYPE_COLOR = color.neutral[500];
+
+function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
+  const accent = ENTITY_ACCENT[data.entity_type] ?? entityAccent.TABLE;
   const selectColumn = useCanvasStore((s) => s.selectColumn);
-  const selectedColumn = useCanvasStore((s) => s.selectedColumn);
 
-  // Pull this entity's lint issues from the validation report (FR-2.3).
-  const issues = useCanvasStore(
-    (s) =>
-      s.validation?.issues.filter((i) =>
-        i.entities.includes(data.entity_name),
-      ) ?? [],
+  /**
+   * The selected column's name **if it belongs to this entity**, else null.
+   *
+   * Subscribing to `s.selectedColumn` itself meant every node watched an object
+   * that changes identity whenever *any* column anywhere is selected — so
+   * clicking one row re-rendered all of them. This returns a string or null, so
+   * only the entity gaining the selection and the one losing it see a change.
+   */
+  const selectedColumnName = useCanvasStore((s) =>
+    s.selectedColumn?.entityName === data.entity_name
+      ? s.selectedColumn.columnName
+      : null,
   );
+
+  /**
+   * This entity's lint issues (FR-2.3), derived rather than selected.
+   *
+   * The filter has to run somewhere, and running it *inside* the selector was
+   * the defect: a new array every notification, unequal under `Object.is`,
+   * re-rendering every node on every store write. `s.validation` is a stable
+   * reference between reports, so the subscription is now quiet until a report
+   * actually arrives, and the filtering moves to `useMemo`.
+   */
+  const validation = useCanvasStore((s) => s.validation);
+  const issues = useMemo(
+    () =>
+      validation?.issues.filter((i) => i.entities.includes(data.entity_name)) ??
+      NO_ISSUES,
+    [validation, data.entity_name],
+  );
+
   const hasError = issues.some((i) => i.severity === 'error');
   const hasWarning = issues.some((i) => i.severity === 'warning');
   const missingPk = issues.some((i) => i.code === 'MISSING_PK');
   // Columns holding a dangling foreign-key reference (precise source metadata).
-  const danglingColumns = new Set(
-    issues
-      .filter(
-        (i) =>
-          i.code === 'DANGLING_REF' &&
-          i.entity_name === data.entity_name &&
-          i.column_name,
-      )
-      .map((i) => i.column_name as string),
+  const danglingColumns = useMemo(
+    () =>
+      new Set(
+        issues
+          .filter(
+            (i) =>
+              i.code === 'DANGLING_REF' &&
+              i.entity_name === data.entity_name &&
+              i.column_name,
+          )
+          .map((i) => i.column_name as string),
+      ),
+    [issues, data.entity_name],
   );
   // Columns flagged as unclassified PII by the governance lint (Pick 1).
-  const piiExposureColumns = new Set(
-    issues
-      .filter((i) => i.code === 'PII_EXPOSURE' && i.column_name)
-      .map((i) => i.column_name as string),
+  const piiExposureColumns = useMemo(
+    () =>
+      new Set(
+        issues
+          .filter((i) => i.code === 'PII_EXPOSURE' && i.column_name)
+          .map((i) => i.column_name as string),
+      ),
+    [issues],
   );
   const statusColor = hasError
     ? ERROR_COLOR
     : hasWarning
       ? WARNING_COLOR
       : null;
-  const borderColor = statusColor ?? (selected ? accent : '#e2e8f0');
+  const borderColor = statusColor ?? (selected ? accent : color.neutral[200]);
   const tooltip = issues.map((i) => `[${i.code}] ${i.message}`).join('\n');
 
   return (
@@ -74,9 +159,9 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
         boxShadow: statusColor
           ? `0 0 0 3px ${statusColor}33`
           : selected
-            ? `0 0 0 2px ${accent}33, 0 4px 14px rgba(15,23,42,0.10)`
-            : '0 2px 8px rgba(15,23,42,0.08)',
-        background: '#ffffff',
+            ? `0 0 0 2px ${accent}33, ${SHADOW_SELECTED}`
+            : SHADOW_RESTING,
+        background: color.white,
         fontSize: 12,
         overflow: 'hidden',
       }}
@@ -85,7 +170,7 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
       <div
         style={{
           background: accent,
-          color: '#ffffff',
+          color: color.white,
           padding: '7px 11px',
           fontWeight: 700,
           letterSpacing: 0.2,
@@ -101,7 +186,7 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
               title={tooltip}
               style={{
                 background: statusColor ?? WARNING_COLOR,
-                color: '#fff',
+                color: color.white,
                 borderRadius: 10,
                 padding: '0 6px',
                 fontSize: 11,
@@ -121,7 +206,7 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
           title="This entity has no primary key."
           style={{
             padding: '2px 10px',
-            background: '#fffbeb',
+            background: WARNING_TINT,
             color: WARNING_COLOR,
             fontWeight: 600,
             borderBottom: `1px solid ${WARNING_COLOR}33`,
@@ -135,8 +220,8 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
           style={{
             padding: '2px 10px',
             fontStyle: 'italic',
-            color: '#64748b',
-            borderBottom: '1px solid #f1f5f9',
+            color: color.neutral[500],
+            borderBottom: `1px solid ${color.neutral[100]}`,
           }}
         >
           grain: {data.grain}
@@ -148,8 +233,14 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
             padding: '2px 10px',
             fontSize: 11,
             fontWeight: 600,
+            // The one colour in this file with no token equivalent. Violet-600
+            // is not in the ramp and the nearest palette value, `HUB` at
+            // `#9333EA`, is a canvas *entity* accent — reusing it here would
+            // make a tier label read as an entity type. Whether a data tier
+            // earns a hue of its own is a design decision, not a conversion,
+            // so it stays literal and stays in the F1 budget at 1.
             color: '#7c3aed',
-            borderBottom: '1px solid #f1f5f9',
+            borderBottom: `1px solid ${color.neutral[100]}`,
           }}
         >
           {data.tier.replace('TIER_', 'Tier ').replace('_', ' · ')}
@@ -160,9 +251,9 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
         {data.columns.map((col) => {
           const isDangling = danglingColumns.has(col.name);
           const isPiiExposure = !isDangling && piiExposureColumns.has(col.name);
-          const isSelected =
-            selectedColumn?.entityName === data.entity_name &&
-            selectedColumn?.columnName === col.name;
+          // The entity check already happened in the selector, which is what
+          // makes the subscription a string rather than an object.
+          const isSelected = selectedColumnName === col.name;
           return (
             <li
               key={col.name}
@@ -184,11 +275,11 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
                 padding: '2px 10px',
                 cursor: 'pointer',
                 background: isSelected
-                  ? '#dbeafe'
+                  ? SELECTED_TINT
                   : isDangling
-                    ? '#fef2f2'
+                    ? ERROR_TINT
                     : isPiiExposure
-                      ? '#fffbeb'
+                      ? WARNING_TINT
                       : undefined,
                 color: isDangling ? ERROR_COLOR : undefined,
                 fontWeight:
@@ -209,7 +300,7 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
                 {col.is_pii && (
                   <span
                     title={col.pii_type ?? 'PII'}
-                    style={{ color: '#dc2626' }}
+                    style={{ color: ERROR_COLOR }}
                   >
                     {' '}
                     ⚠
@@ -219,12 +310,12 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
               {col.is_metric ? (
                 <span
                   title={`Measure (${col.aggregation ?? 'SUM'})`}
-                  style={{ color: '#2563eb', fontWeight: 700, fontSize: 11 }}
+                  style={{ color: color.blue, fontWeight: 700, fontSize: 11 }}
                 >
                   Σ {(col.aggregation ?? 'SUM').toUpperCase()}
                 </span>
               ) : (
-                <span style={{ color: '#94a3b8' }}>{col.data_type}</span>
+                <span style={{ color: TYPE_COLOR }}>{col.data_type}</span>
               )}
             </li>
           );
@@ -242,3 +333,13 @@ export default function EntityNode({ data, selected }: NodeProps<EntityNodeType>
     </div>
   );
 }
+
+/**
+ * Memoised, and it is the *last* of the three changes rather than the first.
+ *
+ * On its own this does nothing: both store subscriptions above genuinely
+ * changed on every write, so the component re-rendered for a reason `memo`
+ * cannot see. With the selectors narrowed, this is what stops a parent's
+ * re-render cascading into five hundred children.
+ */
+export default memo(EntityNode);

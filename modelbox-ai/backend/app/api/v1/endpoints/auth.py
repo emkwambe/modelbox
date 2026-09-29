@@ -10,16 +10,22 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 
 from app.api.v1.dependencies import (
+    _ROLE_LEVEL,
+    AuthenticatedDep,
     CurrentUserDep,
     SessionDep,
-    require_workspace_role,
-    resolve_user_workspace,
+    forbid_api_key_principal,
+    require_body_workspace_role,
+    require_listed_workspaces,
+    require_membership,
+    require_resource_role,
 )
+from app.core.config import Settings, get_settings
 from app.core.security import (
     create_access_token,
     generate_api_key,
@@ -35,6 +41,7 @@ from app.schemas.data_model import (
     Token,
     UserOut,
 )
+from app.services import audit_log
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -56,12 +63,32 @@ async def login_for_access_token(
         or not user.hashed_password
         or not verify_password(form_data.password, user.hashed_password)
     ):
+        # Recorded before the raise: a failed sign-in is the event a reviewer
+        # looks for, and it is the one an implementation that logs after a
+        # successful return will never have.
+        await audit_log.record(
+            action="AUTH_LOGIN_FAILED",
+            outcome="DENIED",
+            actor_user_id=user.user_id if user else None,
+            actor_email=form_data.username,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    await audit_log.record(
+        action="AUTH_LOGIN",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+    )
     return Token(access_token=create_access_token(str(user.user_id)))
+
+
+def registration_allowed(config: Settings) -> bool:
+    """Open self-registration: everywhere but production, or when enabled there."""
+    return config.environment != "production" or config.allow_registration
 
 
 @router.post(
@@ -70,8 +97,21 @@ async def login_for_access_token(
     status_code=status.HTTP_201_CREATED,
     summary="Register a local account and personal workspace",
 )
-async def register(payload: RegisterRequest, session: SessionDep) -> Token:
-    """Create a user + personal workspace (as OWNER) and return a token."""
+async def register(
+    payload: RegisterRequest,
+    session: SessionDep,
+    config: Annotated[Settings, Depends(get_settings)],
+) -> Token:
+    """Create a user + personal workspace (as OWNER) and return a token.
+
+    403 in production unless MODELBOX_ALLOW_REGISTRATION=true. The appliance's
+    first owner is created with `python -m app.cli create-owner`.
+    """
+    if not registration_allowed(config):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Self-registration is disabled on this appliance. Ask an owner for access.",
+        )
     existing = (
         await session.execute(
             select(User).where(User.email == payload.email)
@@ -102,12 +142,21 @@ async def register(payload: RegisterRequest, session: SessionDep) -> Token:
         )
     )
     await session.flush()
+    await audit_log.record(
+        action="MEMBER_ADDED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=workspace.workspace_id,
+        resource_type="user",
+        resource_id=str(user.user_id),
+        detail={"role": "OWNER", "via": "register"},
+    )
 
     return Token(access_token=create_access_token(str(user.user_id)))
 
 
 @router.get("/me", response_model=UserOut, summary="Current authenticated user")
-async def read_me(user: CurrentUserDep) -> UserOut:
+async def read_me(user: AuthenticatedDep) -> UserOut:
     """Return the profile of the authenticated caller."""
     return UserOut.model_validate(user)
 
@@ -122,14 +171,25 @@ async def read_me(user: CurrentUserDep) -> UserOut:
     summary="Create an API key (ADMIN+); returns the secret ONCE",
 )
 async def create_api_key(
-    payload: ApiKeyCreateRequest, session: SessionDep, user: CurrentUserDep
+    request: Request,
+    payload: ApiKeyCreateRequest,
+    session: SessionDep,
+    user: CurrentUserDep,
+    workspace_id: Annotated[uuid.UUID, Depends(require_body_workspace_role("ADMIN"))],
 ) -> ApiKeyCreatedResponse:
-    """Mint a workspace API key. The plaintext secret is shown once here."""
-    workspace_id = await resolve_user_workspace(
-        session, user, payload.workspace_id
-    )
-    await require_workspace_role(session, user.user_id, workspace_id, "ADMIN")
+    """Mint a workspace API key (ADMIN+). The plaintext secret is shown once here.
 
+    A key cannot mint a key. ``role_cap`` defaults to VIEWER and may not exceed
+    the creator's current role in the workspace; on each use the key acts with
+    the lower of its cap and the creator's role at that moment.
+    """
+    forbid_api_key_principal(request)
+    member = await require_membership(session, user.user_id, workspace_id)
+    if _ROLE_LEVEL[payload.role_cap] > _ROLE_LEVEL.get(member.role, 0):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"A key's cap cannot exceed your own role ({member.role}).",
+        )
     plaintext, prefix, key_hash = generate_api_key()
     record = ApiKey(
         workspace_id=workspace_id,
@@ -137,11 +197,21 @@ async def create_api_key(
         name=payload.name,
         key_prefix=prefix,
         key_hash=key_hash,
+        role_cap=payload.role_cap,
         expires_at=payload.expires_at,
     )
     session.add(record)
     await session.flush()
     await session.refresh(record)  # populate server-side created_at
+    await audit_log.record(
+        action="API_KEY_CREATED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=workspace_id,
+        resource_type="api_key",
+        resource_id=str(record.api_key_id),
+        detail={"name": record.name, "role_cap": record.role_cap, "prefix": record.key_prefix},
+    )
 
     return ApiKeyCreatedResponse(
         api_key=plaintext, **ApiKeyInfo.model_validate(record).model_dump()
@@ -154,17 +224,16 @@ async def create_api_key(
     summary="List API keys in the caller's workspaces (no secrets)",
 )
 async def list_api_keys(
-    session: SessionDep, user: CurrentUserDep
+    session: SessionDep,
+    ws_ids: Annotated[list[uuid.UUID], Depends(require_listed_workspaces("ADMIN"))],
 ) -> list[ApiKeyInfo]:
-    """List key metadata for the caller's workspaces (never the secret/hash)."""
+    """List key metadata where the caller is ADMIN+ (never the secret/hash)."""
+    if not ws_ids:
+        return []
     rows = (
         await session.execute(
             select(ApiKey)
-            .join(
-                WorkspaceMember,
-                WorkspaceMember.workspace_id == ApiKey.workspace_id,
-            )
-            .where(WorkspaceMember.user_id == user.user_id)
+            .where(ApiKey.workspace_id.in_(ws_ids))
             .order_by(ApiKey.created_at.desc())
         )
     ).scalars().all()
@@ -177,18 +246,25 @@ async def list_api_keys(
     summary="Revoke an API key (ADMIN+)",
 )
 async def revoke_api_key(
-    key_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
+    key_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUserDep,
+    record: Annotated[
+        ApiKey, Depends(require_resource_role("ADMIN", ApiKey, "key_id", "path"))
+    ],
 ) -> Response:
     """Revoke (delete) an API key. Requires ADMIN+ in its workspace."""
-    record = await session.get(ApiKey, key_id)
-    if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"API key {key_id} not found.",
-        )
-    await require_workspace_role(
-        session, user.user_id, record.workspace_id, "ADMIN"
-    )
+    details = {"name": record.name, "prefix": record.key_prefix}
+    workspace_id = record.workspace_id
     await session.delete(record)
     await session.flush()
+    await audit_log.record(
+        action="API_KEY_REVOKED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=workspace_id,
+        resource_type="api_key",
+        resource_id=str(key_id),
+        detail=details,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -3,7 +3,7 @@
 **Version:** 1.0
 **Date:** 10 August 2026
 **Author:** Architecture / PM
-**Inputs:** `docs/PROJECT_STATE_REPORT.md` (audit, branch `audit/state-report`), `docs/ModelBox_AI_Brand_Design_System.md`, `docs/ModelBox_AI_Marketing_Content_Plan.md`, repo at `3050058`
+**Inputs:** `docs/PROJECT_STATE_REPORT.md` (audit, branch `audit/state-report`), `docs/ModelBox_AI_Brand_Design_System.md` and `docs/ModelBox_AI_Marketing_Content_Plan.md` (both since moved out of this repository), repo at `3050058`
 **Status:** Proposed. Section 3 requires founder sign-off before Sprint 2.
 
 ---

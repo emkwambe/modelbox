@@ -7,21 +7,25 @@ on:
     branches: [ "**" ]
   pull_request:
 
+# Keyed by commit, not branch. Keyed by branch, re-running an older commit's
+# run cancelled the branch head's run, which then had to be re-run by hand.
+# Cancellation now applies only to another run of the same commit.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
   backend-test:
-    name: Backend Pytest & Type Check
-    runs-on: ubuntu-latest
+    # Type checking is its own job (Backend Type Check (mypy)) since Sprint 7.
+    name: Backend Pytest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: "pip"
@@ -41,14 +45,14 @@ jobs:
 
   artifact-fidelity:
     name: Artifact Fidelity Harness
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: "pip"
@@ -60,7 +64,7 @@ jobs:
         # drifted. That extraction imports a TypeScript module directly, which
         # requires --experimental-strip-types: Node >= 22.6. The frontend jobs
         # stay on 20, matching the app's own engines constraint.
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -121,14 +125,14 @@ jobs:
 
   frontend-build:
     name: Frontend Strict Type Check & Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
           cache: "npm"
@@ -151,17 +155,17 @@ jobs:
 
   frontend-lint:
     name: Frontend Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Blocking as of v1.6.0. The ESLint config was added in Sprint 1 and the
     # codebase was already clean apart from one unescaped apostrophe, so the
     # planned `continue-on-error` grace period through Sprint 5 bought nothing.
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
           cache: "npm"
@@ -177,13 +181,24 @@ jobs:
           cd modelbox-ai/frontend
           npx next lint --max-warnings 0
 
+      # Added to this job rather than as a seventh job, deliberately. "Frontend
+      # Lint" is already in branch protection's required set, so the frontend
+      # tests gate merges from the moment they land. A new job would need the
+      # protection rule updated separately, and until that happened the suite
+      # would run without blocking anything — a gate that cannot fail a merge is
+      # the "skipped gate must be loud" problem wearing a green tick.
+      - name: Run Frontend Tests
+        run: |
+          cd modelbox-ai/frontend
+          npm test
+
   migrations:
     name: Alembic Single Head
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Full history and tags: the populated-database verification builds a
           # git worktree at the previous release tag, so the "before" side is
@@ -191,7 +206,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: "pip"
@@ -244,18 +259,196 @@ jobs:
         run: |
           cd modelbox-ai/backend
           # Full history is needed: the "before" side is a worktree at the last tag.
-          pytest tests/test_migration_0013_populated.py -v --no-header
+          # test_ledger_roles_postgres.py proves the append-only ledgers and the
+          # least-privilege role by raw SQL against a real Postgres (Step 3.2).
+          # test_migration_0015_to_head_populated.py: 0015 → head on a populated
+          # database, and ORM-vs-migration drift on Postgres (Step 3.3).
+          pytest tests/test_migration_0013_populated.py tests/test_ledger_roles_postgres.py tests/test_migration_0015_to_head_populated.py -v --no-header
 
-  versions:
-    name: Version Consistency
-    runs-on: ubuntu-latest
+  backend-lint:
+    name: Backend Lint (Ruff)
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install Ruff at the locked version
+        # Only Ruff, at the version requirements.lock pins: its default rule
+        # set is part of what that version means, so CI and a developer's
+        # `ruff check .` enforce the same rules. An empty grep fails the step.
+        run: |
+          python -m pip install --upgrade pip
+          ruff_pin="$(grep -E '^ruff==' modelbox-ai/backend/requirements.lock)"
+          pip install "$ruff_pin"
+
+      - name: Run Ruff
+        run: |
+          cd modelbox-ai/backend
+          ruff check .
+          ruff check ../tests/blackbox
+
+  backend-typecheck:
+    name: Backend Type Check (mypy)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            modelbox-ai/backend/requirements.lock
+            modelbox-ai/backend/requirements-lint.txt
+
+      - name: Install Backend Dependencies and Type Stubs
+        # The application's locked dependencies, so mypy checks against the
+        # libraries that ship, plus the stub packages in requirements-lint.txt.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r modelbox-ai/backend/requirements.lock -r modelbox-ai/backend/requirements-lint.txt
+
+      - name: Run mypy
+        run: |
+          cd modelbox-ai/backend
+          mypy app
+
+  leak-guard:
+    name: Leak Guard
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Refuse private-repository paths
+        # Sprint prompts and plans, research, marketing plans, assessments and
+        # market studies belong in the private repository; the patterns are in
+        # the script.
+        run: python modelbox-ai/scripts/check_leak_guard.py
+
+  blackbox:
+    name: Black-box Acceptance
+    # The appliance proven from outside (Sprint 7 Step 6, Amendments 1 and 3).
+    # tests/blackbox imports nothing from the application; it drives the
+    # compose stack over HTTP, `docker compose exec` and psql. Each
+    # configuration runs even if an earlier one failed, and each ends with
+    # `down -v`, so every configuration starts from empty volumes.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    defaults:
+      run:
+        working-directory: modelbox-ai
+    env:
+      COMPOSE: docker compose --env-file .env -f docker/docker-compose.appliance.yml
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install the suite's dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tests/blackbox/requirements.txt
+
+      - name: "A: only .env.example, compose refuses"
+        run: python -m pytest tests/blackbox -m config_a -v --no-header -rA
+
+      - name: Create .env with init-env
+        run: sh scripts/init-env.sh
+
+      - name: Build the appliance images
+        run: $COMPOSE build
+
+      - name: "B: the hardened appliance, every check passes"
+        if: ${{ !cancelled() }}
+        env:
+          BLACKBOX_PROFILE: hardened
+        run: |
+          $COMPOSE up -d
+          python -m pytest tests/blackbox -m config_b -v --no-header -rA
+
+      - name: Stop B
+        if: ${{ !cancelled() }}
+        run: docker compose -p modelbox-ai down -v --remove-orphans
+
+      - name: "Upgrade: designate-appliance-owner on an upgraded database"
+        if: ${{ !cancelled() }}
+        env:
+          BLACKBOX_PROFILE: hardened
+        run: python -m pytest tests/blackbox -m upgrade -v --no-header -rA
+
+      - name: Stop the upgraded appliance
+        if: ${{ !cancelled() }}
+        run: docker compose -p modelbox-ai down -v --remove-orphans
+
+      - name: "Insecure profile: each check covering a reintroduced weakness fails"
+        # Strict expected failures (conftest): a weakened check that passes, or
+        # that fails other than on its own check, turns this step red.
+        if: ${{ !cancelled() }}
+        env:
+          BLACKBOX_PROFILE: insecure
+        run: |
+          $COMPOSE -f tests/blackbox/compose/insecure.yml --profile airgap up -d
+          python -m pytest tests/blackbox -m config_b -v --no-header -rA
+
+      - name: Stop the insecure profile
+        if: ${{ !cancelled() }}
+        run: docker compose -p modelbox-ai down -v --remove-orphans
+
+      - name: "C: AIRGAPPED, sentinel keys, egress-deny network"
+        if: ${{ !cancelled() }}
+        env:
+          BLACKBOX_PROFILE: egress-deny
+        run: |
+          sed -i 's/^AIRGAPPED=.*/AIRGAPPED=true/' .env
+          for key in OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY MOONSHOT_API_KEY; do
+            sed -i "s/^${key}=.*/${key}=sentinel-${key}-must-never-leave/" .env
+          done
+          $COMPOSE -f tests/blackbox/compose/egress-deny.yml up -d
+          python -m pytest tests/blackbox -m config_c -v --no-header -rA
+
+      - name: Appliance logs
+        if: ${{ failure() }}
+        run: |
+          docker version --format 'engine {{.Server.Version}}'
+          docker compose version
+          docker compose -p modelbox-ai ps -a
+          docker compose -p modelbox-ai logs --no-color --tail 200
+
+      - name: Stop C
+        if: ${{ always() }}
+        run: docker compose -p modelbox-ai down -v --remove-orphans
+
+  versions:
+    name: Version Consistency
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 

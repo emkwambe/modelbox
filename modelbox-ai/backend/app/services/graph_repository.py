@@ -111,10 +111,12 @@ class GraphRepository:
         await self._session.flush()
 
         for entity in entities:
-            row = existing_entities.get(entity.entity_name)
-            if row is None:
+            found = existing_entities.get(entity.entity_name)
+            if found is None:
                 row = ModelEntity(model_id=model_id, entity_name=entity.entity_name)
                 self._session.add(row)
+            else:
+                row = found
             row.entity_type = str(entity.entity_type)
             row.canvas_position_x = entity.canvas_position_x
             row.canvas_position_y = entity.canvas_position_y

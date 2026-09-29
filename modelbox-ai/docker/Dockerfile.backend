@@ -8,6 +8,12 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
+# `import litellm` otherwise fetches its model cost map from GitHub at start-up:
+# an outbound request no gateway records, on every boot, air-gapped or not.
+# In the image rather than in compose, so every way of running the image gets
+# it, not only the appliance's compose file.
+ENV LITELLM_LOCAL_MODEL_COST_MAP=True
+
 WORKDIR /app
 
 # System deps for asyncpg / psycopg2 / cryptography builds.
@@ -29,5 +35,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 --start-period=30s \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
-# Apply migrations, then start the API. Fails fast if migrations error.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# Start the API. Migrations are not run here: the API connects as the
+# least-privilege role, which cannot change the schema. The modelbox-migrate
+# service runs `python -m app.db_bootstrap` as the owner, before this starts.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

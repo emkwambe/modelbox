@@ -7,9 +7,10 @@
  * semantic layers (FR-2.3).
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import CodeEditor from '@/components/editor/CodeEditor';
+import { StatusText } from '@/components/ui';
 import {
   downloadExportZip,
   exportArtifact,
@@ -17,9 +18,13 @@ import {
   exportDictionary,
   exportSemantic,
   exportSyntheticData,
+  listArtifactStatus,
 } from '@/lib/api';
+import { errMessage } from '@/lib/errors';
 import { useCanvasStore } from '@/store/canvasStore';
+import { color, semantic, surface } from '@/styles/tokens';
 import type {
+  ArtifactStatusInfo,
   ContractFormat,
   DictionaryFormat,
   ExportFormat,
@@ -44,19 +49,21 @@ const FORMATS: { value: ExportFormat; label: string }[] = [
 ];
 
 /**
- * Certified dialects are verified on every push by two independent grammars,
- * and DuckDB additionally by executing the emitted DDL against the engine.
- * Preview dialects transpile but are not deployment-verified: BigQuery needs
- * NOT ENFORCED on key constraints, Databricks needs NOT NULL on primary keys,
- * ClickHouse needs an ENGINE clause and forbids Nullable in a key.
+ * Verification status comes from `GET /export/status`, never from this file.
  *
- * The distinction is shown in the picker, before the user commits to an
- * export — a warning discovered afterwards is not a warning.
+ * These lists used to be written here as literals, and a test in the fidelity
+ * harness read this source as *text* to check they still matched what the
+ * harness verified. The label therefore reached the user by being retyped, and
+ * the check ran backwards: the harness verified the UI's source code.
+ *
+ * The status is shown before the user commits to an export — a warning
+ * discovered afterwards is not a warning.
  */
-const CERTIFIED_DIALECTS = ['postgres', 'snowflake', 'redshift', 'duckdb'];
-const PREVIEW_DIALECTS = ['bigquery', 'databricks', 'clickhouse'];
-const DIALECTS = [...CERTIFIED_DIALECTS, ...PREVIEW_DIALECTS];
-const isPreviewDialect = (d: string) => PREVIEW_DIALECTS.includes(d);
+const STATUS_LABEL: Record<string, string> = {
+  CERTIFIED: 'Certified',
+  PREVIEW: 'Preview',
+  UNVERIFIED: 'Unverified',
+};
 
 const SEED_FORMATS: { value: SeedFormat; label: string }[] = [
   { value: 'sql_insert', label: 'SQL INSERT' },
@@ -98,7 +105,10 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
 
   const [kind, setKind] = useState<Kind>('artifact');
   const [format, setFormat] = useState<ExportFormat>('ddl');
-  const [dialect, setDialect] = useState('snowflake');
+  // Empty until the manifest arrives, then the first certified dialect. Naming
+  // one here would be the same defect in miniature: a dialect the UI asserts
+  // exists, unchecked against the appliance that has to emit it.
+  const [dialect, setDialect] = useState('');
   const [seedFormat, setSeedFormat] = useState<SeedFormat>('sql_insert');
   const [rowCount, setRowCount] = useState(50);
   const [contractFormat, setContractFormat] =
@@ -112,6 +122,39 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statuses, setStatuses] = useState<ArtifactStatusInfo[] | null>(null);
+
+  // Fetched once. A failure leaves `statuses` null and every badge simply
+  // absent — the panel keeps working, and it says nothing it cannot support
+  // rather than defaulting a variant to "certified" because the fetch failed.
+  useEffect(() => {
+    let cancelled = false;
+    listArtifactStatus()
+      .then((rows) => {
+        if (cancelled) return;
+        setStatuses(rows);
+        const firstCertified = rows.find(
+          (r) => r.family === 'ddl' && r.status === 'CERTIFIED',
+        );
+        if (firstCertified) setDialect((d) => d || firstCertified.variant);
+      })
+      .catch(() => {
+        if (!cancelled) setStatuses([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const statusFor = (variant: string): ArtifactStatusInfo | undefined =>
+    statuses?.find((s) => s.variant === variant);
+
+  const certifiedDialects = (statuses ?? []).filter(
+    (s) => s.family === 'ddl' && s.status === 'CERTIFIED',
+  );
+  const previewDialects = (statuses ?? []).filter(
+    (s) => s.family === 'ddl' && s.status !== 'CERTIFIED',
+  );
 
   async function handleGenerate() {
     if (!modelId) return;
@@ -137,7 +180,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
       setFiles(result.files);
       setActiveFile(Object.keys(result.files)[0] ?? null);
     } catch (err) {
-      setError(errMessage(err));
+      setError(errMessage(err, 'Export failed.'));
       setFiles({});
       setActiveFile(null);
     } finally {
@@ -152,7 +195,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
     try {
       await downloadExportZip(modelId, format, dialect);
     } catch (err) {
-      setError(errMessage(err));
+      setError(errMessage(err, 'Export failed.'));
     } finally {
       setDownloading(false);
     }
@@ -177,6 +220,23 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
   const dialectRelevant =
     (kind === 'artifact' && format === 'ddl') || kind === 'seed';
 
+  // What the user has actually selected, whatever kind they are on. The status
+  // badge previously reached only DDL and seed, because it was gated on
+  // `dialectRelevant` — the one control that happens to be a dialect picker.
+  const selectedVariant =
+    kind === 'artifact'
+      ? format === 'ddl'
+        ? dialect
+        : format
+      : kind === 'seed'
+        ? seedFormat
+        : kind === 'contract'
+          ? contractFormat
+          : kind === 'semantic'
+            ? semanticEngine
+            : dictionaryFormat;
+  const selectedStatus = statusFor(selectedVariant);
+
   return (
     <div style={containerStyle}>
       {/* Kind tabs */}
@@ -193,8 +253,8 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
             }}
             style={{
               ...tabBtn,
-              background: kind === k.value ? '#2563eb' : 'transparent',
-              color: kind === k.value ? '#ffffff' : '#94a3b8',
+              background: kind === k.value ? color.blue : 'transparent',
+              color: kind === k.value ? color.white : color.neutral[400],
             }}
           >
             {k.label}
@@ -233,7 +293,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
                 </option>
               ))}
             </select>
-            <label style={{ color: '#94a3b8', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ color: color.neutral[400], fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
               Rows
               <input
                 type="range"
@@ -242,7 +302,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
                 value={rowCount}
                 onChange={(e) => setRowCount(Number(e.target.value))}
               />
-              <span style={{ color: '#e2e8f0', width: 30 }}>{rowCount}</span>
+              <span style={{ color: color.neutral[200], width: 30 }}>{rowCount}</span>
             </label>
           </>
         )}
@@ -292,16 +352,16 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
             style={selectStyle}
           >
             <optgroup label="Certified — deployment-verified">
-              {CERTIFIED_DIALECTS.map((d) => (
-                <option key={d} value={d}>
-                  {d}
+              {certifiedDialects.map((d) => (
+                <option key={d.variant} value={d.variant}>
+                  {d.variant}
                 </option>
               ))}
             </optgroup>
             <optgroup label="Preview — not deployment-verified">
-              {PREVIEW_DIALECTS.map((d) => (
-                <option key={d} value={d}>
-                  {d} (preview)
+              {previewDialects.map((d) => (
+                <option key={d.variant} value={d.variant}>
+                  {d.variant} (preview)
                 </option>
               ))}
             </optgroup>
@@ -313,8 +373,8 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
           disabled={loading || !modelId}
           style={{
             ...actionBtn,
-            background: loading ? '#64748b' : '#2563eb',
-            color: '#fff',
+            background: loading ? color.neutral[500] : color.blue,
+            color: color.white,
             cursor: loading || !modelId ? 'default' : 'pointer',
           }}
         >
@@ -326,7 +386,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
             onClick={handleDownloadZip}
             disabled={downloading || !modelId}
             title="Download the full project as a .zip"
-            style={{ ...actionBtn, border: '1px solid #334155', color: '#e2e8f0' }}
+            style={{ ...actionBtn, border: `1px solid ${color.neutral[700]}`, color: color.neutral[200] }}
           >
             {downloading ? 'Zipping…' : '.ZIP'}
           </button>
@@ -336,20 +396,23 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
             type="button"
             onClick={handleDownloadFile}
             title="Download the current file"
-            style={{ ...actionBtn, border: '1px solid #334155', color: '#e2e8f0' }}
+            style={{ ...actionBtn, border: `1px solid ${color.neutral[700]}`, color: color.neutral[200] }}
           >
             Download
           </button>
         )}
       </div>
 
-      {dialectRelevant && isPreviewDialect(dialect) && (
-        <div style={previewBanner} role="status">
-          <strong>{dialect}</strong> is <strong>Preview — not
-          deployment-verified.</strong> The DDL transpiles and re-parses, but we
-          do not verify that this engine accepts it, and it currently does not
-          without hand-editing. Certified dialects are{' '}
-          {CERTIFIED_DIALECTS.join(', ')}.
+      {/* Every artifact carries its status, not only the SQL dialects. Seven
+          families — dbt, Cube, LookML, MetricFlow, ODCS, Avro, Protobuf — plus
+          the three dictionary formats previously showed nothing at all, so a
+          user could not tell a contract verified by protoc from a dictionary
+          nothing has ever checked. */}
+      {selectedStatus && selectedStatus.status !== 'CERTIFIED' && (
+        <div style={statusBanner(selectedStatus.status)} role="status">
+          <strong>{selectedVariant}</strong> is{' '}
+          <strong>{STATUS_LABEL[selectedStatus.status]}</strong>.{' '}
+          {selectedStatus.reason}
         </div>
       )}
 
@@ -357,7 +420,7 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
         <select
           value={activeFile ?? ''}
           onChange={(e) => setActiveFile(e.target.value)}
-          style={{ ...selectStyle, margin: 8, background: '#1e293b', color: '#e2e8f0' }}
+          style={{ ...selectStyle, margin: 8, background: color.neutral[800], color: color.neutral[200] }}
         >
           {fileNames.map((name) => (
             <option key={name} value={name}>
@@ -369,15 +432,29 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
 
       <div style={{ flex: 1, minHeight: 0 }}>
         {error ? (
-          <p style={{ color: '#f87171', padding: 12 }} role="alert">
-            {error}
-          </p>
+          /*
+            `#f87171` is Tailwind's red-400. Stated plainly because it is the
+            uncomfortable direction: measured on this panel it is **6.45:1**,
+            and the `breaking.onDark` token replacing it is **4.86:1**. The
+            conversion *lowers* contrast here.
+            Both clear the 4.5:1 body floor, and the reason to take the token
+            anyway is that a product with two reds has no red — the panel would
+            otherwise disagree with every other failure in the product about
+            what failure looks like. Where that trade is not available, the
+            floor wins and the token moves; that is what `neutral-400` ->
+            `neutral-500` did inside `EntityNode`.
+          */
+          <div style={{ padding: 12 }}>
+            <StatusText tone="breaking" on="dark">
+              {error}
+            </StatusText>
+          </div>
         ) : !modelId ? (
-          <p style={{ color: '#94a3b8', padding: 12 }}>
+          <p style={{ color: color.neutral[400], padding: 12 }}>
             Synthesize or introspect a model first to export.
           </p>
         ) : fileNames.length === 0 ? (
-          <p style={{ color: '#94a3b8', padding: 12 }}>
+          <p style={{ color: color.neutral[400], padding: 12 }}>
             Choose options and click Generate.
           </p>
         ) : (
@@ -393,26 +470,12 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-function errMessage(e: unknown): string {
-  if (
-    typeof e === 'object' &&
-    e !== null &&
-    'response' in e &&
-    typeof (e as { response?: unknown }).response === 'object'
-  ) {
-    const detail = (e as { response?: { data?: { detail?: unknown } } }).response
-      ?.data?.detail;
-    if (typeof detail === 'string') return detail;
-  }
-  return e instanceof Error ? e.message : 'Export failed.';
-}
-
 const containerStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   height: '100%',
-  borderLeft: '1px solid #e2e8f0',
-  background: '#0f172a',
+  borderLeft: `1px solid ${color.neutral[200]}`,
+  background: surface.panel,
 };
 
 const tabRow: React.CSSProperties = {
@@ -420,7 +483,7 @@ const tabRow: React.CSSProperties = {
   alignItems: 'center',
   gap: 4,
   padding: '6px 8px',
-  background: '#1e293b',
+  background: color.neutral[800],
 };
 
 const tabBtn: React.CSSProperties = {
@@ -428,7 +491,7 @@ const tabBtn: React.CSSProperties = {
   borderRadius: 6,
   border: 'none',
   background: 'transparent',
-  color: '#94a3b8',
+  color: color.neutral[400],
   fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
@@ -439,29 +502,40 @@ const controlRow: React.CSSProperties = {
   alignItems: 'center',
   gap: 8,
   padding: '8px 12px',
-  background: '#1e293b',
-  color: '#e2e8f0',
+  background: color.neutral[800],
+  color: color.neutral[200],
   flexWrap: 'wrap',
-  borderTop: '1px solid #0f172a',
+  borderTop: `1px solid ${surface.panel}`,
 };
 
-const previewBanner: React.CSSProperties = {
-  margin: '0 8px 8px',
-  padding: '8px 10px',
-  borderRadius: 6,
-  // Amber: the brand system's warning colour. Not an error — the export works,
-  // it is the deployability that is unverified.
-  background: '#78350f',
-  border: '1px solid #b45309',
-  color: '#fef3c7',
-  fontSize: 12,
-  lineHeight: 1.45,
+/**
+ * The panel sits on a dark ground, so these take the `onDark` variants.
+ *
+ * Preview and Unverified are deliberately different colours. "We checked and it
+ * is not deployment-verified" and "nothing has ever checked this" are different
+ * statements, and giving them one badge would let the second hide inside the
+ * first — which is exactly how three dictionary formats came to sit beside
+ * protoc-verified contracts looking equally reviewed.
+ */
+const statusBanner = (status: string): React.CSSProperties => {
+  const accent =
+    status === 'UNVERIFIED' ? semantic.breaking.onDark : semantic.preview.onDark;
+  return {
+    margin: '0 8px 8px',
+    padding: '8px 10px',
+    borderRadius: 6,
+    background: surface.panel,
+    border: `1px solid ${accent}`,
+    color: accent,
+    fontSize: 12,
+    lineHeight: 1.45,
+  };
 };
 
 const selectStyle: React.CSSProperties = {
   padding: '4px 8px',
   borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  border: `1px solid ${color.neutral[300]}`,
   fontSize: 12,
 };
 
@@ -469,7 +543,7 @@ const actionBtn: React.CSSProperties = {
   padding: '4px 12px',
   borderRadius: 6,
   border: 'none',
-  background: '#0f172a',
+  background: surface.panel,
   fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',

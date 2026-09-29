@@ -18,13 +18,16 @@ Not for deployment on a shared network before v1.11.0.
 | **Backend** | Python 3.11+, FastAPI, Pydantic v2, SQLGlot, NetworkX, Instructor, LiteLLM |
 | **Verified against** | `dbt parse`, `protoc`, `fastavro`, `sqlfluff`, DuckDB execution — see `backend/tests/test_artifact_fidelity.py` |
 | **Data** | PostgreSQL 16 (SQLAlchemy 2.0 async + asyncpg), Redis 7 |
-| **LLM** | OpenAI · Anthropic · Gemini · Mistral (EU) · Ollama · vLLM — via a LiteLLM routing gateway |
+| **LLM** | OpenAI · Anthropic · Gemini · Mistral (EU) · Ollama · vLLM — via the engine's in-process gateway (the LiteLLM library) |
 
 ```
 Next.js UI  ──REST──►  FastAPI Engine  ──►  PostgreSQL 16 / Redis 7
                             │
-                            └──►  LiteLLM Gateway ──►  Cloud APIs | Local (Ollama/vLLM)
+                            └──►  in-process gateway ──►  Cloud APIs | Local (Ollama/vLLM)
 ```
+
+There is no separate routing service. The gateway runs inside the engine and
+the worker, and it is the only code that reaches a model provider.
 
 ## Project layout
 
@@ -45,18 +48,85 @@ modelbox-ai/
 ## Quick start (Docker appliance)
 
 ```bash
-cp .env.example .env          # then fill in provider API keys
-docker compose -f docker/docker-compose.appliance.yml up --build
+# 1. Generate .env with fresh secrets (from this directory; refuses to overwrite an existing .env)
+pwsh scripts/init-env.ps1     # Windows (PowerShell 7)
+sh scripts/init-env.sh        # Linux / macOS
+
+# 2. Fill in provider API keys in .env, start, and create the first owner
+docker compose --env-file .env -f docker/docker-compose.appliance.yml up --build -d
+docker compose --env-file .env -f docker/docker-compose.appliance.yml exec modelbox-backend python -m app.cli create-owner --email you@example.com
 ```
 
-- Web UI → http://localhost:3000
-- API docs → http://localhost:8000/docs
-- Health → http://localhost:8000/health
+**Step 2 is how anyone first signs in.** The appliance creates no account of
+its own and runs with self-registration off, so `create-owner` makes the first
+one: it prompts twice for the password (12 characters or more), never takes it
+as an argument, and makes you OWNER of a new workspace. It refuses once any
+owner exists; from then on an owner adds people. For scripted installs,
+`--password-stdin` reads the password from standard input instead of the
+prompt. Set `MODELBOX_ALLOW_REGISTRATION=true` in `.env` only if you want open
+self-registration on this appliance.
+
+**Step 1 comes first.** The init script writes `.env` from `.env.example`
+with a generated 64-character hex value for `JWT_SECRET`, `ENCRYPTION_KEY`,
+`POSTGRES_PASSWORD` and `MODELBOX_APP_DB_PASSWORD`, and prints only their
+names. It never overwrites an existing `.env`: a new `ENCRYPTION_KEY` would make
+every stored connection secret unreadable, and a new `POSTGRES_PASSWORD` would
+lock the appliance out of its own database. Keep `.env` with your backups (see
+`docs/AVAILABILITY.md`). When upgrading, `--add-missing` (`-AddMissing` in
+PowerShell) adds only the secrets an existing `.env` lacks, and never changes
+one already there.
+
+**Two database accounts.** `POSTGRES_PASSWORD` belongs to the database owner,
+used only by the one-shot `modelbox-migrate` service, which applies migrations
+and then sets the password of `modelbox_app` from `MODELBOX_APP_DB_PASSWORD`.
+The backend and worker connect as `modelbox_app`, which cannot change the
+schema and can only add to the audit trail and egress ledger, never change
+them. To rotate its password, change it in `.env` and start the appliance
+again.
+
+`.env` belongs here, beside this README, and **`--env-file .env` is not
+optional.** Two different mechanisms read that file and only one of them finds
+it on its own:
+
+- **Provider credentials** reach the containers through `env_file:` entries in
+  the compose file, whose paths resolve relative to the compose file itself. These
+  work from any directory, with or without the flag.
+- **Everything written as `${VAR}` in the compose file** — `JWT_SECRET`,
+  `ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, `UI_PORT`, `AIRGAPPED` — is substituted
+  by Compose *before* any service is created, and that substitution reads
+  Compose's project directory, which is `docker/`. Without the flag the three
+  secrets have no value and Compose refuses to start, naming each one; `UI_PORT`
+  and `AIRGAPPED` silently fall back to their defaults, so the UI binds port
+  3000 rather than your `UI_PORT`.
+
+**The appliance runs with `ENVIRONMENT=production`, and outside
+`ENVIRONMENT=development` the backend refuses to start on a shipped secret.** If `JWT_SECRET`, `ENCRYPTION_KEY` or the database password is the
+value in this repository, or `JWT_SECRET` is shorter than 32 bytes, startup
+fails with an error that names each variable and never prints its value.
+
+If synthesis fails with *"All providers exhausted"*, check that the file exists
+and that the keys in it are current — a retired model identifier surfaces as a
+404 and reads like a bad credential. If the UI fails to start with *"ports are
+not available"*, the `--env-file` flag is missing and `UI_PORT` never applied.
+
+- Web UI → http://localhost:3000 (or your `UI_PORT`)
+- API → http://localhost:3000/api/v1, through the UI's own origin
+- Health → http://localhost:3000/api/health (the backend's `/health`, for monitoring)
+
+**The UI port is the only port the appliance publishes.** The UI forwards
+`/api/*` to the backend over the compose network, so the backend, Postgres,
+Redis and Ollama are not reachable from the host. For the interactive API docs
+(`/docs`) on this machine, add the debug override, which publishes the backend
+on `127.0.0.1:8000` only:
+
+```bash
+docker compose --env-file .env -f docker/docker-compose.appliance.yml -f docker/docker-compose.debug.yml up --build
+```
 
 Enable the optional local inference engine (offline / air-gapped):
 
 ```bash
-docker compose -f docker/docker-compose.appliance.yml --profile airgap up --build
+docker compose --env-file .env -f docker/docker-compose.appliance.yml --profile airgap up --build
 ```
 
 ## Local development
@@ -72,13 +142,22 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
+The development account (`dev@modelbox.ai`, an OWNER of "Dev Workspace") is
+created at startup only when `ENVIRONMENT=development` **and**
+`MODELBOX_SEED_DEV_USER=true`. Its password is in this repository, so no other
+environment creates it, whatever the flag says.
+
 **Frontend**
 
 ```bash
 cd frontend
-npm install
-npm run dev
+npm ci
+MODELBOX_BACKEND_URL=http://localhost:8000 npm run dev   # PowerShell: $env:MODELBOX_BACKEND_URL='http://localhost:8000'; npm run dev
 ```
+
+The UI calls `/api/v1` on its own origin and the Next.js server forwards it.
+`MODELBOX_BACKEND_URL` tells `next dev` where the backend is; the Docker image
+forwards to `modelbox-backend:8000`.
 
 ## Key API endpoints
 
@@ -134,6 +213,10 @@ strips every cloud provider from each task's routing chain and pins execution to
 local runtimes (Ollama / vLLM). Routing is keyed off the explicit `egress:`
 classification in `config/model_router.yaml` (any non-`local` egress — including
 `cloud_apac` — is stripped in air-gapped mode), so the policy is deterministic.
+
+The backend image sets `LITELLM_LOCAL_MODEL_COST_MAP=True`, so the LiteLLM
+library uses its bundled model cost map instead of fetching one from GitHub
+when it loads.
 
 ## Releases (container images)
 

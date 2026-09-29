@@ -1,6 +1,6 @@
 # Synthetic defect-reproduction fixtures
 
-These are **not** gold graphs. The five models in `../gold/` are extracted from
+These are **not** gold graphs. The six models in `../gold/` are extracted from
 the Requirements Library (`frontend/src/lib/templates.ts`) and serve double duty
 as a curriculum and marketing asset — they are deliberately *correct*, and
 seeding them with defects would cost more than it saves.

@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 
 from app.api.v1.dependencies import (
     CurrentUserDep,
     GatewayDep,
     SessionDep,
-    require_membership,
-    resolve_user_workspace,
+    require_body_workspace_role,
+    require_listed_workspaces,
+    require_resource_role,
 )
-from app.models.metadata_store import TrainerAssignment, WorkspaceMember
+from app.models.metadata_store import TrainerAssignment
 from app.schemas.data_model import (
     AssignmentCreateRequest,
     AssignmentInfo,
@@ -27,18 +29,16 @@ from app.services.trainer_service import TrainerService
 
 router = APIRouter(prefix="/trainer", tags=["trainer"])
 
-
-async def _load_assignment(
-    session: SessionDep, user: CurrentUserDep, assignment_id: uuid.UUID
-) -> TrainerAssignment:
-    assignment = await session.get(TrainerAssignment, assignment_id)
-    if assignment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Assignment {assignment_id} not found.",
-        )
-    await require_membership(session, user.user_id, assignment.workspace_id)
-    return assignment
+# Reading an assignment is VIEWER; working on one (the tutor calls a model
+# provider, grading records a result) is MEMBER.
+AssignmentFromPath = Annotated[
+    TrainerAssignment,
+    Depends(require_resource_role("VIEWER", TrainerAssignment, "assignment_id", "path")),
+]
+AssignmentFromBody = Annotated[
+    TrainerAssignment,
+    Depends(require_resource_role("MEMBER", TrainerAssignment, "assignment_id", "body")),
+]
 
 
 @router.post(
@@ -51,10 +51,8 @@ async def create_assignment(
     payload: AssignmentCreateRequest,
     session: SessionDep,
     user: CurrentUserDep,
+    workspace_id: Annotated[uuid.UUID, Depends(require_body_workspace_role("MEMBER"))],
 ) -> AssignmentInfo:
-    workspace_id = await resolve_user_workspace(
-        session, user, payload.workspace_id
-    )
     assignment = await TrainerService(session).create_assignment(
         user, payload, workspace_id
     )
@@ -67,16 +65,15 @@ async def create_assignment(
     summary="List assignments in the caller's workspaces",
 )
 async def list_assignments(
-    session: SessionDep, user: CurrentUserDep
+    session: SessionDep,
+    ws_ids: Annotated[list[uuid.UUID], Depends(require_listed_workspaces("VIEWER"))],
 ) -> list[AssignmentInfo]:
+    if not ws_ids:
+        return []
     rows = (
         await session.execute(
             select(TrainerAssignment)
-            .join(
-                WorkspaceMember,
-                WorkspaceMember.workspace_id == TrainerAssignment.workspace_id,
-            )
-            .where(WorkspaceMember.user_id == user.user_id)
+            .where(TrainerAssignment.workspace_id.in_(ws_ids))
             .order_by(TrainerAssignment.created_at.desc())
         )
     ).scalars().all()
@@ -89,9 +86,8 @@ async def list_assignments(
     summary="Fetch an assignment",
 )
 async def get_assignment(
-    assignment_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
+    assignment_id: uuid.UUID, assignment: AssignmentFromPath
 ) -> AssignmentInfo:
-    assignment = await _load_assignment(session, user, assignment_id)
     return AssignmentInfo.model_validate(assignment)
 
 
@@ -105,9 +101,13 @@ async def socratic_step(
     session: SessionDep,
     user: CurrentUserDep,
     gateway: GatewayDep,
+    assignment: AssignmentFromBody,
 ) -> SocraticStepResponse:
-    await _load_assignment(session, user, payload.assignment_id)
-    return await TrainerService(session, gateway).socratic_step(payload)
+    return await TrainerService(session, gateway).socratic_step(
+        payload,
+        user_id=user.user_id,
+        workspace_id=assignment.workspace_id,
+    )
 
 
 @router.post(
@@ -116,9 +116,11 @@ async def socratic_step(
     summary="Auto-grade a student ERD against expected invariants",
 )
 async def grade_submission(
-    payload: GradeRequest, session: SessionDep, user: CurrentUserDep
+    payload: GradeRequest,
+    session: SessionDep,
+    user: CurrentUserDep,
+    assignment: AssignmentFromBody,
 ) -> GradeResponse:
-    assignment = await _load_assignment(session, user, payload.assignment_id)
     return await TrainerService(session).grade(
         assignment, payload.submitted_graph, user
     )

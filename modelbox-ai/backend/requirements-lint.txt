@@ -1,0 +1,8 @@
+# Type stubs for the mypy job, installed on top of requirements.lock.
+# Kept out of the lock: they are type information only, never imported at
+# runtime, and the lock is regenerated only inside python:3.11-slim.
+# Each matches the pinned library it describes (requirements.lock).
+types-PyYAML==6.0.12.20260906
+types-python-jose==3.5.0.20260408
+types-networkx==3.6.1.20260911
+types-pyasn1==0.6.0.20260724

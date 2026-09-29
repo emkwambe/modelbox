@@ -38,3 +38,9 @@ Thumbs.db
 # --- Logs ---
 *.log
 npm-debug.log*
+
+# The npm stub that appears at the repo root when npm runs one directory above
+# `frontend/`. It has `"packages": {}` and nothing resolves it — the real lock is
+# `frontend/package-lock.json`. Ignored because it has now been committed twice
+# by an `add -A` and removed twice, which is a loop worth ending.
+/package-lock.json

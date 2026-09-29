@@ -4,7 +4,8 @@
 **Date:** 10 August 2026
 **Purpose:** Convert "dependable, valuable, sellable" from judgement into a list of
 binary, falsifiable conditions with named evidence.
-**Companion to:** `ModelBox_AI_Enhancement_Blueprint.md`, `ModelBox_AI_Sprint_Plan.md`
+**Companion to:** `ModelBox_AI_Enhancement_Blueprint.md`. The sprint plan it was
+also written with has since moved out of this repository.
 
 ---
 
@@ -33,7 +34,7 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | A4 | The lock is generated on Linux, carries environment markers, and contains no Windows-only packages | `requirements.lock` inspection | 1 |
 | A5 ◆ | Every known defect has a named failing test carrying its finding ID | `pytest -m "not preview"`: 76 xfail, each carrying a finding ID | 1 |
 | A6 ◆ | No non-preview xfail remains at Phase I exit; each flipped test is `strict=True` | `pytest` output: 0 xfail outside `@preview` | 3 |
-| A7 | Preview failures — the three Preview dialects (15) and LookML (3) — are reported separately and never counted as debt | `pytest -m preview`: 18 xfail, 2 pass | 1 |
+| A7 | Preview failures — the three Preview dialects (18) and LookML (4) — are reported separately and never counted as debt | `pytest -m preview`: 22 xfail, 2 pass. **Corrected 2026-09-01, and the correction is the point:** both parentheticals are per-graph products (3 dialects × graphs; LookML's own list), so `aml-financial-crime` moved them from 15 and 3 the moment it landed in `e0beb47`. `AML_Slice_1_Scope.md:108-117` predicted the inventory would move at that commit and asked for the note to be written before the run; it was not, and no test asserts these counts, so nothing caught it for four days. A criterion that states a number its own command no longer produces cannot do the job A7 exists to do | 1 |
 | A8 | Version is consistent across `package.json`, `/health`, compose tags, release notes, enforced in CI | Version-check job passes | 1 |
 | A9 **MET** | A tagged release builds a GHCR image that pulls and starts clean on a machine that never built it | Proof Log PL-004 — v1.6.0 pulled from GHCR, migrated, `/health` 1.6.0 | 1 |
 
@@ -77,14 +78,46 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 |---|---|---|---|
 | D1 ◆ | No claim of masking survives anywhere in the product or docs | Grep of README, router config, UI | 1 |
 | D2 ◆ | Startup fails loudly if a governance flag is set that the code does not honour | Startup transcript | 1 |
-| D3 ◆ | Every outbound LLM request is recorded in an append-only ledger; a test proves no path bypasses it | `egress_audit` coverage test | 5 |
-| D4 ◆ | An operator can answer "what left our network, when, to whom" from the UI without engineering help | Ledger view screenshot | 5 |
-| D5 ◆ | A task pinned to an egress class cannot fail over outside it | Residency enforcement test | 5 |
-| D6 ◆ | Air-gapped mode runs end-to-end with no cloud keys present in any container | `docker compose` with air-gap profile; env inspection | 5 |
-| D7 | Air-gapped route resolves to a service that exists in the compose file | Route resolution test | 5 |
-| D8 | Failover distinguishes auth failure, rate limit, and validation failure | Typed exception handling test | 5 |
+| D3 ◆ | Every outbound LLM request is recorded in an append-only ledger **before it is sent**, and no module outside the gateway can reach a provider at all | **Primary (structural):** `test_no_module_outside_the_gateway_imports_a_provider_sdk` + `test_only_one_function_reaches_the_provider_client` + `test_the_attempt_write_precedes_every_client_statement`. **Supporting:** `test_a_ledger_that_cannot_write_stops_the_request`; `test_migration_0015_egress_audit.py` (raw SQL, populated DB). PL-008 | 5 |
+| D4 ◆ **MET** | An operator can answer "what left our network, when, to whom" from the UI without engineering help | Proof Log **PL-009** — `/settings/egress`, reachable from the Studio nav, driven on the running appliance: four attributed rows showing failover from `anthropic_cloud` to `gemini_cloud` with real token counts. Two halves, both asserted: `test_egress_attribution.py` (structural — every call site into the gateway names an actor, or the AST scan fails with file and line) and `test_egress_ledger_view.py` (the view, including that rows scoping cannot show are **counted rather than dropped**). *"To whom"* was the half missing: the identity columns existed from migration 0015 and every call site left them null | 5 |
+| D5 ◆ | A task pinned to an egress class cannot fail over outside it, and a task with no pin is a configuration error rather than an allowance. **The permitted set comes from a declared containment map, explicitly not from an ordering over class names** | `test_egress_residency_and_failover.py` — `test_a_pin_strips_non_compliant_failover_targets` (the named mutation), `test_an_eu_pin_does_not_admit_apac_and_an_apac_pin_does_not_admit_eu` (kills the scalar implementation), `test_the_residency_check_lives_in_the_calling_function` (structural), `test_a_task_without_a_pin_is_a_configuration_error`, `test_the_production_router_pins_every_task` | 5 |
+| D6 ◆ | Air-gapped mode runs end-to-end **with every provider key set to a sentinel**, uses none of them, and refuses any route that would | `test_airgap_routing.py` — `test_an_airgapped_run_sends_no_cloud_key`, `test_stripping_is_what_makes_a_fall_through_task_local` (the discriminating case), `test_a_route_that_would_use_a_cloud_key_is_refused_at_resolution`, `test_the_sentinels_are_actually_present` | 5 |
+| D7 | Every air-gapped provider resolves to a service in the compose file **or is declared bring-your-own**, and no air-gapped primary is BYO | `test_every_airgapped_provider_exists_or_is_declared_byo`, `test_no_airgapped_primary_is_bring_your_own`, `test_the_shipped_local_runtime_is_reachable_from_the_backend` | 5 |
+| D8 **MET** | Failover distinguishes auth failure, rate limit, and validation failure, and an **unclassified** failure abandons the chain rather than being retried as transient | `test_failures_classify_distinctly` (four inputs, four outputs), `test_an_unmapped_failure_abandons_the_chain`, `test_every_classification_has_a_declared_failover_decision`, `test_an_auth_failure_is_reported_ahead_of_a_rate_limit`. **Sprint 7 Step 4, through the real Instructor client:** `test_gateway_instructor.py::test_an_auth_failure_under_real_instructor_is_provider_auth` and `test_the_gateway_reports_and_records_it_as_auth` (an `AuthenticationError` wrapped in `InstructorRetryException` classifies as auth, by walking the cause chain), with negative control `test_negative_control_without_the_chain_walk_auth_reads_as_schema`; one ledger row per HTTP request, `test_invalid_json_twice_then_valid_is_three_attempt_rows`. CI [run 36501535008](https://github.com/emkwambe/modelbox/actions/runs/36501535008) | 5, 7 |
 | D9 | JWT validates `aud` and `iss`; a token minted for another audience is rejected | Security test | 4 |
-| D10 | A conformance report exists comparing at least one local and one cloud provider, scored by the linter | Generated report artifact | 5 |
+| D10 | A conformance report exists comparing at least one local and one cloud provider, scored by the linter against a threshold fixed **before** the first provider call | **The generated report**, not the script — a harness that has never produced a number proves the method, not the claim. Threshold: `scripts/conformance_threshold.py` (commit `b6a3e1a`, into a tree with no code able to call a provider). Harness isolation: `test_conformance_isolation.py` | 5 |
+
+**D3 was re-specified in Sprint 5, and the new wording governs.** It previously
+read "a test proves no path bypasses it", which is a negative over the whole
+call graph and cannot be earned by sampling: a test exercising three call sites
+says nothing about a fourth added next year. Same error as B6 and B11 — a
+criterion written past what its evidence could establish.
+
+The evidence is therefore structural, and that is why three tests are named as
+primary rather than one. Together they say: nothing outside the gateway can
+import a provider SDK, exactly one function inside it reaches the client, and
+the ledger write precedes every statement in that function that does. Ledger
+completeness then follows by construction rather than by enumeration, and it
+fails loudly the day someone adds a sixth provider. A behavioural coverage test
+remains useful but cannot be the primary evidence for a universal.
+
+**D5's wording was a defect in this register, found in Sprint 5.** "Max egress
+class" encodes an ordering into a domain that has none. Over `local`,
+`cloud_eu`, `cloud_apac` and `cloud`, any total order asserts either
+`cloud_eu ≤ cloud_apac` or the reverse, and **both are false as residency
+controls**: an EU-pinned task must not fail over to APAC, and an APAC-pinned
+task must not fail over to the EU. A scalar comparison therefore gets exactly
+one of the two wrong — silently, and in the permissive direction.
+
+The name is kept because it is what the product configuration says. The
+semantics are not: `egress_policy` declares, per pin, the exact set of classes
+it admits. The criterion is amended rather than left to be caught by a test,
+because a criterion that misstates the property will be implemented from its own
+text — and the register is supposed to be the thing that does not lie.
+
+Related to standard 9: the ordering was a *consequence* that holds in the easy
+cases (`local` really is admitted everywhere, `cloud` really is the top) and
+fails on the pair that matters.
 
 ## E. Claim integrity — the trust gate
 
@@ -94,7 +127,7 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | E2 ◆ | No public surface states a capability without a Proof Log ID behind it | Proof Log cross-reference | 7 |
 | E3 ◆ | Every Proof Log entry names a passing test and an expiry condition | `PROOF_LOG.md` review | ongoing |
 | E4 | Release notes enumerate known open defects with test IDs rather than omitting them | Release notes for the Sprint 1 tag | 1 |
-| E5 | Research documents are quarantined and cannot be read as specification | `docs/research/` with status headers | 1 |
+| E5 | Research documents are quarantined and cannot be read as specification | Research documents are kept out of this repository (moved 2026-09-28; previously `docs/research/` with status headers) | 1 |
 | E6 | The PRD carries no unqualified commitment the code does not keep | PRD reconciliation | 1 |
 
 ## F. Product experience
@@ -105,30 +138,43 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 | F2 ◆ | No unstyled empty, loading, error, or permission-denied state remains | State inventory walkthrough | 6 |
 | F3 | Pass/fail state uses semantic colour consistently — Emerald validated, Rose breaking, Amber preview | UI review | 6 |
 | F4 | Canvas remains usable at 500 tables | Profiling run | 6 |
-| F5 | Export surface shows per-artifact validation status drawn from the fidelity harness | Screenshot | 6 |
-| F6 | Contrast meets the brand system's own WCAG standard | Automated contrast check | 6 |
-| F7 | `next lint` passes with a committed ESLint config | CI job | 1 (config), 6 (clean) |
+| F5 **MET** | Export surface shows per-artifact validation status drawn from the fidelity harness | `backend/app/services/artifact_status.py` is the single manifest, served by `GET /api/v1/export/status` (`test_export_status_endpoint.py`); `ExportPanel.tsx:148-155,237,405-413` reads it rather than restating it. `ExportPanel.status.test.tsx` is parameterised over a manifest fixture: the picker offers the manifest's dialects **and no others**, the default is a certified dialect *without the test naming which*, and a failed fetch shows **no** badge rather than a stale one. `test_every_certified_artifact_family_has_collected_tests` runs pytest's collector in a subprocess, so "certified" cannot outrun the tests that certify it. **Limits:** the banner renders only when status is not `CERTIFIED`, so a certified artifact affirms nothing — see Sprint 6 open decision 2; and the three dictionary formats sit at `UNVERIFIED` because no fidelity gate exists for that exporter, held honest by `test_unverified_variants_claim_no_verification` | 6 |
+| F6 **MET, at a stated breadth** | Every **declared** colour pair meets the brand system's own WCAG floor — 4.5:1 body, 3:1 large and non-text | `tokens.test.ts`: `PAIRS` is asserted non-empty, every pair meets its floor, and the published ratios recompute against a reference implementation (black on white must be exactly 21:1, so a constant-returning luminance function fails). `tokens.ts` makes a foreground reachable **only through the surface it sits on**, so an unmeasured combination is unavailable rather than discouraged. `Badge.test.tsx` and `ui.contract.test.tsx` hold the primitives. **Breadth, stated rather than implied:** this is a claim about *declared pairs*, not about rendered screens — there is no page-level contrast sweep, and jsdom cannot do one honestly because it computes no layout. What makes the claim worth having is F1: the colour burn-down is at **22 of 358**, and all 22 are recorded decisions (`global-error.tsx`'s deliberate exemption, and violet awaiting a palette entry), so almost every colour in the product now arrives through a pair this test measures. **The residual risk is a pair that is used and never declared** — which is not hypothetical: the export panel's `neutral-900` ground was exactly that until 2026-09-01, and its status colours were unasserted while looking fully tokenised | 6 |
+| F7 **MET** | `next lint` passes with a committed ESLint config | Config `frontend/.eslintrc.json`, tracked since `902a544`. CI job `frontend-lint` in `.github/workflows/ci.yml` (at the **git toplevel**, not under `modelbox-ai/`) runs `npx next lint --max-warnings 0` and is **blocking** — the `continue-on-error` grace period `CLAUDE.md:314` scheduled for Sprint 6 was retired early, at v1.6.0. The job also runs `npm test`, deliberately, because it is already in branch protection's required set. Run for this entry on 2026-09-01 at `6154e88`: `npx next lint --max-warnings 0` → `✔ No ESLint warnings or errors`, exit 0. **Limit:** `frontend/build.log` is untracked and stale — it shows 3 routes where `3cb4de9` made 10 — so it must not be read as a current lint or build result | 1 (config), 6 (clean) |
 
 ## G. Commercial readiness
+
+**G8–G12 added 2026-09-02 from buyer research.** They are the identity and
+auditability floor for the segment that research identified as the largest
+funded opportunity — EU/UK banking and insurance regulatory remediation. None of
+these words appeared anywhere in this register or the sprint plan before that
+date, which is worth recording: the gap was not deprioritised, it was never
+named, and a register that does not name a blocker cannot report it as
+outstanding.
 
 | ID | Criterion | Evidence | Sprint |
 |---|---|---|---|
 | G1 ◆ | An evaluator can install the appliance and export a working artifact without assistance | Unassisted install transcript from someone who has never seen it | 5 |
-| G2 ◆ | A security reviewer's standard questions — what leaves, where it goes, how to stop it — are answerable from documentation alone | Security FAQ doc | 5 |
+| G2 ◆ **MET** | A security reviewer's standard questions — what leaves, where it goes, how to stop it — are answerable from documentation alone | `docs/SECURITY_FAQ.md`, one section per question, every capability statement carrying a `PL-` id (PL-008 what leaves, PL-010 how to stop it, PL-009 what is recorded). `test_security_faq_cites_real_proof.py` fails if the FAQ cites an entry that does not exist, if an answer section states capabilities citing nothing, or if the "what we do not claim" section loses its disclosures — so E2 is enforced on this surface rather than promised. **Limit:** no external reviewer has read it yet; that would be stronger evidence than the document's own structure | 5 |
 | G3 ◆ | Every landing page claim traces to a Proof Log ID | Claim-to-test map | 7 |
 | G4 | Brownfield path works: point at a warehouse, get a governance audit and remediation backlog | Introspection walkthrough | 5 |
 | G5 | The differentiator line — governed contracts and semantic layers, not just schemas — is true and stated | Product surface | 3 (true), 7 (stated) |
 | G6 | Pricing and licensing model exists in writing | Commercial doc | Phase II |
 | G7 ◆ | The 90-day wedge is decided and written down: appliance-to-enterprise or Trainer-as-GTM | Decision record | before Phase II |
+| G8 **NOT MET — re-specified to OIDC (decision 5, 2026-09-28): server verification done, UI login flow outstanding** | SSO via OIDC end to end: the server verifies tokens from Entra ID, Okta and Ping, a user can sign in through the UI, and SCIM-provisioned users can sign in through OIDC; local password auth survives for air-gapped installs with no IdP to federate with. SAML 2.0 is added on a pilot's demand | `test_federated_identity.py` (11) — an OIDC subject resolves to a local user, keyed on (issuer, subject) and never email, with just-in-time provisioning gated on an allowlist that is **empty by default**. `test_jwks_rotation.py` (8) — key rotation with real RSA signatures. **NOT MET because the UI login flow is not built** (scheduled for Sprint 9), and without it a SCIM-provisioned user, who has no local password, cannot sign in. **Also unverified:** no test runs against a containerised Entra/Okta/Ping, so the protocol is asserted and the vendor is not. *Superseded wording, kept as history:* the criterion asked for SAML 2.0 *and* OIDC and was NOT MET for want of SAML | 6.5, 9 |
+| G9 **MET** | SCIM provisioning **and de-provisioning** | `test_scim_lifecycle.py` (14). De-provisioning is asserted **by using the credential**, not by reading `is_active`: the API key works, the IdP calls DELETE, the key returns 401. Both shapes of `PATCH active=false` are covered because that is how every IdP actually removes somebody — an implementation handling only DELETE passes a manual test and never fires. Keys are revoked rather than left inert, and the user row survives so their audit history does. **Limits:** Users only — no Groups, no bulk, and one filter (`userName eq`), with an unsupported filter returning nothing rather than everything | 6.5 |
+| G10 **MET** (2026-09-28) | RBAC with viewer / modeller / approver / admin, enforced at the API rather than in the UI | **In-process:** `test_route_policy.py::test_every_route_enforces_its_declared_role` (every route in every included router declares and enforces a minimum role; negative control `test_negative_control_an_unguarded_route_in_a_nested_router_fails`), `test_role_authorization.py` (per-role refusals on mutating endpoints, real credentials, `get_current_user` never overridden), `test_api_key_scope.py` (a key acts only in its workspace, capped; negative control `test_negative_control_without_the_workspace_scope_a_key_reaches_b`). **Black-box, configuration B (hardened appliance) and the insecure profile,** CI [run 36501535008](https://github.com/emkwambe/modelbox/actions/runs/36501535008): `test_b5_a_viewer_cannot_transform_a_model`, `test_b6_a_key_minted_in_a_is_refused_in_b`. Proof Log PL-016. **Limit:** there is no API or UI to add members or set roles yet (Sprint 8 backlog); roles are enforced, not yet managed in the product | 6.5, 7 |
+| G11 **MET** (2026-09-28) | Audit-log export covering authentication, authorisation changes, model mutations and artifact generation, in a format shippable to Splunk or Sentinel without a custom parser | **In-process:** `test_audit_sink_unpatched.py::test_the_unpatched_sink_writes_a_row` (the sink writes with nothing in its path patched; negative control `test_negative_control_without_get_sessionmaker_nothing_is_stored`), `test_a_failed_write_logs_error_and_degrades_health` (negative control `test_negative_control_without_the_counter_health_stays_ok`), `test_audit_actions.py::test_every_declared_action_is_emitted_by_its_path`, `test_audit_trail.py::test_the_export_is_parseable_jsonl_line_by_line`. **Black-box,** CI [run 36501535008](https://github.com/emkwambe/modelbox/actions/runs/36501535008): configuration B `test_b7_sign_ins_reach_the_owners_export_and_health_is_ok` (`AUTH_LOGIN` and `AUTH_LOGIN_FAILED` in the owner's JSONL export, `/health` ok) and the upgraded-database scenario `test_designate_on_an_upgraded_database_reaches_the_owners_export` (`APPLIANCE_OWNER_DESIGNATED`). Proof Log PL-017. **Authorisation changes** are those the product makes today: API keys created and revoked, members added, the appliance owner designated; role changes have no product path yet (Sprint 8) | 6.5, 7 |
+| G12 **MET** | A written availability position — RPO, RTO, and a **tested** restore | `docs/AVAILABILITY.md`, and `backend/scripts/verify_restore.py` which produces it. The loop migrates a real PostgreSQL 16 to head, writes a known row, dumps, **destroys the container and its volume**, then restores into a new database and verifies both the row and the Alembic revision. Run 2026-09-02 at `0017_extend_roles`: RESTORE VERIFIED, exit 0. Destroying the volume is the point — a restore tested by dropping a table proves the dump contains that table, not that the dump is sufficient alone. Checking the revision is what catches the failure that surfaces days later: a database restored at the wrong revision serves reads and fails the next deployment. **Not a commitment to HA** — the page says single node, no failover, no PITR, and that RPO is the operator’s backup interval because the appliance schedules nothing | 6.5 |
 
 ## H. Curriculum
 
 | ID | Criterion | Evidence | Sprint |
 |---|---|---|---|
 | H1 | One grading path; the 3-invariant rubric is retired | `trainer_service` review | 8 |
-| H2 | All 12 linter codes are taught and gradeable | Curriculum coverage test | 8 |
+| H2 **MET** | All linter codes are taught and gradeable | `test_every_linter_code_is_taught_by_some_lab` — the code set is read off `graph_engine.py` rather than listed, so a new rule fails the test until a lab teaches it. **The count in this row was wrong: there are 13 codes, not 12** — the quality rules added in Sprint U3 were never counted here, which is why the criterion is now worded to the linter rather than to a number. *2026-09-28: 15 since Sprint 7 (`INVALID_DATA_TYPE`, `INVALID_DEFAULT`); the test reads the code set, so it covers them.* Four were taught by no lab until `m4_lab2` (CYCLIC_FK, DANGLING_REF, ORPHAN_ENTITY, PATTERN_EXCEEDS_LENGTH) | 8, met early in 5 |
 | H3 | Lab set-equality against linter output is preserved | `test_trainer_labs.py` still passes | 8 |
-| H4 | At least one lab derives from a real defect this programme fixed | Lab content | 8 |
+| H4 **MET** | At least one lab derives from a real defect this programme fixed | `m4_lab2_integration_review` — its headline flaw is the `VARCHAR(6)` column carrying an eight-character pattern, the contradiction that produced the `PATTERN_EXCEEDS_LENGTH` check after the seed generator was asked to satisfy both and could only choose which to break. The lab's solution notes carry that history, so the learner meets the reasoning and not just the rule | 8, met early in 5 |
 
 ---
 
@@ -137,11 +183,16 @@ Criteria marked **◆** are gate conditions: Phase I does not exit until every o
 Three times in Sprint 2 an assertion was written that could not have failed for
 the reason it claimed to test. Stated once here rather than rediscovered again.
 
-There are now thirteen, and **nine were earned rather than designed** — written
+There are now fourteen, and **ten were earned rather than designed** — written
 after something went wrong, not before. That ratio is the most useful fact
 about this list: it is a record of how verification actually fails here, not a
 theory of how it might. Treat a new one as evidence about the *category* rather
 than the instance.
+
+Four of the fourteen (8, 11, 12, 14) are now variations on one theme: a test
+that passes without the thing it names ever happening. That they were found
+separately, in unrelated code, is the argument for looking specifically for this
+shape rather than waiting to trip over it.
 
 1. **Verify from outside the layer under test.** A backfill checked through the
    ORM can be satisfied by a mapping bug; check it with raw SQL. An emitter rule
@@ -290,6 +341,18 @@ than the instance.
     and it is not about libraries — the second has no dependency involved at
     all. What generalises is the empty expectation, wherever it comes from.
 
+    A third form, found in Sprint 5 and the hardest to see: **unreachability.**
+    `allow_provider_calls` was declared with a bare `validation_alias`, which
+    *replaces* the field name, so `Settings(allow_provider_calls=True)` bound
+    nothing and returned the default. The flag was not absent and not empty —
+    it was unsettable, while the calling code read as entirely correct. A
+    security flag that appears set and is not is worse than one obviously
+    missing, and the failure direction was permissive.
+
+    So: absence, emptiness and unreachability all produce the same vacuous
+    satisfaction. Assert the expected value exists **and that setting it
+    changes the outcome.**
+
 13. **A guard is a claim about behaviour, and needs the same discrimination
     test as the code it guards.** Point it at something that must fail and
     confirm that it does. That is cheap, and nothing else establishes that a
@@ -305,6 +368,39 @@ than the instance.
 
     The fix is not more care when writing guards. It is that a guard which has
     never been observed failing is an untested claim, whatever it looks like.
+
+14. **A configuration made correct stops being a test fixture for the mechanism
+    that corrects it.** Coverage and correctness come into tension the moment a
+    fix lands: the production config that used to contain the discriminating
+    case no longer contains it, *because the case was the defect.* The
+    discriminating case has to move to a synthetic fixture in the same commit as
+    the fix, or the tests quietly stop testing.
+
+    Distinct from standard 11, and worse. There, a fixture never exercised the
+    feature and the gap was present from the start. Here the coverage existed
+    when the test was written and erodes later — silently, in a commit that
+    looks like an improvement, reviewed as an improvement, and correctly
+    described as one.
+
+    Found in Sprint 5, in tests written specifically to close a standard 12
+    hole. D6 had been re-specified to set sentinel provider keys rather than
+    rely on their absence. Task 3 then fixed the air-gapped routing so every
+    task in `airgapped_overrides` listed local providers only — which is right,
+    and which removed the only case where air-gap *stripping* did any work.
+    Disabling the stripping entirely left seven of the eight new tests green.
+    The suite was asserting that local-only routes resolve to local providers,
+    which is true of a gateway with no air-gap enforcement at all.
+
+    `test_stripping_is_what_makes_a_fall_through_task_local` is the remedy: a
+    synthetic router with a task carrying **no** air-gapped override, so
+    resolution falls through to `task_routing` and the stripping is the only
+    thing standing between a cloud provider and a sentinel key. With it, the
+    mutation dies twice instead of once.
+
+    The trigger to watch for is a fix that makes a real-world input stop
+    exhibiting the behaviour under test. Ask, at that moment, what still fails
+    if the mechanism is removed — and if the answer is "nothing", the fixture
+    left with the defect.
 
 A criterion whose evidence violates any of these is NOT MET, whatever the test
 reports.

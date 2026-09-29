@@ -92,7 +92,7 @@ def test_worker_processes_consecutive_jobs(monkeypatch) -> None:
     wrapper drives two independent asyncio.run() loops cleanly.
     """
     pytest.importorskip("celery")  # installed in CI; may be absent on dev hosts
-    import app.worker as worker
+    from app import worker
 
     processed: list[str] = []
 

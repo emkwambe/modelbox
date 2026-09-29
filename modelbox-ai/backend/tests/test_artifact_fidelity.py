@@ -61,6 +61,14 @@ from app.schemas.data_model import (
     RelationshipSchema,
     SynthesizedModel,
 )
+from app.services.artifact_status import (
+    ARTIFACT_STATUS,
+    ArtifactStatus,
+    all_dialects,
+    certified_dialects,
+    certified_families,
+    preview_dialects,
+)
 from app.services.exporter_service import ExporterService
 from app.services.seed_generator import SyntheticSeedGenerator
 
@@ -111,13 +119,20 @@ SYNTHETIC: dict[str, Fixture] = {
 
 GOLD_IDS = sorted(GOLD)
 
-# Dialect certification — Enhancement Blueprint §3, Q4. `postgres`, `snowflake`,
-# `redshift` and `duckdb` are deployment-verified; the other three are Preview
-# and are NOT scheduled for repair, so their failures are marked `preview` and
-# excluded from the Sprint 3 burn-down.
-CERTIFIED_DIALECTS = ("postgres", "snowflake", "redshift", "duckdb")
-PREVIEW_DIALECTS = ("bigquery", "databricks", "clickhouse")
-ALL_DIALECTS = CERTIFIED_DIALECTS + PREVIEW_DIALECTS
+# Dialect certification — Enhancement Blueprint §3, Q4. Preview dialects
+# transpile but are not deployment-verified, so their failures are marked
+# `preview` and excluded from the burn-down.
+#
+# **Derived, not declared.** These were literals here, and `ExportPanel.tsx`
+# held its own copies, and a test scraped the TSX to check the two agreed — so
+# the harness verified the UI's text while nothing verified that a thing called
+# certified had been tested at all. The manifest in `app.services.artifact_status`
+# is now the single source, and reading it here is what makes the label
+# load-bearing: moving a variant to CERTIFIED there removes its `preview`
+# exclusion here, and its failures enter the burn-down.
+CERTIFIED_DIALECTS = certified_dialects()
+PREVIEW_DIALECTS = preview_dialects()
+ALL_DIALECTS = all_dialects()
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +257,7 @@ def _fk_columns(model: SynthesizedModel) -> set[str]:
 
 
 def _declared_length(data_type: str) -> int | None:
-    match = re.search(r"(?:VAR)?CHAR\s*\(\s*(\d+)\s*\)", data_type, re.I)
+    match = re.search(r"(?:VAR)?CHAR\s*\(\s*(\d+)\s*\)", data_type, re.IGNORECASE)
     return int(match.group(1)) if match else None
 
 
@@ -384,6 +399,9 @@ def _run_dbt_parse(project: Path) -> DbtResult:
     proc = subprocess.run(
         [sys.executable, "-c", _DBT_SUBPROCESS, str(project)],
         capture_output=True, text=True, env=env, cwd=str(project),
+        # A failed parse is a result to assert on, reported in the payload;
+        # only a missing payload is a harness failure (below).
+        check=False,
     )
     _, marker, payload = proc.stdout.partition("@@FIDELITY@@")
     if not marker:
@@ -496,6 +514,8 @@ def _run_dbt_build(project: Path) -> DbtResult:
     proc = subprocess.run(
         [sys.executable, "-c", _DBT_BUILD_SUBPROCESS, str(project)],
         capture_output=True, text=True, env=env, cwd=str(project),
+        # As for parse: a failed build is data; a missing payload is not.
+        check=False,
     )
     _, marker, payload = proc.stdout.partition("@@FIDELITY@@")
     if not marker:
@@ -563,6 +583,9 @@ def test_gold_mirror_matches_templates_ts(tmp_path: Path) -> None:
     proc = subprocess.run(
         [str(NODE), "--experimental-strip-types", str(_EXTRACTOR), str(staging)],
         capture_output=True, text=True,
+        # stderr is inspected first: an old Node is a missing prerequisite,
+        # reported through `_need`, not an extractor failure.
+        check=False,
     )
     if "bad option: --experimental-strip-types" in proc.stderr:
         # Node < 22.6 cannot import a TypeScript module. Fail rather than skip
@@ -583,11 +606,38 @@ def test_gold_mirror_matches_templates_ts(tmp_path: Path) -> None:
 
 
 def test_templates_ts_is_the_only_gold_source() -> None:
-    """Guard the mirror's provenance: five graphs, extracted, none hand-added."""
+    """Guard the mirror's provenance: extracted from the library, none hand-added.
+
+    The claim is that every gold graph came from `templates.ts` and nothing was
+    written into the mirror by hand. That is a statement about *provenance*, and
+    it is checked by comparing the two sets — a graph in the mirror with no
+    template behind it fails here whatever the totals are.
+
+    It previously also asserted `len(GOLD_IDS) == 5`, which was a restatement of
+    how many templates happened to exist rather than a property of anything.
+    Adding a sixth reference model to the library failed this test while every
+    emitter passed against it, which is the wrong way round: the count was the
+    only thing that objected, and it objected to the library growing. Read the
+    expected set off `templates.ts` instead, so the guard tracks the source it
+    exists to protect.
+    """
     assert _TEMPLATES_TS.is_file()
     index = json.loads((_GOLD_DIR / "index.json").read_text(encoding="utf-8"))
     assert set(index) == set(GOLD_IDS)
-    assert len(GOLD_IDS) == 5, "the Requirements Library is five gold graphs"
+
+    declared = set(
+        re.findall(
+            r"^\s*id: '([a-z0-9-]+)',",
+            _TEMPLATES_TS.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+    )
+    assert declared, "fixture sanity: no template ids parsed out of templates.ts"
+    assert set(GOLD_IDS) == declared, (
+        f"the gold mirror and the Requirements Library disagree: "
+        f"mirror-only={sorted(set(GOLD_IDS) - declared)}, "
+        f"library-only={sorted(declared - set(GOLD_IDS))}"
+    )
 
 
 _EXPORT_PANEL = (
@@ -596,42 +646,115 @@ _EXPORT_PANEL = (
 )
 
 
-def test_export_ui_offers_exactly_the_dialects_the_backend_supports() -> None:
-    """The UI's dialect list must match the backend's, certification included.
+def test_the_export_ui_hardcodes_no_dialect_list() -> None:
+    """The UI must not carry its own copy of what is certified (F5).
 
-    Finding M12. The export panel offered five dialects while the backend
-    accepted seven: `redshift` was **certified and unreachable**, and
-    `clickhouse` was **preview and offered without qualification**. The whole
-    fidelity programme was therefore verifying a surface users could not fully
-    reach, while users could reach a surface it had not verified.
+    This replaces `test_export_ui_offers_exactly_the_dialects_the_backend_supports`,
+    which read this same file as *text* and asserted its two literal arrays
+    matched the harness's. That test closed a real seam — finding M12, where the
+    panel offered five dialects while the backend accepted seven — but it closed
+    it in the wrong direction: the harness verified the UI's source code, and
+    the UI's copy stayed authoritative for what a user was told.
 
-    That is a gap between the harness and the product rather than a bug in
-    either, which is exactly why neither caught it — the audit checked what the
-    emitters produce, never what the UI lets you ask for. This test closes the
-    seam so an eighth dialect cannot drift in on one side only.
+    The manifest is now the single source and the UI fetches it, so the correct
+    assertion is the negative one: no dialect list is written here at all.
     """
     source = _EXPORT_PANEL.read_text(encoding="utf-8")
 
-    def declared(name: str) -> list[str]:
-        match = re.search(rf"const {name} = \[(.*?)\];", source, re.S)
-        assert match, f"{name} not found in ExportPanel.tsx"
-        return re.findall(r"'([^']+)'", match.group(1))
+    for name in ("CERTIFIED_DIALECTS", "PREVIEW_DIALECTS", "DIALECTS"):
+        assert f"const {name}" not in source, (
+            f"ExportPanel.tsx declares {name}; certification is served by "
+            f"/export/status and must not be restated in the UI"
+        )
 
-    assert declared("CERTIFIED_DIALECTS") == list(CERTIFIED_DIALECTS), (
-        "the UI's certified dialects differ from the ones this harness verifies"
-    )
-    assert declared("PREVIEW_DIALECTS") == list(PREVIEW_DIALECTS), (
-        "the UI's preview dialects differ from the ones this harness labels"
-    )
+    # Belt and braces: no bare array of dialect names, whatever it is called.
+    for dialect in all_dialects():
+        assert f"'{dialect}'" not in source, (
+            f"ExportPanel.tsx contains the literal '{dialect}'; dialects come "
+            f"from the API"
+        )
 
-    # And both must agree with what the exporter will actually accept.
+
+def test_the_manifest_covers_exactly_what_the_exporter_accepts() -> None:
+    """The other half of M12, kept: neither side may grow a dialect alone.
+
+    The seam that finding named is still real — it is only the *source* of truth
+    that moved. A dialect the exporter accepts but the manifest never mentions
+    is offered to users with no status at all; one the manifest claims but the
+    exporter rejects is a promise that errors on use.
+    """
     from app.services.exporter_service import _SQLGLOT_DIALECTS
 
     backend = set(_SQLGLOT_DIALECTS) - {"postgresql"}  # an alias, not a dialect
-    assert set(ALL_DIALECTS) == backend, (
-        f"harness covers {sorted(ALL_DIALECTS)} but the exporter accepts "
+    assert set(all_dialects()) == backend, (
+        f"manifest covers {sorted(all_dialects())} but the exporter accepts "
         f"{sorted(backend)}"
     )
+
+
+def test_every_certified_artifact_family_has_collected_tests() -> None:
+    """Nothing may be called certified without tests behind it.
+
+    The manifest is a claim, and a claim with no gate is the shape this whole
+    programme exists to prevent. `family` is the prefix of the tests that verify
+    a variant, so collecting this module and matching prefixes turns
+    "CERTIFIED" into a statement that can be checked rather than typed.
+
+    Collection is run in a subprocess rather than introspected, because the
+    question is what pytest *collects* — a test skipped at import, or lost to a
+    renamed marker, is not a gate however present its source looks.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", str(Path(__file__)), "--collect-only", "-q"],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        check=False,
+    )
+    collected = {
+        line.split("::", 1)[1].split("[", 1)[0]
+        for line in result.stdout.splitlines()
+        if "::" in line
+    }
+    # Standard 12: an empty collection would satisfy every membership test below
+    # by making the loop body unreachable.
+    assert len(collected) > 20, (
+        f"collection returned {len(collected)} tests; the guard below would "
+        f"pass vacuously. stderr: {result.stderr[-800:]}"
+    )
+
+    missing = [
+        family
+        for family in certified_families()
+        if not any(name.startswith(f"test_{family}_") for name in collected)
+    ]
+    assert not missing, (
+        f"these families are marked CERTIFIED in the manifest but no "
+        f"test_<family>_* is collected for them: {missing}"
+    )
+
+
+def test_unverified_variants_claim_no_verification() -> None:
+    """UNVERIFIED must mean what it says, and be reachable.
+
+    The data dictionary is offered by the export panel in three formats and has
+    no fidelity gate of any kind. Recording that honestly is the point of the
+    third status; this asserts the manifest keeps saying so until a gate exists,
+    at which point the entry moves to CERTIFIED and this test names the change.
+    """
+    unverified = {
+        e.variant for e in ARTIFACT_STATUS if e.status is ArtifactStatus.UNVERIFIED
+    }
+    assert unverified == {"markdown", "html", "json"}, (
+        f"the set of unverified variants changed to {sorted(unverified)}; if a "
+        f"gate was added, move the entry to CERTIFIED and update this test"
+    )
+    for family in {
+        e.family for e in ARTIFACT_STATUS if e.status is ArtifactStatus.UNVERIFIED
+    }:
+        assert family not in certified_families(), (
+            f"family '{family}' is both certified and unverified"
+        )
 
 
 # ===========================================================================
@@ -726,7 +849,7 @@ def test_ddl_primary_key_columns_are_not_null(gid: str) -> None:
             if not column.is_primary_key:
                 continue
             pattern = rf"\b{re.escape(column.name)}\b[^,\n]*NOT NULL"
-            assert re.search(pattern, ddl, re.I), (
+            assert re.search(pattern, ddl, re.IGNORECASE), (
                 f"{entity.entity_name}.{column.name} is a primary key but is "
                 f"not emitted NOT NULL"
             )
@@ -765,12 +888,12 @@ def test_ddl_not_null_follows_declared_nullability(gid: str) -> None:
         block = re.search(
             rf"CREATE TABLE {re.escape(entity.entity_name)} \((.*?)\n\);",
             ddl,
-            re.S,
+            re.DOTALL,
         )
         assert block, f"no CREATE TABLE emitted for {entity.entity_name}"
         for column in entity.columns:
             pattern = rf"^\s*{re.escape(column.name)}\s+\S.*$"
-            line = re.search(pattern, block.group(1), re.M)
+            line = re.search(pattern, block.group(1), re.MULTILINE)
             assert line, f"{entity.entity_name}.{column.name} not emitted"
             emitted = "NOT NULL" in line.group(0).upper()
             assert emitted is (not column.is_nullable), (
@@ -1227,6 +1350,7 @@ def _inspect_cubes(fixture: Fixture, tmp_path: Path) -> list[dict[str, Any]]:
     proc = subprocess.run(
         [str(NODE), str(_CUBE_INSPECT), *sorted(written)],
         capture_output=True, text=True,
+        check=False,  # asserted below with the inspector's stderr in the message
     )
     assert proc.returncode == 0, f"cube inspector failed: {proc.stderr[-1500:]}"
     return json.loads(proc.stdout)
@@ -1293,7 +1417,16 @@ def test_cube_boolean_dimensions_are_boolean(gid: str, tmp_path: Path) -> None:
 @pytest.mark.parametrize("gid", gold_params({
     gid: "M3: LookML excludes the primary key from measures but not foreign "
          "keys, so SUM() over an FK is emitted. Preview — not scheduled."
-    for gid in ("saas-subscription", "ecommerce-orders", "healthcare-ehr")
+    # Every graph whose foreign keys are numeric. `banking-datavault` uses
+    # CHAR hash keys and `marketing-attribution` is a single-table OBT, so
+    # neither exhibits it. `aml-financial-crime` is a Kimball star with
+    # INTEGER surrogate keys and exhibits it exactly as the other stars do.
+    for gid in (
+        "saas-subscription",
+        "ecommerce-orders",
+        "healthcare-ehr",
+        "aml-financial-crime",
+    )
 }))
 def test_lookml_no_measure_over_foreign_key(gid: str) -> None:
     fks = _fk_columns(GOLD[gid].model)
@@ -1492,12 +1625,11 @@ def test_odcs_carries_the_meaning_of_each_declared_constraint() -> None:
                         f"{where}: declares min {column.min_value}, contract "
                         f"says {options.get('minimum')!r}"
                     )
-            if column.max_value is not None:
-                if options.get("maximum") != column.max_value:
-                    missing.append(
-                        f"{where}: declares max {column.max_value}, contract "
-                        f"says {options.get('maximum')!r}"
-                    )
+            if column.max_value is not None and options.get("maximum") != column.max_value:
+                missing.append(
+                    f"{where}: declares max {column.max_value}, contract "
+                    f"says {options.get('maximum')!r}"
+                )
             if column.regex_pattern:
                 checked["regex"] += 1
                 if options.get("pattern") != column.regex_pattern:
@@ -1595,7 +1727,7 @@ def test_avro_parses(gid: str) -> None:
         GOLD[gid].model, "avro", GOLD[gid].dataset_name
     )
     assert len(files) == len(GOLD[gid].model.entities)
-    for name, content in files.items():
+    for content in files.values():
         fastavro.parse_schema(json.loads(content))
 
 
@@ -1633,6 +1765,7 @@ def test_protobuf_compiles(gid: str, tmp_path: Path) -> None:
             [str(PROTOC), f"--proto_path={tmp_path}",
              f"--descriptor_set_out={tmp_path / 'out.desc'}", name],
             capture_output=True, text=True, cwd=tmp_path,
+            check=False,  # asserted below with protoc's stderr as the message
         )
         assert proc.returncode == 0, proc.stderr[-1500:]
 
@@ -1735,7 +1868,7 @@ def test_protobuf_decimal_is_not_double(gid: str) -> None:
         f"{e.entity_name}.{c.name}({c.data_type})"
         for e in fixture.model.entities for c in e.columns
         if any(t in c.data_type.upper() for t in ("NUMERIC", "DECIMAL", "NUMBER"))
-        and re.search(rf"^\s*double {re.escape(c.name)} = \d+;", proto, re.M)
+        and re.search(rf"^\s*double {re.escape(c.name)} = \d+;", proto, re.MULTILINE)
     ]
     assert not offending, f"fixed-point columns emitted as double: {offending}"
 
@@ -1866,7 +1999,7 @@ def test_seed_respects_declared_precision_and_scale() -> None:
             precision, scale = int(match.group(1)), int(match.group(2))
             for row in rows.get(entity.entity_name, []):
                 digits = row[column.name].lstrip("-").replace(".", "")
-                whole, _, frac = row[column.name].lstrip("-").partition(".")
+                _whole, _, frac = row[column.name].lstrip("-").partition(".")
                 if len(digits) > precision or len(frac) > scale:
                     violations.append(
                         f"{column.name}={row[column.name]} against "

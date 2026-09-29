@@ -16,14 +16,29 @@ class is importable without any credentials present.
 from __future__ import annotations
 
 import logging
+import math
 import os
+import re
+import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
 import yaml
 from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
 
 from app.core.config import Settings, get_settings
+from app.services.egress_ledger import (
+    EGRESS_FAILURE,
+    EGRESS_SUCCESS,
+    DatabaseEgressLedger,
+    EgressAttempt,
+    EgressLedger,
+    EgressLedgerError,
+    prompt_digest,
+    usage_tokens,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +60,320 @@ _LITELLM_PREFIX: dict[str, str] = {
 _LOCAL_EGRESS = {"local"}
 
 
+class ProviderCallsDisabledError(RuntimeError):
+    """Raised when the choke point is asked to call out and has not been allowed.
+
+    Fail-closed, for a product whose central claim is that an operator knows
+    what leaves their network. A gateway that reaches a provider because nobody
+    configured it not to is the same failure as an air-gap test passing on a
+    box that happened to have no keys — absence read as permission.
+
+    It also makes an otherwise unenforceable rule structural. "Only the
+    conformance harness may make real provider calls" is a statement of intent
+    until something refuses; this is the something.
+    """
+
+
 class LLMRouterError(RuntimeError):
     """Raised when routing configuration is invalid or exhausts all fallbacks."""
+
+
+class EgressPolicyError(LLMRouterError):
+    """The router's residency configuration is unusable (D5).
+
+    A configuration defect, never a routing outcome. Raised when a task omits
+    ``max_egress_class``, names a class the policy does not declare, or a
+    provider carries a class nothing admits. Each of those could have been
+    treated as "allow everything", and each would then be an absent constraint
+    read as permission — standard 12, in the venue where it costs most.
+    """
+
+
+class EgressResidencyError(LLMRouterError):
+    """A provider outside the task's residency pin was about to be called (D5).
+
+    Distinct from ``EgressPolicyError``: the configuration is coherent and the
+    request is the thing being refused.
+    """
+
+
+class ProviderAuthError(LLMRouterError):
+    """A provider rejected our credentials.
+
+    Not a transient fault, and the distinction is the point of D8. An expired
+    key and a 429 both make a provider unavailable, but only one of them is
+    fixed by waiting — reporting the first as the second sends an operator to
+    look at quota dashboards for a problem that is in their environment file.
+    """
+
+
+class ProviderRateLimitError(LLMRouterError):
+    """A provider is throttling us. Genuinely transient."""
+
+
+class ProviderSchemaError(LLMRouterError):
+    """A provider answered, but could not be coerced into the response model."""
+
+
+class UnclassifiedProviderError(LLMRouterError):
+    """A provider failed in a way this gateway does not recognise.
+
+    **Aborts the chain rather than failing over**, deliberately. The reflex is
+    to treat an unrecognised failure as transient and try the next provider,
+    which is the same shape as an absent value read as permission: we do not
+    know that continuing is safe, so we do not continue. The remedy is to
+    classify the exception in ``_FAILURE_SIGNATURES``, which is a one-line
+    change and leaves a record of the decision.
+    """
+
+
+# Exception *class names* — including base classes — mapped to a classification.
+# Matched by name rather than by importing litellm's exception hierarchy: the
+# gateway must stay importable without the SDK present, which is the same reason
+# the client is built lazily. The cost is that a provider renaming an exception
+# silently drops to unclassified — which aborts rather than fails over, so the
+# failure direction of this shortcut is safe.
+_FAILURE_SIGNATURES: dict[str, type[LLMRouterError]] = {
+    "AuthenticationError": ProviderAuthError,
+    "PermissionDeniedError": ProviderAuthError,
+    "InvalidAPIKeyError": ProviderAuthError,
+    "RateLimitError": ProviderRateLimitError,
+    "Timeout": ProviderRateLimitError,
+    "APIConnectionError": ProviderRateLimitError,
+    "ServiceUnavailableError": ProviderRateLimitError,
+    "InternalServerError": ProviderRateLimitError,
+    "ValidationError": ProviderSchemaError,
+    "InstructorRetryException": ProviderSchemaError,
+    "IncompleteOutputException": ProviderSchemaError,
+}
+
+# Which classifications may move on to the next provider. Written as an explicit
+# set so that adding a class without deciding its failover behaviour is a
+# KeyError at the decision point, not a default.
+_MAY_FAIL_OVER: dict[type[LLMRouterError], bool] = {
+    ProviderAuthError: True,
+    ProviderRateLimitError: True,
+    ProviderSchemaError: True,
+    UnclassifiedProviderError: False,
+}
+
+# Which classification wins when a chain produced several. A configuration
+# defect outranks a transient one: if one provider's key is invalid and the
+# next is merely throttled, the operator needs to hear about the key.
+_REPORTING_PRECEDENCE: tuple[type[LLMRouterError], ...] = (
+    ProviderAuthError,
+    ProviderSchemaError,
+    ProviderRateLimitError,
+)
+
+
+# Instructor makes exactly one request per call; the gateway owns every retry
+# (`_call_with_schema_retries`). An Instructor-internal retry is a second HTTP
+# request under the first one's ledger row, so the ledger would show one
+# request where the network saw several.
+_INSTRUCTOR_MAX_RETRIES = 0
+
+
+def _exception_chain(exc: BaseException) -> list[BaseException]:
+    """``exc`` followed by its causes, outermost first.
+
+    Follows ``__cause__``, then ``__context__`` unless the raiser suppressed it
+    with ``raise ... from None``. Guarded against cycles, which Python permits.
+    """
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        if current.__cause__ is not None:
+            current = current.__cause__
+        elif current.__suppress_context__:
+            current = None
+        else:
+            current = current.__context__
+    return chain
+
+
+def _reask_messages(
+    exc: BaseException, sent: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The conversation for a schema re-ask.
+
+    Instructor puts it on its exception as ``messages``: the request as sent,
+    plus the invalid response and the validation error. Without it the request
+    is repeated as sent.
+    """
+    messages = getattr(exc, "messages", None)
+    if isinstance(messages, list) and messages:
+        return messages
+    return sent
+
+
+def _field_errors(exc: BaseException) -> list[str]:
+    """``field.path:error_type`` for every pydantic error along the chain.
+
+    Read with ``include_input=False`` and without messages or context, which is
+    where pydantic puts the value it was given: here, the model's output.
+    """
+    errors: list[str] = []
+    for link in _exception_chain(exc):
+        if isinstance(link, PydanticValidationError):
+            for error in link.errors(
+                include_input=False, include_url=False, include_context=False
+            ):
+                path = ".".join(str(part) for part in error["loc"]) or "(root)"
+                errors.append(f"{path}:{error['type']}")
+    return errors
+
+
+# A provider's error type or code is recorded only if it looks like one: an
+# identifier, never a sentence. Anything else is dropped rather than truncated.
+_ERROR_TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
+_MAX_RETRY_AFTER_SECONDS = 86_400
+
+
+def _token(value: object) -> str | None:
+    if isinstance(value, str) and _ERROR_TOKEN.fullmatch(value):
+        return value
+    return None
+
+
+def _status(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+        return value
+    return None
+
+
+def _retry_after(headers: object) -> int | None:
+    """Whole seconds from ``retry-after`` or ``retry-after-ms``; an HTTP date is
+    not read, and a value outside 0..86400 seconds is dropped."""
+    getter = getattr(headers, "get", None)
+    if getter is None:
+        return None
+    for name, scale in (("retry-after", 1.0), ("retry-after-ms", 0.001)):
+        raw = getter(name)
+        if raw is None:
+            continue
+        try:
+            seconds = float(str(raw).strip()) * scale
+        except ValueError:
+            continue
+        if 0 <= seconds <= _MAX_RETRY_AFTER_SECONDS:
+            return math.ceil(seconds)
+    return None
+
+
+def _response_json(response: object) -> object:
+    """The provider response's JSON body, or None. LiteLLM keeps the response
+    but does not parse its error object; only tokens are read from it."""
+    reader = getattr(response, "json", None)
+    if reader is None:
+        return None
+    try:
+        return reader()
+    # Not JSON (ValueError, which JSONDecodeError and UnicodeDecodeError are),
+    # or a streamed body never read (httpx raises a RuntimeError subclass).
+    except (ValueError, RuntimeError):
+        return None
+
+
+def _provider_fields(exc: BaseException) -> list[str]:
+    """``status=``, ``type=``, ``code=`` and ``retry_after=`` from the chain.
+
+    Each is taken from the first exception in the chain that carries a valid
+    value. The status is the exception's ``status_code``; retry-after comes
+    from its headers or its response's. The type and code come only from the
+    provider's own error object (an SDK's parsed ``body``, else the response's
+    JSON): LiteLLM sets ``type`` and ``code`` attributes of its own, such as
+    ``throttling_error`` for every 429, which are not what the provider said.
+    Every value is validated as a number or an identifier; nothing is copied as
+    text.
+    """
+    fields: dict[str, int | str] = {}
+    for link in _exception_chain(exc):
+        body = getattr(link, "body", None)
+        if not isinstance(body, dict):
+            body = _response_json(getattr(link, "response", None))
+        error = body.get("error") if isinstance(body, dict) else None
+        error = error if isinstance(error, dict) else {}
+        candidates: dict[str, int | str | None] = {
+            "status": _status(getattr(link, "status_code", None)),
+            "type": _token(error.get("type")),
+            "code": _token(error.get("code")),
+            "retry_after": _retry_after(getattr(link, "headers", None))
+            or _retry_after(getattr(getattr(link, "response", None), "headers", None)),
+        }
+        for key, value in candidates.items():
+            if value is not None and key not in fields:
+                fields[key] = value
+    return [f"{key}={fields[key]}" for key in ("status", "type", "code", "retry_after") if key in fields]
+
+
+def describe_provider_failure(
+    exc: BaseException,
+    *,
+    classification: type[LLMRouterError],
+    provider: str,
+    model: str,
+) -> str:
+    """What the ledger, the gateway's log and its raised errors say about a failure.
+
+    Provider, model, the classification, the exception classes along the
+    chain; for a provider failure its HTTP status, error type or code, and
+    retry-after seconds (`_provider_fields`); for a schema failure each error's
+    field path and type. Never an exception's message: a validation error's
+    message quotes the invalid value, which is the model's output, and a
+    wrapper's message quotes the validation error. The ledger is append-only,
+    so what is written there stays.
+    """
+    classes = "<".join(type(link).__name__ for link in _exception_chain(exc))
+    parts = [f"{classification.__name__}/{classes}", f"provider={provider}", f"model={model}"]
+    parts += _provider_fields(exc)
+    errors = _field_errors(exc)
+    if errors:
+        parts.append("errors=" + ",".join(errors))
+    return " ".join(parts)
+
+
+def classify_provider_failure(exc: BaseException) -> type[LLMRouterError]:
+    """Map a provider exception to one of the typed failures.
+
+    Classifies the **innermost recognised cause first**, then works outward to
+    the exception's own class. Instructor wraps every failure of a structured
+    call, a provider's ``AuthenticationError`` included, in
+    ``InstructorRetryException`` raised from the original; that wrapper is a
+    schema failure only when what it wraps is one. The walk goes innermost
+    first so a transport error nested under a provider's own exception still
+    classifies by the provider's exception, not by the wrapper around it.
+
+    Each exception is matched along its MRO, so a subclass of a known error
+    classifies with its parent. Anything unrecognised anywhere in the chain
+    becomes :class:`UnclassifiedProviderError`, which does not fail over.
+    """
+    for link in reversed(_exception_chain(exc)):
+        for klass in type(link).__mro__:
+            mapped = _FAILURE_SIGNATURES.get(klass.__name__)
+            if mapped is not None:
+                return mapped
+    return UnclassifiedProviderError
 
 
 class LLMGateway:
     """Task-routed, structured-output LLM client with failover."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        ledger: EgressLedger | None = None,
+    ) -> None:
         self._settings: Settings = settings or get_settings()
+        # Defaults to the database ledger, never to nothing. The parameter
+        # exists so the choke point can be exercised without a database, not so
+        # the audit trail can be switched off — there is no null implementation,
+        # and `test_the_default_gateway_writes_to_the_database` asserts what an
+        # unconfigured gateway gets.
+        self._ledger: EgressLedger = ledger or DatabaseEgressLedger()
         self._config: dict[str, Any] = self._load_config(
             self._settings.model_router_config_path
         )
@@ -125,15 +445,119 @@ class LLMGateway:
                 raise LLMRouterError(
                     f"Air-gapped mode active but task '{task}' has no local provider."
                 )
+
+        # ---- residency, applied to the whole chain (D5) ---------------------
+        # Filtered here rather than checked on the primary, because the failover
+        # targets are the ones that leak. The plausible wrong implementation
+        # validates `chain[0]` and lets the rest through, which passes every
+        # happy-path test and breaches residency only when a provider is down —
+        # the moment nobody is watching.
+        permitted = self._permitted_egress_classes(task)
+        chain = [p for p in chain if self._egress_class(p) in permitted]
+        if not chain:
+            raise EgressResidencyError(
+                f"task '{task}' permits egress classes {sorted(permitted)}, and "
+                f"no provider in its chain qualifies. Refusing rather than "
+                f"falling back outside the pin."
+            )
         return chain
 
     def _is_local(self, provider_name: str) -> bool:
         provider = self.providers.get(provider_name, {})
         return provider.get("egress") in _LOCAL_EGRESS
 
+    # -- residency (D5) -----------------------------------------------------
+    def _permitted_egress_classes(self, task: str) -> frozenset[str]:
+        """The egress classes ``task`` may reach, from its declared pin.
+
+        Every lookup here fails loudly rather than falling back to permissive.
+        A missing pin, an undeclared class, and an empty permitted set are all
+        configuration defects, and all three would otherwise present as "no
+        constraint" — which is indistinguishable, at the call site, from a
+        constraint that was checked and passed.
+        """
+        route = self._config.get("task_routing", {}).get(task)
+        if route is None:
+            raise LLMRouterError(f"No routing rule defined for task: {task}")
+
+        pin = route.get("max_egress_class")
+        if not pin:
+            raise EgressPolicyError(
+                f"task '{task}' declares no max_egress_class. Add one to "
+                f"model_router.yaml; there is no permissive default, because an "
+                f"absent residency constraint must not read as an allowance."
+            )
+
+        policy = self._config.get("egress_policy", {})
+        if pin not in policy:
+            raise EgressPolicyError(
+                f"task '{task}' pins max_egress_class '{pin}', which the "
+                f"egress_policy block does not declare. Known: {sorted(policy)}"
+            )
+
+        permitted = frozenset(policy[pin])
+        if not permitted:
+            raise EgressPolicyError(
+                f"egress class '{pin}' admits nothing, so task '{task}' can "
+                f"never route. This is a configuration error, not a refusal."
+            )
+        return permitted
+
+    def _egress_class(self, provider_name: str) -> str:
+        """The provider's declared egress class, for the ledger.
+
+        Falls back to ``"unknown"`` rather than raising or defaulting to
+        ``"local"``. A provider whose router entry omits ``egress`` is a
+        configuration defect, and the ledger should say so plainly instead of
+        recording a reassuring guess about where the data went.
+        """
+        return str(self.providers.get(provider_name, {}).get("egress", "unknown"))
+
     def _resolve_task_temperature(self, task: str) -> float:
         route = self._config.get("task_routing", {}).get(task, {})
         return float(route.get("temperature", 0.0))
+
+    def _call_settings(self) -> dict[str, Any]:
+        """Provider-call settings from the router's ``settings:`` block.
+
+        ``request_timeout_seconds`` and ``num_retries`` have been in
+        ``config/model_router.yaml`` from the start and **nothing read them**:
+        a grep for ``timeout`` over this module returned nothing while the file
+        said 60 seconds, and a failure logged "Max retries exceeded. Total
+        attempts: 1" while the file said 3. Configuration that states a
+        behaviour the code does not implement is the defect class D2 exists to
+        prevent, arriving through the router file instead of the environment.
+
+        The timeout is the one with teeth. Without it there is no per-request
+        deadline anywhere in the call path, so a provider that accepts a
+        connection and then stalls blocks the whole failover chain
+        indefinitely — the chain never advances, the task never fails, and the
+        caller's own budget expires first. That is precisely how a hung call
+        reaches a user as "timed out waiting for synthesis" naming no provider
+        at all.
+
+        ``num_retries`` is LiteLLM's transport-level retry of the *same*
+        provider, which is a different thing from this gateway's failover to
+        the *next* one. It does not touch classification: an auth failure is
+        not retryable and still fails over immediately under D8's rules. The
+        cost of honouring it is latency on a genuinely rate-limited provider,
+        which is now three attempts before the chain moves on — that is what
+        the deployment asked for, and it is a deliberate consequence rather
+        than an oversight.
+
+        A key that is absent is left to the client library's default rather
+        than given an invented one. The purpose here is to honour what the
+        deployment declares, not to declare on its behalf.
+        """
+        block = self._config.get("settings", {}) or {}
+        kwargs: dict[str, Any] = {}
+        timeout = block.get("request_timeout_seconds")
+        if timeout is not None:
+            kwargs["timeout"] = float(timeout)
+        retries = block.get("num_retries")
+        if retries is not None:
+            kwargs["num_retries"] = int(retries)
+        return kwargs
 
     def _litellm_kwargs(self, provider_name: str) -> dict[str, Any]:
         """Translate a router provider into LiteLLM call kwargs."""
@@ -154,7 +578,167 @@ class LLMGateway:
         api_key_env = provider.get("api_key_env")
         if api_key_env:
             kwargs["api_key"] = os.environ.get(api_key_env)
+
+        # Provider-declared headers, read from the environment rather than the
+        # config file — the same discipline as `api_key_env`, because a header
+        # can carry a tenant identifier and a committed YAML is the wrong place
+        # for one.
+        #
+        # This exists because of a real failure rather than for generality.
+        # Anthropic's **identity-linked** API keys refuse every request that does
+        # not carry `anthropic-workspace-id`, and the appliance had no way to
+        # send one: a customer holding that kind of key could configure this
+        # provider correctly and still have every call rejected, with an error
+        # that reads like a bad key. Encoded per-provider rather than as an
+        # Anthropic special case, since the shape recurs across vendors.
+        headers: dict[str, str] = {}
+        for header_name, env_name in (provider.get("headers") or {}).items():
+            value = os.environ.get(env_name)
+            if not value:
+                # Declared and unset is a configuration error, not an implicit
+                # "send nothing" — the same ruling `max_egress_class` gets. The
+                # provider would otherwise reject the call with a message about
+                # its own API, several layers from the line that caused it.
+                raise LLMRouterError(
+                    f"provider '{provider_name}' declares header "
+                    f"'{header_name}' from ${env_name}, which is unset. Set it "
+                    f"or remove the declaration; sending the request without "
+                    f"the header would fail at the provider."
+                )
+            headers[header_name] = value
+        if headers:
+            kwargs["extra_headers"] = headers
+        # Global call settings last: every provider in every chain gets the
+        # deployment's declared timeout and retry budget, because they are
+        # assembled here — the one place call kwargs are built.
+        kwargs.update(self._call_settings())
         return kwargs
+
+    # -- the choke point ----------------------------------------------------
+    async def _call_provider(
+        self,
+        *,
+        attempt: EgressAttempt,
+        permitted_egress: frozenset[str],
+        response_model: type[TModel],
+        messages: list[dict[str, Any]],
+        temperature: float,
+        call_kwargs: dict[str, Any],
+    ) -> TModel:
+        """Make one provider request, recorded on every path through it.
+
+        One request, not one *call*: Instructor runs with
+        ``_INSTRUCTOR_MAX_RETRIES`` (0), so it never sends a second request
+        under this attempt's row. Schema re-asks happen one level up, each
+        through here with its own attempt.
+
+        **This is the only method in the application that touches
+        ``self.client``, and that is a tested property**
+        (``test_only_one_function_reaches_the_provider_client``). Combined with
+        the import scan — no module outside this file can import a provider SDK
+        at all — it makes "no path bypasses the ledger" structural. The claim is
+        not that three known call sites log; it is that the set of possible call
+        sites is one, and that one records before it dials.
+
+        The attempt write is an unconditional statement preceding every
+        statement that reaches the client, so no early return, branch, or
+        exception path can skip it, and a ledger that cannot write raises rather
+        than letting an unrecorded request leave. Failover happens above this
+        method, so each provider tried gets its own attempt and its own outcome:
+        two providers contacted is two requests that left the network, and the
+        ledger shows two.
+        """
+        # ---- residency, re-checked at the moment of the call (D5) -----------
+        # Not redundant with the filter in `resolve_route`. That one proves the
+        # *chain* is compliant; this one proves the *request* is, in the same
+        # function that reaches the client and after every other decision has
+        # been made. A check that lives only upstream is a check that anything
+        # mutating the chain in between can defeat, and nothing at the call site
+        # can tell the difference between "validated" and "never validated".
+        # `test_the_residency_check_lives_in_the_calling_function` pins it here.
+        if attempt.egress_class not in permitted_egress:
+            raise EgressResidencyError(
+                f"refusing to call provider '{attempt.provider}' for task "
+                f"'{attempt.task}': its egress class '{attempt.egress_class}' is "
+                f"not in the permitted set {sorted(permitted_egress)}."
+            )
+        await self._ledger.record_attempt(attempt)
+        try:
+            result: TModel = await self.client.chat.completions.create(
+                response_model=response_model,
+                messages=messages,
+                temperature=temperature,
+                max_retries=_INSTRUCTOR_MAX_RETRIES,
+                **call_kwargs,
+            )
+        except Exception as exc:
+            # The classification goes in the ledger, not just the log. "Which
+            # provider failed and why" is an operator question, and the answer
+            # is worth as much as the record that the request was made. What
+            # is written is `describe_provider_failure`, never the exception's
+            # message, which can quote the model's output.
+            await self._ledger.record_outcome(
+                attempt,
+                event=EGRESS_FAILURE,
+                error=describe_provider_failure(
+                    exc,
+                    classification=classify_provider_failure(exc),
+                    provider=attempt.provider,
+                    model=str(call_kwargs.get("model", "unknown")),
+                ),
+            )
+            raise
+        prompt_tokens, completion_tokens = usage_tokens(result)
+        await self._ledger.record_outcome(
+            attempt,
+            event=EGRESS_SUCCESS,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+        return result
+
+    async def _call_with_schema_retries(
+        self,
+        *,
+        new_attempt: Callable[[], EgressAttempt],
+        permitted_egress: frozenset[str],
+        response_model: type[TModel],
+        messages: list[dict[str, Any]],
+        temperature: float,
+        max_retries: int,
+        call_kwargs: dict[str, Any],
+    ) -> TModel:
+        """One provider: a request, then up to ``max_retries`` schema re-asks.
+
+        Every request goes through `_call_provider` with an attempt of its own,
+        so the ledger holds one ATTEMPT and one outcome for each request that
+        left. Only a schema failure is retried here. Anything else goes straight
+        back to the failover loop, which classifies it.
+
+        A re-ask sends what Instructor's own retry sent: the conversation
+        Instructor returns on the exception, which appends the invalid response
+        and the validation error to the request. The attempt's digest stays the
+        user prompt's, as it was when those retries ran under a single row.
+        """
+        request = messages
+        # Clamped as Instructor clamped it: a negative budget is one request.
+        for retries_left in range(max(max_retries, 0), -1, -1):
+            try:
+                return await self._call_provider(
+                    attempt=new_attempt(),
+                    permitted_egress=permitted_egress,
+                    response_model=response_model,
+                    messages=request,
+                    temperature=temperature,
+                    call_kwargs=call_kwargs,
+                )
+            except (EgressLedgerError, EgressResidencyError, EgressPolicyError):
+                raise
+            except Exception as exc:
+                if retries_left == 0 or classify_provider_failure(exc) is not ProviderSchemaError:
+                    raise
+                request = _reask_messages(exc, request)
+        raise AssertionError("unreachable: the last iteration returns or raises")
 
     # -- execution ----------------------------------------------------------
     async def structured_completion(
@@ -167,13 +751,30 @@ class LLMGateway:
         llm_override: str | None = None,
         temperature: float | None = None,
         max_retries: int = 2,
+        model_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
     ) -> TModel:
         """Run a structured completion for ``task`` with automatic failover.
 
         Iterates the resolved provider chain; the first provider to return a
-        response that validates against ``response_model`` wins. Instructor
-        handles per-provider schema re-prompting up to ``max_retries``.
+        response that validates against ``response_model`` wins. Each provider
+        gets up to ``max_retries`` schema re-asks, owned by the gateway so each
+        one is a ledger attempt of its own (`_call_with_schema_retries`).
         """
+        # ---- fail-closed gate, before anything is constructed ---------------
+        # Placed ahead of `self.client` deliberately: a refusal that fires after
+        # the client is built has already imported the SDK and, for some
+        # providers, opened a connection. Refusing after dialling out is not
+        # refusing.
+        if not self._settings.allow_provider_calls:
+            raise ProviderCallsDisabledError(
+                "Outbound provider calls are disabled. Set "
+                "MODELBOX_ALLOW_PROVIDER_CALLS=1 to permit them. This gateway "
+                "is the only path to a provider, so nothing reaches the network "
+                "while it is off."
+            )
+
         chain = self.resolve_route(task, llm_override)
         temp = temperature if temperature is not None else self._resolve_task_temperature(task)
 
@@ -183,34 +784,97 @@ class LLMGateway:
         # ---- egress choke point -------------------------------------------
         # Every outbound prompt in the application passes through here; there
         # are exactly three call sites into this method (synthesis_engine,
-        # paradigm_translator, trainer_service). The append-only egress ledger
-        # (B3, Sprint 5) attaches at this line. Prompt masking previously sat
-        # here and did nothing; see Settings.mask_metadata_in_prompts.
+        # paradigm_translator, trainer_service). The append-only ledger (B3,
+        # D3) is written in `_call_provider`, so that each provider in a
+        # failover chain, and each schema re-ask to one provider, is recorded
+        # as the separate request it is. Prompt masking previously sat here
+        # and did nothing; see Settings.mask_metadata_in_prompts.
         messages.append({"role": "user", "content": prompt})
 
-        last_error: Exception | None = None
+        # Computed once and shared by every attempt in the chain: the same
+        # prompt going to a fallback provider is the same text, and an operator
+        # asking "was this sent, and where did it go" needs one digest that
+        # matches across all the rows for it.
+        digest = prompt_digest(prompt)
+
+        permitted = self._permitted_egress_classes(task)
+        last_error: str | None = None
+        seen: list[type[LLMRouterError]] = []
         for provider_name in chain:
+
+            def new_attempt(provider_name: str = provider_name) -> EgressAttempt:
+                return EgressAttempt(
+                    attempt_id=uuid.uuid4(),
+                    task=task,
+                    provider=provider_name,
+                    egress_class=self._egress_class(provider_name),
+                    prompt_sha256=digest,
+                    prompt_chars=len(prompt),
+                    model_id=model_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+
+            model = "unknown"
             try:
                 call_kwargs = self._litellm_kwargs(provider_name)
+                model = str(call_kwargs.get("model", "unknown"))
                 logger.info("Routing task '%s' -> provider '%s'", task, provider_name)
-                result: TModel = await self.client.chat.completions.create(
+                return await self._call_with_schema_retries(
+                    new_attempt=new_attempt,
+                    permitted_egress=permitted,
                     response_model=response_model,
                     messages=messages,
                     temperature=temp,
                     max_retries=max_retries,
-                    **call_kwargs,
+                    call_kwargs=call_kwargs,
                 )
-                return result
-            except Exception as exc:  # noqa: BLE001 - failover on any provider error
-                last_error = exc
+            except (EgressLedgerError, EgressResidencyError, EgressPolicyError):
+                # Never failed over, for the same reason in three guises. A
+                # ledger that cannot record is not a provider that is down, and
+                # a residency refusal is not a provider that is down either —
+                # trying the next one would make exactly the request the refusal
+                # exists to prevent. Governance refusals propagate; only
+                # provider faults fail over.
+                raise
+            # Broad by necessity: provider SDKs raise their own hierarchies.
+            # `classify_provider_failure` is what narrows it, immediately.
+            except Exception as exc:
+                classification = classify_provider_failure(exc)
+                seen.append(classification)
+                # Described, never quoted: the message can carry the model's
+                # output, and this text reaches the log and, through the error
+                # raised below, a job's stored error.
+                last_error = describe_provider_failure(
+                    exc, classification=classification, provider=provider_name, model=model
+                )
                 logger.warning(
                     "Provider '%s' failed for task '%s': %s",
                     provider_name,
                     task,
-                    exc,
+                    last_error,
                 )
+                # Looked up rather than defaulted: a classification added
+                # without deciding its failover behaviour raises here instead of
+                # inheriting "retry", which is the permissive direction.
+                if not _MAY_FAIL_OVER[classification]:
+                    raise classification(
+                        f"Provider '{provider_name}' failed for task '{task}' in "
+                        f"a way this gateway does not recognise, so the chain was "
+                        f"abandoned rather than continued: {last_error}. Classify "
+                        f"it in _FAILURE_SIGNATURES if failing over is correct."
+                    ) from exc
                 continue
 
+        # Report the failure that most needs acting on, not the last one that
+        # happened to occur. A chain ending on a 429 whose first provider had an
+        # invalid key must not be reported as a rate-limit problem.
+        for klass in _REPORTING_PRECEDENCE:
+            if klass in seen:
+                raise klass(
+                    f"All providers exhausted for task '{task}'. Failures: "
+                    f"{[k.__name__ for k in seen]}. Last error: {last_error}"
+                )
         raise LLMRouterError(
             f"All providers exhausted for task '{task}'. Last error: {last_error}"
         )

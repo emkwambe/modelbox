@@ -21,6 +21,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -30,6 +31,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -37,10 +39,14 @@ from sqlalchemy.orm import (
     relationship,
 )
 
+# JSONB on PostgreSQL, as migration 0006 created the trainer columns; plain
+# JSON elsewhere (the SQLite test schema).
+_JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
+
 # Valid enumerations enforced at the database layer (CHECK constraints).
 PARADIGMS = ("3NF", "KIMBALL", "DATA_VAULT", "OBT")
 CARDINALITIES = ("1:1", "1:N", "N:1", "N:M")
-WORKSPACE_ROLES = ("OWNER", "ADMIN", "MEMBER")
+WORKSPACE_ROLES = ("OWNER", "ADMIN", "APPROVER", "MEMBER", "VIEWER")
 JOB_STATUSES = ("PENDING", "PROCESSING", "COMPLETED", "FAILED")
 CONNECTION_ENGINES = ("POSTGRESQL", "SNOWFLAKE", "BIGQUERY", "MYSQL", "DUCKDB")
 
@@ -64,16 +70,28 @@ class User(Base):
     """An authenticated user (identity from local creds or an OIDC provider)."""
 
     __tablename__ = "users"
+    # As migration 0002 created them: a named unique constraint and a separate
+    # plain index. `unique=True, index=True` on the column would instead
+    # declare a single unique index, which no migrated database has.
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_users_email"),
+        Index("ix_users_email", "email"),
+    )
 
     user_id: Mapped[uuid.UUID] = _uuid_pk()
-    email: Mapped[str] = mapped_column(
-        String(255), nullable=False, unique=True, index=True
-    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
     # Nullable: OIDC-provisioned users have no local password.
     hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(
         default=True, server_default=text("true")
+    )
+    # The appliance's owner: set only by `python -m app.cli create-owner`. It
+    # grants reading appliance-scope audit events (logins, SCIM). Holding the
+    # OWNER role in a workspace does not imply it, since every personal
+    # workspace makes its creator OWNER (owner decision, Sprint 7 Step 3).
+    is_appliance_owner: Mapped[bool] = mapped_column(
+        default=False, server_default=text("false")
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
@@ -81,7 +99,7 @@ class User(Base):
         nullable=False,
     )
 
-    memberships: Mapped[list["WorkspaceMember"]] = relationship(
+    memberships: Mapped[list[WorkspaceMember]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -101,12 +119,12 @@ class Workspace(Base):
         nullable=False,
     )
 
-    data_models: Mapped[list["DataModel"]] = relationship(
+    data_models: Mapped[list[DataModel]] = relationship(
         back_populates="workspace",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    members: Mapped[list["WorkspaceMember"]] = relationship(
+    members: Mapped[list[WorkspaceMember]] = relationship(
         back_populates="workspace",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -122,7 +140,7 @@ class WorkspaceMember(Base):
             "workspace_id", "user_id", name="uq_workspace_member"
         ),
         CheckConstraint(
-            "role IN ('OWNER', 'ADMIN', 'MEMBER')",
+            "role IN ('OWNER', 'ADMIN', 'APPROVER', 'MEMBER', 'VIEWER')",
             name="ck_workspace_members_role",
         ),
     )
@@ -144,8 +162,48 @@ class WorkspaceMember(Base):
         String(16), nullable=False, server_default=text("'MEMBER'")
     )
 
-    workspace: Mapped["Workspace"] = relationship(back_populates="members")
-    user: Mapped["User"] = relationship(back_populates="memberships")
+    workspace: Mapped[Workspace] = relationship(back_populates="members")
+    user: Mapped[User] = relationship(back_populates="memberships")
+
+
+class FederatedIdentity(Base):
+    """A link between an external IdP subject and a local user (G8).
+
+    **Keyed on (issuer, subject), never on email.** An email address is mutable
+    and, worse, reassignable: organisations recycle addresses when people leave,
+    so matching on it would eventually hand a new joiner the previous holder's
+    account and every workspace they belonged to. The OIDC `sub` claim is the
+    only identifier a provider promises is stable and unique within its issuer,
+    and pairing it with `iss` keeps two providers' subject spaces from colliding.
+
+    **A separate table rather than columns on `users`.** One person can federate
+    from more than one issuer — a migration between IdPs is exactly when both
+    are live — and a single pair of columns forces a destructive choice at the
+    moment continuity matters most.
+
+    The email is still stored on the user for display and for the audit trail,
+    and is refreshed from the token; it is simply not the key.
+    """
+
+    __tablename__ = "federated_identities"
+    __table_args__ = (
+        UniqueConstraint("issuer", "subject", name="uq_federated_identity"),
+        Index("ix_federated_identities_user", "user_id"),
+    )
+
+    identity_id: Mapped[uuid.UUID] = _uuid_pk()
+    issuer: Mapped[str] = mapped_column(String(512), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
 
 
 class DataModel(Base):
@@ -193,13 +251,13 @@ class DataModel(Base):
         nullable=False,
     )
 
-    workspace: Mapped["Workspace"] = relationship(back_populates="data_models")
-    entities: Mapped[list["ModelEntity"]] = relationship(
+    workspace: Mapped[Workspace] = relationship(back_populates="data_models")
+    entities: Mapped[list[ModelEntity]] = relationship(
         back_populates="data_model",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    relationships: Mapped[list["EntityRelationship"]] = relationship(
+    relationships: Mapped[list[EntityRelationship]] = relationship(
         back_populates="data_model",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -247,8 +305,8 @@ class ModelEntity(Base):
         Integer, nullable=False, default=1, server_default=text("1")
     )
 
-    data_model: Mapped["DataModel"] = relationship(back_populates="entities")
-    columns: Mapped[list["EntityColumn"]] = relationship(
+    data_model: Mapped[DataModel] = relationship(back_populates="entities")
+    columns: Mapped[list[EntityColumn]] = relationship(
         back_populates="entity",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -313,7 +371,7 @@ class EntityColumn(Base):
     # SQL word; the IR field keeps its name.
     reference_target: Mapped[str | None] = mapped_column(String(257), nullable=True)
 
-    entity: Mapped["ModelEntity"] = relationship(back_populates="columns")
+    entity: Mapped[ModelEntity] = relationship(back_populates="columns")
 
 
 class EntityRelationship(Base):
@@ -358,7 +416,7 @@ class EntityRelationship(Base):
     )
     cardinality: Mapped[str] = mapped_column(String(16), nullable=False)
 
-    data_model: Mapped["DataModel"] = relationship(back_populates="relationships")
+    data_model: Mapped[DataModel] = relationship(back_populates="relationships")
 
 
 class SynthesisJob(Base):
@@ -452,14 +510,19 @@ class DatabaseConnection(Base):
 class ApiKey(Base):
     """A programmatic API key (workspace-scoped, SHA-256 hashed at rest).
 
-    Authenticates as its creating user, so it inherits that user's workspace
-    memberships and RBAC. Only the prefix and hash are stored — the plaintext
-    secret is shown once at creation and is unrecoverable thereafter.
+    Authenticates as its creating user, but only in its own workspace and only
+    up to the lower of ``role_cap`` and the creator's current role there, which
+    is re-read on every request. Only the prefix and hash are stored — the
+    plaintext secret is shown once at creation and is unrecoverable thereafter.
     """
 
     __tablename__ = "api_keys"
     __table_args__ = (
         UniqueConstraint("key_hash", name="uq_api_keys_key_hash"),
+        CheckConstraint(
+            "role_cap IN (" + ", ".join(f"'{r}'" for r in WORKSPACE_ROLES) + ")",
+            name="ck_api_keys_role_cap",
+        ),
     )
 
     api_key_id: Mapped[uuid.UUID] = _uuid_pk()
@@ -477,6 +540,9 @@ class ApiKey(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     key_prefix: Mapped[str] = mapped_column(String(20), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    role_cap: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="VIEWER", default="VIEWER"
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.current_timestamp(),
@@ -505,9 +571,9 @@ class TrainerAssignment(Base):
     title: Mapped[str] = mapped_column(String(150), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     # Optional defective seed graph for "Spot the Flaw" mode.
-    flawed_graph_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    flawed_graph_json: Mapped[dict | None] = mapped_column(_JSON_DOCUMENT, nullable=True)
     expected_graph_invariants: Mapped[dict] = mapped_column(
-        JSON, nullable=False
+        _JSON_DOCUMENT, nullable=False
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
@@ -533,9 +599,9 @@ class TrainerSubmission(Base):
         ForeignKey("users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
-    submitted_graph_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    submitted_graph_json: Mapped[dict] = mapped_column(_JSON_DOCUMENT, nullable=False)
     score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
-    feedback_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    feedback_json: Mapped[dict | None] = mapped_column(_JSON_DOCUMENT, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.current_timestamp(),
@@ -543,23 +609,224 @@ class TrainerSubmission(Base):
     )
 
 
+EGRESS_ATTEMPT = "ATTEMPT"
+EGRESS_SUCCESS = "SUCCESS"
+EGRESS_FAILURE = "FAILURE"
+
+# The one place this vocabulary is written down. It previously existed three
+# times — here, as string literals in the sink, and again in the migration's
+# CHECK constraint — with nothing enforcing agreement between them. That is the
+# shape that drifts: the same class as the three private `_is_temporal_type`
+# predicates whose disagreement was the Cube bug.
+#
+# The constraint below is generated from this tuple, the sink imports these
+# names, and `test_the_migration_check_matches_the_declared_vocabulary` holds
+# the migration's frozen literal against it.
+EGRESS_EVENTS = (EGRESS_ATTEMPT, EGRESS_SUCCESS, EGRESS_FAILURE)
+
+
+def _egress_event_check() -> str:
+    """Render the CHECK expression from the declared vocabulary."""
+    values = ", ".join(f"'{event}'" for event in EGRESS_EVENTS)
+    return f"event IN ({values})"
+
+
+class EgressAudit(Base):
+    """Append-only record of every outbound provider request (D3, D4).
+
+    **Append-only, and one row per event rather than one per request.** The
+    attempt is written *before* the call and never updated; the outcome is a
+    second row correlated by ``attempt_id``. An UPDATE would have been simpler
+    and wrong — it lets a later write revise the record of what already left,
+    which is the one thing an audit trail must not permit.
+
+    **Written before the call, deliberately.** A request that leaves the
+    network and then fails is still a request that left, so a ledger recording
+    only successes is not an audit trail — it is a success log. If the process
+    dies mid-flight the ATTEMPT row survives alone, which states precisely what
+    is known: we tried, and we cannot say what happened.
+
+    **Committed in its own transaction**, independent of the caller's. Egress
+    is not undone by a rollback, so the record of it must not be either. A
+    ledger enlisted in the caller's transaction would quietly erase exactly the
+    requests made during work that later failed.
+
+    ``prompt_sha256`` rather than the prompt. The ledger answers what left,
+    when, to whom, and lets an operator prove a specific text was or was not
+    sent — without becoming a second copy of the data the governance story
+    exists to protect.
+    """
+
+    __tablename__ = "egress_audit"
+    __table_args__ = (
+        CheckConstraint(_egress_event_check(), name="ck_egress_audit_event"),
+        Index("ix_egress_audit_attempt", "attempt_id"),
+        Index("ix_egress_audit_occurred", "occurred_at"),
+    )
+
+    egress_id: Mapped[uuid.UUID] = _uuid_pk()
+    # Correlates the ATTEMPT with its SUCCESS or FAILURE. Not a foreign key:
+    # the rows are peers, and a constraint would make the outcome row's write
+    # depend on the attempt row still existing.
+    attempt_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    event: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    task: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    egress_class: Mapped[str] = mapped_column(String(32), nullable=False)
+    prompt_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt_chars: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Nullable throughout: the gateway is a process-wide singleton and does not
+    # always know who is asking. Recording "unknown" honestly beats inventing
+    # an attribution the ledger cannot support.
+    model_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+
+    # Known only on the outcome row.
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    # Indexed by the named Index in __table_args__; `index=True` here would
+    # declare a second index that no migration creates.
+    occurred_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+#: Audit actions. Vocabulary rather than free text, so an export can be
+#: filtered and a reviewer can be told what the complete set is.
+#:
+#: Every member is emitted by a code path, and `test_audit_actions.py` drives
+#: each one. An action with no path is removed, not left declared: a declared
+#: action nothing emits tells a reviewer to look for events that cannot exist
+#: (Sprint 7 Step 3 removed AUTH_LOGOUT, MEMBER_ROLE_CHANGED and MEMBER_REMOVED).
+AUDIT_ACTIONS: tuple[str, ...] = (
+    "AUTH_LOGIN",
+    "AUTH_LOGIN_FAILED",
+    "API_KEY_CREATED",
+    "API_KEY_REVOKED",
+    "MEMBER_ADDED",
+    "MODEL_CREATED",
+    "MODEL_UPDATED",
+    "MODEL_DELETED",
+    "MODEL_APPROVED",
+    "USER_PROVISIONED",
+    "USER_DEPROVISIONED",
+    "ARTIFACT_GENERATED",
+    "APPLIANCE_OWNER_DESIGNATED",
+)
+
+#: Outcomes. `DENIED` is separate from `FAILURE` on purpose: a refused
+#: authorisation and a crashed handler are different events to a reviewer, and
+#: collapsing them hides the one they came to look for.
+AUDIT_OUTCOMES: tuple[str, ...] = ("SUCCESS", "DENIED", "FAILURE")
+
+#: Where an event belongs. A workspace event names its workspace; an appliance
+#: event (a login, a SCIM change) has none, and says so rather than leaving a
+#: NULL to be read as "unknown".
+AUDIT_SCOPES: tuple[str, ...] = ("workspace", "appliance")
+
+
+class AuditEvent(Base):
+    """Append-only record of who did what inside the appliance (G11).
+
+    **Distinct from `EgressAudit`, and the distinction is the point.** That
+    ledger answers *what left the network*. This answers *who did what here*.
+    A supervisor asks both, and a single table answering neither cleanly is
+    worse than two answering one each.
+
+    **The actor's email is denormalised on purpose.** ``actor_user_id`` is not a
+    foreign key and the email is copied at write time, because the audit trail
+    has to survive the user being deleted — which is precisely the moment
+    somebody wants to read it. A join that returns NULL for a departed employee
+    is an audit log that forgets the people most worth remembering.
+
+    **Append-only in the same sense as the egress ledger**: rows are inserted
+    and never updated. There is no ``updated_at`` because there is no update.
+    """
+
+    __tablename__ = "audit_event"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN (" + ", ".join(f"'{a}'" for a in AUDIT_ACTIONS) + ")",
+            name="ck_audit_event_action",
+        ),
+        CheckConstraint(
+            "outcome IN (" + ", ".join(f"'{o}'" for o in AUDIT_OUTCOMES) + ")",
+            name="ck_audit_event_outcome",
+        ),
+        CheckConstraint(
+            "(scope = 'workspace' AND workspace_id IS NOT NULL) OR "
+            "(scope = 'appliance' AND workspace_id IS NULL)",
+            name="ck_audit_event_scope",
+        ),
+        Index("ix_audit_event_workspace", "workspace_id"),
+        Index("ix_audit_event_actor", "actor_user_id"),
+        Index("ix_audit_event_occurred", "occurred_at"),
+    )
+
+    audit_id: Mapped[uuid.UUID] = _uuid_pk()
+
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Derived by `audit_log.record` from `workspace_id`; the CHECK above keeps
+    # the two consistent for any writer.
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    # Nullable: an unauthenticated failed login has no user, and recording
+    # "unknown" honestly beats attributing it to somebody.
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    actor_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+
+    resource_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # Structured, and never the resource's contents. The audit log records that
+    # a model was exported, not the model — the same rule that keeps the egress
+    # ledger a digest rather than a second copy of the prompt.
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # Indexed by the named Index in __table_args__; `index=True` here would
+    # declare a second index that no migration creates.
+    occurred_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
 __all__ = [
+    "AUDIT_ACTIONS",
+    "AUDIT_OUTCOMES",
+    "CARDINALITIES",
+    "CONNECTION_ENGINES",
+    "EGRESS_ATTEMPT",
+    "EGRESS_EVENTS",
+    "EGRESS_FAILURE",
+    "EGRESS_SUCCESS",
+    "JOB_STATUSES",
+    "PARADIGMS",
+    "WORKSPACE_ROLES",
+    "ApiKey",
+    "AuditEvent",
     "Base",
+    "DataModel",
+    "DatabaseConnection",
+    "EgressAudit",
+    "EntityColumn",
+    "EntityRelationship",
+    "FederatedIdentity",
+    "ModelEntity",
+    "SynthesisJob",
+    "TrainerAssignment",
+    "TrainerSubmission",
     "User",
     "Workspace",
     "WorkspaceMember",
-    "DataModel",
-    "ModelEntity",
-    "EntityColumn",
-    "EntityRelationship",
-    "SynthesisJob",
-    "DatabaseConnection",
-    "ApiKey",
-    "TrainerAssignment",
-    "TrainerSubmission",
-    "PARADIGMS",
-    "CARDINALITIES",
-    "WORKSPACE_ROLES",
-    "JOB_STATUSES",
-    "CONNECTION_ENGINES",
 ]

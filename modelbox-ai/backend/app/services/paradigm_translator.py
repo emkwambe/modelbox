@@ -21,12 +21,32 @@ from app.schemas.data_model import (
     SynthesizedModel,
     TransformParadigmRequest,
     TransformParadigmResponse,
+    ValidationIssue,
 )
+from app.services.approval import is_current_version_approved
+from app.services.graph_engine import GraphEngine
 from app.services.graph_repository import GraphRepository
 from app.services.llm_gateway import LLMGateway
 from app.services.synthesis_engine import SynthesisEngine
 
 logger = logging.getLogger(__name__)
+
+
+class TransformRefused(Exception):
+    """Base for a transform the translator declined before overwriting anything."""
+
+
+class ModelApprovedError(TransformRefused):
+    """The model's current version carries a recorded sign-off."""
+
+
+class TransformLintError(TransformRefused):
+    """The transformed graph has linter errors, so it did not replace the model's."""
+
+    def __init__(self, errors: list[ValidationIssue]) -> None:
+        self.errors = errors
+        codes = ", ".join(sorted({issue.code for issue in errors}))
+        super().__init__(f"The transformed graph has linter errors ({codes}); nothing was saved.")
 
 # Per-paradigm synthesis strategy injected into the transform prompt (Blueprint §4.1).
 _PARADIGM_STRATEGY: dict[str, str] = {
@@ -59,14 +79,36 @@ class ParadigmTranslator:
         self._synthesis = SynthesisEngine(session, gateway)
 
     async def transform(
-        self, model_id: uuid.UUID, request: TransformParadigmRequest
+        self,
+        model_id: uuid.UUID,
+        request: TransformParadigmRequest,
+        *,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
     ) -> TransformParadigmResponse | None:
-        """Transform ``model_id`` into ``request.target_paradigm``."""
+        """Transform ``model_id`` into ``request.target_paradigm``.
+
+        The actor is threaded to the egress ledger (D4). Unlike synthesis this
+        call has a model to name, and naming it is the difference between an
+        operator seeing that a prompt went to a provider and seeing which of
+        their models it described.
+
+        Two refusals, both before the graph is touched. An approved version is
+        refused before the provider is called, since nothing could be saved
+        and the prompt would leave for no purpose. A result with linter errors
+        is refused after the call and before the overwrite, so the model keeps
+        the graph it had.
+        """
         started = time.perf_counter()
 
         model = await self._session.get(DataModel, model_id)
         if model is None:
             return None
+        if await is_current_version_approved(self._session, model):
+            raise ModelApprovedError(
+                f"Model {model_id} version {model.version_number} is approved; "
+                "transforming it would replace the graph that was signed off."
+            )
         previous_paradigm = model.current_paradigm
 
         current = await self._synthesis.get_model(model_id)
@@ -83,7 +125,15 @@ class ParadigmTranslator:
                 "transformation. Preserve all column descriptions and semantic "
                 "tags across the switch."
             ),
+            model_id=model_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
         )
+
+        report = GraphEngine().validate(transformed.entities, transformed.relationships)
+        errors = [issue for issue in report.issues if issue.severity == "error"]
+        if errors:
+            raise TransformLintError(errors)
 
         # Replace the model's graph with the transformed one and bump version.
         await GraphRepository(self._session).replace_graph(

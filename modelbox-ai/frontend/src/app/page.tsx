@@ -9,12 +9,14 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
+import { AUTH_BADGE_RESERVE } from '@/components/auth/AuthBadge';
 import TemplateLibraryModal from '@/components/TemplateLibraryModal';
 import { enqueueSynthesis, getJob, getModel } from '@/lib/api';
 import type { Template } from '@/lib/templates';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStatus, useAuthStore } from '@/store/authStore';
 import { useCanvasStore } from '@/store/canvasStore';
 import type { Paradigm, SynthesizeResponse } from '@/types/schema';
+import { color, semantic } from '@/styles/tokens';
 
 const PARADIGMS: Paradigm[] = ['3NF', 'KIMBALL', 'DATA_VAULT', 'OBT'];
 
@@ -22,7 +24,7 @@ const CAPABILITIES: { icon: string; title: string; desc: string }[] = [
   {
     icon: '🧠',
     title: 'AI Synthesis',
-    desc: 'Natural language, PRDs, or DDL → validated models across 3NF, Kimball, Data Vault & OBT.',
+    desc: 'Natural language, PRDs, or DDL → a first-draft model for a modeller to review and edit, in 3NF, Kimball, Data Vault or OBT.',
   },
   {
     icon: '🔀',
@@ -70,6 +72,8 @@ export default function HomePage() {
   const router = useRouter();
   const loadModel = useCanvasStore((s) => s.loadModel);
   const loadGraph = useCanvasStore((s) => s.loadGraph);
+  const sourcePrompt = useCanvasStore((s) => s.sourcePrompt);
+  const sourceParadigm = useCanvasStore((s) => s.paradigm);
   const token = useAuthStore((s) => s.token);
   const openModal = useAuthStore((s) => s.openModal);
   const activeWorkspaceId = useAuthStore((s) => s.activeWorkspaceId);
@@ -79,7 +83,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const authStatus = useAuthStatus();
   const [showLibrary, setShowLibrary] = useState(false);
 
   function handleUsePrompt(t: Template) {
@@ -89,18 +93,29 @@ export default function HomePage() {
   }
 
   function handleLoadGraph(t: Template) {
-    loadGraph(t.entities, t.relationships, t.paradigm);
+    // Carry the prompt with the graph: the canvas offers "Synthesize this
+    // model", and that is the prompt it sends the reader back here with.
+    loadGraph(t.entities, t.relationships, t.paradigm, t.rawPrompt);
     setShowLibrary(false);
     router.push('/canvas');
   }
 
   // Auth state is only known client-side (persisted). Gate auth-dependent UI
   // behind mount to avoid an SSR/CSR hydration mismatch.
-  useEffect(() => setMounted(true), []);
-  const signedIn = mounted && Boolean(token);
+
+  // Coming back from the canvas's "Synthesize this model": start from the
+  // template's own prompt. Never overwrite something already typed.
+  useEffect(() => {
+    if (!sourcePrompt) return;
+    setContent((current) => (current.trim() ? current : sourcePrompt));
+    if (sourceParadigm) setParadigm(sourceParadigm);
+  }, [sourcePrompt, sourceParadigm]);
+
+  const signedIn = authStatus === 'signed-in';
 
   /** Poll a job to completion and return the finished model. */
   async function pollJob(jobId: string): Promise<SynthesizeResponse> {
+    let lastStatus = 'PENDING';
     for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
       const job = await getJob(jobId);
       if (job.status === 'COMPLETED' && job.result_model_id) {
@@ -109,10 +124,23 @@ export default function HomePage() {
       if (job.status === 'FAILED') {
         throw new Error(job.error ?? 'Synthesis failed.');
       }
+      lastStatus = job.status;
       setProgress(job.status === 'PROCESSING' ? 'Synthesizing…' : 'Queued…');
       await sleep(POLL_INTERVAL_MS);
     }
-    throw new Error('Timed out waiting for synthesis.');
+    // A job still QUEUED at the deadline never started, which is a different
+    // fault from one that started and ran long — and the status says which.
+    // Reporting both as a timeout described the client's own budget rather
+    // than what happened to the work, and sent people looking for a slow model
+    // when nothing was consuming the queue at all.
+    const minutes = Math.round((POLL_MAX_ATTEMPTS * POLL_INTERVAL_MS) / 60000);
+    throw new Error(
+      lastStatus === 'PENDING'
+        ? `Synthesis never started — the job was still queued after ${minutes} minutes. ` +
+          'Nothing is consuming the queue: check that the modelbox-worker container is running.'
+        : `Synthesis is still running after ${minutes} minutes. The job has not failed; ` +
+          'it may finish on its own, or the provider may be unresponsive — check the worker logs.',
+    );
   }
 
   async function handleSynthesize() {
@@ -151,11 +179,13 @@ export default function HomePage() {
           justifyContent: 'space-between',
           gap: 16,
           flexWrap: 'wrap',
-          paddingRight: 220, // clear the fixed AuthBadge overlay
+          // Reserve space on the right for the fixed AuthBadge overlay. The
+          // badge declares how much it needs; do not restate the number here.
+          paddingRight: AUTH_BADGE_RESERVE,
         }}
       >
         <span style={{ fontWeight: 800, fontSize: 18, letterSpacing: -0.3 }}>
-          ◆ ModelBox<span style={{ color: '#2563eb' }}>AI</span>
+          ◆ ModelBox<span style={{ color: color.blue }}>AI</span>
         </span>
         <div style={{ display: 'flex', gap: 18, fontSize: 14, flexWrap: 'wrap' }}>
           <Link href="/canvas" style={navLink}>
@@ -169,6 +199,11 @@ export default function HomePage() {
           </Link>
           <Link href="/settings/api-keys" style={navLink}>
             API keys
+          </Link>
+          {/* D4 asks that an operator answer "what left our network" without
+              engineering help. A page nobody can navigate to is help. */}
+          <Link href="/settings/egress" style={navLink}>
+            Egress
           </Link>
           <Link href="/docs" style={navLink}>
             Docs
@@ -185,14 +220,14 @@ export default function HomePage() {
           marginTop: 40,
         }}
       >
-        The end-to-end data modeling
+        A data modelling appliance
         <br />
-        &amp; governance mesh
+        for teams that review what they ship
       </h1>
-      <p style={{ color: '#475569', marginTop: 12, fontSize: 16, maxWidth: 640 }}>
-        Synthesize validated models from plain language, diff &amp; migrate
-        schemas, and ship dbt, data contracts, and semantic layers — with
-        governance built in.
+      <p style={{ color: color.neutral[600], marginTop: 12, fontSize: 16, maxWidth: 640 }}>
+        Generate a first-draft model from plain language for a modeller to
+        review and edit, diff &amp; migrate schemas, and export dbt, data
+        contracts, and semantic layers.
       </p>
 
       <button
@@ -231,7 +266,7 @@ export default function HomePage() {
           marginTop: 24,
           padding: 12,
           borderRadius: 8,
-          border: '1px solid #cbd5e1',
+          border: `1px solid ${color.neutral[300]}`,
           fontFamily: 'inherit',
           fontSize: 14,
         }}
@@ -243,7 +278,7 @@ export default function HomePage() {
           <select
             value={paradigm}
             onChange={(e) => setParadigm(e.target.value as Paradigm)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #cbd5e1' }}
+            style={{ padding: 8, borderRadius: 6, border: `1px solid ${color.neutral[300]}` }}
           >
             {PARADIGMS.map((p) => (
               <option key={p} value={p}>
@@ -258,7 +293,7 @@ export default function HomePage() {
           <input
             value={dialect}
             onChange={(e) => setDialect(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #cbd5e1' }}
+            style={{ padding: 8, borderRadius: 6, border: `1px solid ${color.neutral[300]}` }}
           />
         </label>
       </div>
@@ -272,8 +307,8 @@ export default function HomePage() {
             padding: '10px 20px',
             borderRadius: 8,
             border: 'none',
-            background: loading ? '#94a3b8' : '#2563eb',
-            color: '#ffffff',
+            background: loading ? color.neutral[400] : color.blue,
+            color: color.white,
             fontWeight: 600,
             cursor: loading ? 'default' : 'pointer',
           }}
@@ -284,16 +319,16 @@ export default function HomePage() {
               ? 'Synthesize model'
               : 'Sign in to synthesize'}
         </button>
-        {mounted && !signedIn && (
+        {authStatus === 'signed-out' && (
           <button
             type="button"
             onClick={openModal}
             style={{
               padding: '10px 16px',
               borderRadius: 8,
-              border: '1px solid #2563eb',
-              background: '#ffffff',
-              color: '#2563eb',
+              border: `1px solid ${color.blue}`,
+              background: color.white,
+              color: color.blue,
               fontWeight: 600,
               cursor: 'pointer',
             }}
@@ -303,21 +338,21 @@ export default function HomePage() {
         )}
       </div>
 
-      {mounted && signedIn && (
-        <p style={{ color: '#16a34a', marginTop: 8, fontSize: 13 }}>
+      {signedIn && (
+        <p style={{ color: semantic.validated.onLight, marginTop: 8, fontSize: 13 }}>
           ✓ Signed in — ready to synthesize.
         </p>
       )}
 
       {loading && (
-        <p style={{ color: '#64748b', marginTop: 8, fontSize: 13 }}>
+        <p style={{ color: color.neutral[500], marginTop: 8, fontSize: 13 }}>
           {progress ?? 'Working…'} — runs as a background job, so it won&apos;t
           time out (up to a couple of minutes).
         </p>
       )}
 
       {error && (
-        <p style={{ color: '#dc2626', marginTop: 12 }} role="alert">
+        <p style={{ color: semantic.breaking.onLight, marginTop: 12 }} role="alert">
           {error}
         </p>
       )}
@@ -329,7 +364,7 @@ export default function HomePage() {
             fontWeight: 700,
             letterSpacing: 0.8,
             textTransform: 'uppercase',
-            color: '#64748b',
+            color: color.neutral[500],
           }}
         >
           One platform · the full modeling lifecycle
@@ -346,17 +381,17 @@ export default function HomePage() {
             <div
               key={cap.title}
               style={{
-                border: '1px solid #e2e8f0',
+                border: `1px solid ${color.neutral[200]}`,
                 borderRadius: 10,
                 padding: 16,
-                background: '#ffffff',
+                background: color.white,
               }}
             >
               <div style={{ fontSize: 22 }}>{cap.icon}</div>
               <div style={{ fontWeight: 700, fontSize: 14, marginTop: 8 }}>
                 {cap.title}
               </div>
-              <div style={{ fontSize: 13, color: '#64748b', marginTop: 4, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 13, color: color.neutral[500], marginTop: 4, lineHeight: 1.5 }}>
                 {cap.desc}
               </div>
             </div>
@@ -368,7 +403,7 @@ export default function HomePage() {
 }
 
 const navLink: React.CSSProperties = {
-  color: '#334155',
+  color: color.neutral[700],
   fontWeight: 600,
   textDecoration: 'none',
 };

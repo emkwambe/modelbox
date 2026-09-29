@@ -1,7 +1,7 @@
 name: Release Images
 
-# Publish versioned backend + frontend images to GHCR on semver tags (v*).
-# Tags should be cut from a green `main` (the CI workflow gates every push).
+# Publish versioned backend + frontend images to GHCR on semver tags (v*),
+# only after the gate below: the tagged commit is on main and CI passed on it.
 on:
   push:
     tags:
@@ -12,9 +12,28 @@ permissions:
   packages: write
 
 jobs:
+  gate:
+    name: Release gate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Full history and origin/main: reachability is decided by git.
+          fetch-depth: 0
+
+      - name: Refuse unless the commit is on main and CI passed on it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 modelbox-ai/scripts/check_release_gate.py --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"
+
   publish:
     name: Build & push ${{ matrix.service }} image
-    runs-on: ubuntu-latest
+    needs: gate
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -28,13 +47,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        # Third-party actions are pinned to a commit, not a movable tag.
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -42,7 +62,7 @@ jobs:
 
       - name: Derive image tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/modelbox-${{ matrix.service }}
           tags: |
@@ -51,7 +71,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}

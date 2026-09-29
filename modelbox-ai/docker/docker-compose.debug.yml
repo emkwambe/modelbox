@@ -1,0 +1,15 @@
+# =============================================================================
+# ModelBox AI — debug override
+#
+# Re-publishes the backend on the loopback interface only, for /docs, /health
+# and direct API calls from this machine. Never for a shared host: the
+# appliance's only published port is the UI's.
+#
+#   docker compose --env-file .env -f docker/docker-compose.appliance.yml \
+#     -f docker/docker-compose.debug.yml up --build
+# =============================================================================
+
+services:
+  modelbox-backend:
+    ports:
+      - "127.0.0.1:8000:8000"

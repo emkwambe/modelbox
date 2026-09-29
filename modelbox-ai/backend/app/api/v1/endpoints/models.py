@@ -5,23 +5,25 @@ from __future__ import annotations
 import io
 import uuid
 import zipfile
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 
 from app.api.v1.dependencies import (
-    AuthorizedModelDep,
+    AuthenticatedDep,
     CurrentUserDep,
     ExporterServiceDep,
+    ModelMemberDep,
+    ModelViewerDep,
     SessionDep,
     SynthesisEngineDep,
-    require_membership,
+    require_body_models_role,
+    require_body_workspace_role,
+    require_listed_workspaces,
     require_model_role,
-    resolve_user_workspace,
 )
-from app.models.metadata_store import DataModel, WorkspaceMember
+from app.models.metadata_store import DataModel, User
 from app.schemas.data_model import (
     ContractExportResponse,
     ContractFormat,
@@ -36,19 +38,33 @@ from app.schemas.data_model import (
     ModelUpdateRequest,
     SemanticEngine,
     SemanticExportResponse,
-    SyntheticSeedRequest,
-    SyntheticSeedResponse,
     SynthesizedModel,
     SynthesizeRequest,
     SynthesizeResponse,
+    SyntheticSeedRequest,
+    SyntheticSeedResponse,
     ValidationReport,
 )
+from app.services import audit_log
 from app.services.diff_engine import DiffEngine
 from app.services.exporter_service import ExporterError
 from app.services.graph_engine import GraphEngine
 from app.services.graph_repository import GraphRepository
 
 router = APIRouter(prefix="/model", tags=["models"])
+
+
+async def _audit(action: str, user: User, model: DataModel, **detail: object) -> None:
+    """Record a model-level event in the model's workspace."""
+    await audit_log.record(
+        action=action,
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=model.workspace_id,
+        resource_type="model",
+        resource_id=str(model.model_id),
+        detail={"title": model.title, **detail},
+    )
 
 
 def _to_synthesized(model: SynthesizeResponse) -> SynthesizedModel:
@@ -71,17 +87,15 @@ async def synthesize_model(
     payload: SynthesizeRequest,
     engine: SynthesisEngineDep,
     user: CurrentUserDep,
-    session: SessionDep,
+    workspace_id: Annotated[uuid.UUID, Depends(require_body_workspace_role("MEMBER"))],
 ) -> SynthesizeResponse:
     """Generate, validate, and persist a data model (FR-1, Blueprint §6).
 
-    The target workspace is enforced against the caller's membership; when
-    omitted, a personal workspace is resolved/created for the user.
+    MEMBER+ in the target workspace; when omitted, a personal workspace is
+    resolved/created for the user.
     """
-    payload.workspace_id = await resolve_user_workspace(
-        session, user, payload.workspace_id
-    )
-    return await engine.synthesize(payload)
+    payload.workspace_id = workspace_id
+    return await engine.synthesize(payload, user_id=user.user_id)
 
 
 @router.get(
@@ -91,28 +105,12 @@ async def synthesize_model(
 )
 async def list_models(
     session: SessionDep,
-    user: CurrentUserDep,
-    workspace_id: uuid.UUID | None = Query(default=None),
+    ws_ids: Annotated[list[uuid.UUID], Depends(require_listed_workspaces("VIEWER"))],
 ) -> list[ModelInfo]:
-    """List models the caller can access, newest first (FR-2.2 diff selector)."""
-    member_ws = (
-        await session.execute(
-            select(WorkspaceMember.workspace_id).where(
-                WorkspaceMember.user_id == user.user_id
-            )
-        )
-    ).scalars().all()
+    """List models the caller can access, newest first (FR-2.2 diff selector).
 
-    if workspace_id is not None:
-        if workspace_id not in member_ws:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have access to this workspace.",
-            )
-        ws_ids: list[uuid.UUID] = [workspace_id]
-    else:
-        ws_ids = list(member_ws)
-
+    An optional ``workspace_id`` query parameter narrows to one workspace.
+    """
     if not ws_ids:
         return []
 
@@ -134,30 +132,17 @@ async def list_models(
 async def diff_models(
     payload: DiffRequest,
     engine: SynthesisEngineDep,
-    session: SessionDep,
-    user: CurrentUserDep,
+    _models: Annotated[
+        list[DataModel],
+        Depends(require_body_models_role("VIEWER", ("source_model_id", "target_model_id"))),
+    ],
 ) -> DiffResponse:
     """Compare a source (V1) and target (V2) model into ALTER DDL (FR-2.2).
 
-    Both models are authorized independently against the caller's workspace
-    membership. Emits dialect-specific migration statements and flags
-    destructive/breaking changes.
+    Both models are authorized independently, VIEWER+ in each one's workspace.
+    Emits dialect-specific migration statements and flags destructive/breaking
+    changes.
     """
-    source = await session.get(DataModel, payload.source_model_id)
-    if source is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Model {payload.source_model_id} not found.",
-        )
-    target = await session.get(DataModel, payload.target_model_id)
-    if target is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Model {payload.target_model_id} not found.",
-        )
-    await require_membership(session, user.user_id, source.workspace_id)
-    await require_membership(session, user.user_id, target.workspace_id)
-
     source_model = await engine.get_model(payload.source_model_id)
     target_model = await engine.get_model(payload.target_model_id)
     assert source_model is not None and target_model is not None
@@ -181,7 +166,7 @@ async def diff_models(
     summary="Validate an unsaved graph (Trainer labs / pre-save checks)",
 )
 async def validate_graph(
-    payload: GraphUpdateRequest, user: CurrentUserDep
+    payload: GraphUpdateRequest, user: AuthenticatedDep
 ) -> ValidationReport:
     """Run the linter on a submitted graph without persisting it."""
     return GraphEngine().validate(payload.entities, payload.relationships)
@@ -193,7 +178,7 @@ async def validate_graph(
     summary="Retrieve a persisted data model",
 )
 async def get_model(
-    engine: SynthesisEngineDep, model: AuthorizedModelDep
+    engine: SynthesisEngineDep, model: ModelViewerDep
 ) -> SynthesizeResponse:
     """Return a previously synthesized model by id (workspace-scoped)."""
     result = await engine.get_model(model.model_id)
@@ -212,14 +197,17 @@ async def get_model(
 async def update_model(
     payload: ModelUpdateRequest,
     session: SessionDep,
-    model: Annotated[DataModel, Depends(require_model_role("MEMBER"))],
+    model: ModelMemberDep,
+    user: CurrentUserDep,
 ) -> ModelInfo:
     """Patch model metadata. Requires MEMBER or higher (FR-6, Slice B2)."""
+    changed = [f for f in ("title", "target_dialect") if getattr(payload, f) is not None]
     if payload.title is not None:
         model.title = payload.title
     if payload.target_dialect is not None:
         model.target_dialect = payload.target_dialect
     await session.flush()
+    await _audit("MODEL_UPDATED", user, model, fields=changed)
     return ModelInfo.model_validate(model)
 
 
@@ -230,11 +218,49 @@ async def update_model(
 )
 async def delete_model(
     session: SessionDep,
+    user: CurrentUserDep,
     model: Annotated[DataModel, Depends(require_model_role("ADMIN"))],
 ) -> Response:
     """Delete a model and its graph (cascade). Requires ADMIN or higher."""
+    await _audit("MODEL_DELETED", user, model, version=model.version_number)
     await session.delete(model)
     await session.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{model_id}/approve",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Record sign-off on a model (APPROVER or higher)",
+)
+async def approve_model(
+    user: CurrentUserDep,
+    model: Annotated[DataModel, Depends(require_model_role("APPROVER"))],
+) -> Response:
+    """Record that a named person signed off on this model, and when.
+
+    **This exists so that the APPROVER role is not decorative.** A remediation
+    programme's central question is *who signed off on this model*, and a role
+    that grants nothing cannot be asked it. The approval is written to the audit
+    trail rather than to a column on the model, for the reason the trail exists:
+    a column holds the latest answer and silently loses every previous one,
+    while the question a reviewer asks is usually about a version that is no
+    longer current.
+
+    Deliberately not a workflow. There is no pending state, no request-changes,
+    no second approver — those are product decisions nobody has made, and
+    inventing them here would ship a governance process by accident. What is
+    claimed is exactly what is recorded: this person, this model, this moment.
+    """
+    await audit_log.record(
+        action="MODEL_APPROVED",
+        actor_user_id=user.user_id,
+        actor_email=user.email,
+        workspace_id=model.workspace_id,
+        resource_type="model",
+        resource_id=str(model.model_id),
+        detail={"title": model.title, "version": model.version_number},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -246,7 +272,8 @@ async def delete_model(
 async def replace_model_graph(
     payload: GraphUpdateRequest,
     session: SessionDep,
-    model: Annotated[DataModel, Depends(require_model_role("MEMBER"))],
+    model: ModelMemberDep,
+    user: CurrentUserDep,
 ) -> ValidationReport:
     """Replace a model's graph with the canvas's current state (FR-1.2).
 
@@ -257,6 +284,7 @@ async def replace_model_graph(
     )
     model.version_number += 1
     await session.flush()
+    await _audit("MODEL_UPDATED", user, model, fields=["graph"], version=model.version_number)
     return GraphEngine().validate(payload.entities, payload.relationships)
 
 
@@ -266,7 +294,7 @@ async def replace_model_graph(
     summary="Re-run topological/structural validation on a model",
 )
 async def validate_model(
-    engine: SynthesisEngineDep, model: AuthorizedModelDep
+    engine: SynthesisEngineDep, model: ModelViewerDep
 ) -> ValidationReport:
     """Re-check a persisted model's graph for lint issues (FR-2.3)."""
     report = await engine.validate_model(model.model_id)
@@ -285,7 +313,8 @@ async def validate_model(
 async def export_model(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
-    model: AuthorizedModelDep,
+    model: ModelViewerDep,
+    user: CurrentUserDep,
     export_format: ExportFormat = Query(ExportFormat.DDL, alias="format"),
     dialect: str = "snowflake",
 ) -> ExportResponse:
@@ -298,6 +327,7 @@ async def export_model(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    await _audit("ARTIFACT_GENERATED", user, model, artifact=export_format.value, dialect=dialect)
 
     return ExportResponse(
         model_id=model.model_id,
@@ -316,7 +346,8 @@ async def export_synthetic_data(
     payload: SyntheticSeedRequest,
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
-    model: AuthorizedModelDep,
+    model: ModelViewerDep,
+    user: CurrentUserDep,
 ) -> SyntheticSeedResponse:
     """Emit FK-safe mock rows as SQL INSERTs or a CSV bundle (FR-2.4)."""
     result = await engine.get_model(model.model_id)
@@ -328,9 +359,10 @@ async def export_synthetic_data(
         seed_format=payload.format,
         dialect=payload.dialect,
     )
+    await _audit("ARTIFACT_GENERATED", user, model, artifact="synthetic-data", format=payload.format)
     return SyntheticSeedResponse(
         model_id=model.model_id,
-        format=payload.format,  # type: ignore[arg-type]
+        format=payload.format,
         dialect=payload.dialect,
         row_count_per_entity=payload.row_count_per_entity,
         generation_order=seed.generation_order,
@@ -346,7 +378,8 @@ async def export_synthetic_data(
 async def export_contract(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
-    model: AuthorizedModelDep,
+    model: ModelViewerDep,
+    user: CurrentUserDep,
     contract_format: ContractFormat = Query(ContractFormat.OPENDATACONTRACT, alias="format"),
 ) -> ContractExportResponse:
     """Generate a data contract from a persisted model (FR-2.3, Phase 3)."""
@@ -360,6 +393,7 @@ async def export_contract(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    await _audit("ARTIFACT_GENERATED", user, model, artifact="contract", format=contract_format.value)
     return ContractExportResponse(
         model_id=model.model_id, format=contract_format, files=files
     )
@@ -373,7 +407,8 @@ async def export_contract(
 async def export_semantic(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
-    model: AuthorizedModelDep,
+    model: ModelViewerDep,
+    user: CurrentUserDep,
     semantic_engine: SemanticEngine = Query(SemanticEngine.CUBE, alias="engine"),
 ) -> SemanticExportResponse:
     """Generate a BI semantic-layer definition from a model (FR-2.3, Phase 3)."""
@@ -387,6 +422,7 @@ async def export_semantic(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    await _audit("ARTIFACT_GENERATED", user, model, artifact="semantic", engine=semantic_engine.value)
     return SemanticExportResponse(
         model_id=model.model_id, engine=semantic_engine, files=files
     )
@@ -400,7 +436,8 @@ async def export_semantic(
 async def export_dictionary(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
-    model: AuthorizedModelDep,
+    model: ModelViewerDep,
+    user: CurrentUserDep,
     dictionary_format: DictionaryFormat = Query(
         DictionaryFormat.MARKDOWN, alias="format"
     ),
@@ -416,6 +453,9 @@ async def export_dictionary(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    await _audit(
+        "ARTIFACT_GENERATED", user, model, artifact="dictionary", format=dictionary_format.value
+    )
     return DictionaryExportResponse(
         model_id=model.model_id, format=dictionary_format, files=files
     )
@@ -429,7 +469,8 @@ async def export_dictionary(
 async def export_model_zip(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
-    model: AuthorizedModelDep,
+    model: ModelViewerDep,
+    user: CurrentUserDep,
     export_format: ExportFormat = Query(ExportFormat.DBT, alias="format"),
     dialect: str = "snowflake",
 ) -> Response:
@@ -442,6 +483,9 @@ async def export_model_zip(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    await _audit(
+        "ARTIFACT_GENERATED", user, model, artifact=f"{export_format.value}.zip", dialect=dialect
+    )
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:

@@ -1,9 +1,9 @@
 # ModelBox AI — User Guide
 
-ModelBox AI is an LLM-agnostic **data modeling & governance mesh**: synthesize
-validated models from plain language, reverse-engineer live warehouses, lint for
-governance, diff & migrate schemas, and export production artifacts — dbt, data
-contracts, semantic layers, dictionaries, and seed data.
+ModelBox AI is an LLM-agnostic **data modelling appliance**: generate a first-draft
+model from plain language for a modeller to review and edit, reverse-engineer
+live warehouses, lint for governance, diff & migrate schemas, and export
+artifacts — dbt, data contracts, semantic layers, dictionaries, and seed data.
 
 This guide walks data teams through the seven core workflows. All actions are
 available in the web UI; every one is also scriptable via the API (see
@@ -27,7 +27,7 @@ and API keys.
    **Auto-layout**. **Save** persists the graph and re-validates; **Rename** and
    **Delete** manage the model.
 
-> New to the tool? Click **📚 Explore Requirements Library** for 5 gold-standard
+> New to the tool? Click **📚 Explore Requirements Library** for 6 gold-standard
 > starter scenarios — load one onto the canvas instantly (no LLM call) or use it
 > as a prompt.
 
@@ -111,13 +111,16 @@ Automate ModelBox from pipelines and agents.
 1. Go to **API keys** (`/settings/api-keys`).
 2. **Generate key** with a name. Copy the `mb_live_...` secret shown **once**.
 3. Store it as a CI secret. Send it as an `X-API-Key` header — no interactive
-   login. The key authenticates as its creating user and inherits that user's
-   RBAC. Revoke anytime from the same page.
+   login. The key acts as its creating user, but only in its own workspace and
+   only up to its cap: VIEWER unless a higher cap was chosen at creation via the
+   API (`role_cap`), never above the creator's own role, and never above the
+   creator's role *today*. A key cannot create keys. Revoke anytime from the
+   same page.
 
 ```bash
 # Example: export a data contract in CI
 curl -H "X-API-Key: $MODELBOX_KEY" \
-  "http://modelbox.internal:8000/api/v1/model/$MODEL_ID/export/contract?format=avro"
+  "http://modelbox.internal:3000/api/v1/model/$MODEL_ID/export/contract?format=avro"
 ```
 
 **API:** `POST /api/v1/auth/api-keys`, `GET /api/v1/auth/api-keys`,

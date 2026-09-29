@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.__version__ import __version__
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.database import dispose_engine
 from app.core.logging_config import configure_logging
 from app.services.llm_gateway import get_llm_gateway
@@ -29,12 +29,26 @@ settings = get_settings()
 configure_logging(settings)
 
 
-async def _seed_dev_user() -> None:
+def dev_seed_allowed(config: Settings) -> bool:
+    """True only in development, and only when the seed was asked for.
+
+    The account's password is published in this repository, so it is a
+    credential everyone has. Both conditions are required: development alone
+    would seed every developer's database without being asked, and the flag
+    alone would let one stray variable put a known OWNER on a production box.
+    """
+    return config.environment == "development" and config.seed_dev_user
+
+
+async def _seed_dev_user(config: Settings) -> None:
     """Create the default dev account + workspace if it does not exist.
 
-    Best-effort: logged and swallowed on failure (e.g. auth tables not yet
-    migrated) so startup never blocks on seeding.
+    Refused unless :func:`dev_seed_allowed`. Otherwise best-effort: logged and
+    swallowed on failure (e.g. auth tables not yet migrated) so startup never
+    blocks on seeding.
     """
+    if not dev_seed_allowed(config):
+        return
     from sqlalchemy import select
 
     from app.core.database import get_sessionmaker
@@ -79,7 +93,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Starting %s (airgapped=%s)", settings.app_name, settings.is_airgapped)
     # Eagerly construct the LLM gateway so router-config errors surface at boot.
     get_llm_gateway()
-    await _seed_dev_user()
+    await _seed_dev_user(settings)
     try:
         yield
     finally:
@@ -106,13 +120,22 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["system"], summary="Liveness & readiness probe")
     async def health() -> dict[str, Any]:
-        """Return service health, version, and egress mode."""
+        """Return service health, version, egress mode, and audit-write health.
+
+        ``degraded`` while this process has failed to write an audit event. The
+        HTTP status stays 200: the container healthchecks read only the status
+        code, and restarting the backend would not repair an audit sink.
+        """
+        from app.services.audit_log import write_failure_status
+
+        audit = write_failure_status()
         return {
-            "status": "ok",
+            "status": "degraded" if audit["write_failures"] else "ok",
             "service": settings.app_name,
             "version": app.version,
             "environment": settings.environment,
             "airgapped": settings.is_airgapped,
+            "audit": audit,
         }
 
     _mount_api_router(app)

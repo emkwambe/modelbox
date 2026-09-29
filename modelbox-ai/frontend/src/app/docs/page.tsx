@@ -14,6 +14,11 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+import { AUTH_BADGE_RESERVE } from '@/components/auth/AuthBadge';
+import { ErrorState, LoadingState } from '@/components/ui';
+import { errMessage } from '@/lib/errors';
+import { color } from '@/styles/tokens';
+
 type Tab = 'guide' | 'api';
 
 const DOCS: Record<Tab, { label: string; src: string }> = {
@@ -58,9 +63,9 @@ function CopyPre({ children }: { children?: ReactNode }) {
           right: 8,
           padding: '2px 8px',
           borderRadius: 4,
-          border: '1px solid #334155',
-          background: '#1e293b',
-          color: '#e2e8f0',
+          border: `1px solid ${color.neutral[700]}`,
+          background: color.neutral[800],
+          color: color.neutral[200],
           fontSize: 11,
           fontWeight: 600,
           cursor: 'pointer',
@@ -73,24 +78,70 @@ function CopyPre({ children }: { children?: ReactNode }) {
   );
 }
 
+/**
+ * A document is loading, loaded, or failed — three states, not the two the
+ * emptiness of a string can express.
+ *
+ * The previous code inferred "still loading" from `text[tab] === ''`, which is
+ * also what a failed fetch leaves behind. With `catch {}` above it, a backend
+ * that never serves `/content/USER_GUIDE.md` showed "Loading documentation…"
+ * for as long as the page stayed open.
+ */
+type DocState =
+  | { status: 'loading' }
+  | { status: 'ready'; body: string }
+  | { status: 'failed'; message: string };
+
+const LOADING: Record<Tab, DocState> = {
+  guide: { status: 'loading' },
+  api: { status: 'loading' },
+};
+
 export default function DocsPage() {
   const [tab, setTab] = useState<Tab>('guide');
-  const [text, setText] = useState<Record<Tab, string>>({ guide: '', api: '' });
+  const [docs, setDocs] = useState<Record<Tab, DocState>>(LOADING);
   const [query, setQuery] = useState('');
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
+    setDocs(LOADING);
+
     (Object.keys(DOCS) as Tab[]).forEach(async (key) => {
+      const update = (state: DocState) => {
+        if (!cancelled) setDocs((prev) => ({ ...prev, [key]: state }));
+      };
+
       try {
         const res = await fetch(DOCS[key].src);
-        const body = await res.text();
-        setText((prev) => ({ ...prev, [key]: body }));
-      } catch {
-        /* ignore fetch errors */
+        // `fetch` rejects only on a transport failure, so without this a 404
+        // resolves happily and its HTML body is handed to the Markdown
+        // renderer — the error page is displayed *as documentation*.
+        if (!res.ok) {
+          update({
+            status: 'failed',
+            message: `${DOCS[key].src} returned ${res.status}.`,
+          });
+          return;
+        }
+        update({ status: 'ready', body: await res.text() });
+      } catch (e) {
+        update({
+          status: 'failed',
+          message: errMessage(e, 'The documentation could not be fetched.'),
+        });
       }
     });
-  }, []);
 
-  const current = text[tab];
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt]);
+
+  const doc = docs[tab];
+  // Only a loaded document has headings. A failed one contributing to the
+  // table of contents would put links in the sidebar that scroll to nothing.
+  const current = doc.status === 'ready' ? doc.body : '';
 
   const headings = useMemo(
     () =>
@@ -128,12 +179,14 @@ export default function DocsPage() {
           justifyContent: 'space-between',
           gap: 16,
           flexWrap: 'wrap',
-          paddingRight: 220,
+          // Reserve space on the right for the fixed AuthBadge overlay. The
+          // badge declares how much it needs; do not restate the number here.
+          paddingRight: AUTH_BADGE_RESERVE,
         }}
       >
         <Link
           href="/"
-          style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}
+          style={{ color: color.blue, fontWeight: 600, textDecoration: 'none' }}
         >
           ← ModelBox AI
         </Link>
@@ -146,9 +199,9 @@ export default function DocsPage() {
               style={{
                 padding: '6px 14px',
                 borderRadius: 8,
-                border: '1px solid #cbd5e1',
-                background: tab === key ? '#2563eb' : '#ffffff',
-                color: tab === key ? '#ffffff' : '#334155',
+                border: `1px solid ${color.neutral[300]}`,
+                background: tab === key ? color.blue : color.white,
+                color: tab === key ? color.white : color.neutral[700],
                 fontSize: 13,
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -180,7 +233,7 @@ export default function DocsPage() {
             style={{
               padding: '6px 10px',
               borderRadius: 6,
-              border: '1px solid #cbd5e1',
+              border: `1px solid ${color.neutral[300]}`,
               fontSize: 13,
             }}
           />
@@ -191,7 +244,7 @@ export default function DocsPage() {
                 href={`#${h.id}`}
                 style={{
                   fontSize: 13,
-                  color: '#475569',
+                  color: color.neutral[600],
                   textDecoration: 'none',
                   paddingLeft: h.level === 3 ? 12 : 0,
                   paddingBlock: 2,
@@ -205,12 +258,19 @@ export default function DocsPage() {
 
         {/* Rendered document */}
         <article className="markdown-body" style={{ flex: 1, minWidth: 0 }}>
-          {current ? (
+          {doc.status === 'ready' ? (
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-              {current}
+              {doc.body}
             </ReactMarkdown>
+          ) : doc.status === 'failed' ? (
+            <ErrorState
+              title={`${DOCS[tab].label} could not be loaded`}
+              onRetry={() => setAttempt((n) => n + 1)}
+            >
+              {doc.message}
+            </ErrorState>
           ) : (
-            <p style={{ color: '#94a3b8' }}>Loading documentation…</p>
+            <LoadingState label="Loading documentation…" />
           )}
         </article>
       </div>

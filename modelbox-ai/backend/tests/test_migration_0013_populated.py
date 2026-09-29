@@ -28,7 +28,6 @@ import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -37,9 +36,32 @@ from pathlib import Path
 
 import pytest
 
-BACKEND = Path(__file__).resolve().parents[1]
+from tests._docker_postgres import (
+    POSTGRES_IMAGE,
+    assert_reachable_from_host,
+    published_port,
+    wait_for_queries,
+)
+
+BACKEND =Path(__file__).resolve().parents[1]
 REPO = BACKEND.parents[1]
 GOLD_DIR = BACKEND / "tests" / "fixtures" / "gold"
+
+
+def _gold_graph_count() -> int:
+    """How many gold graphs the mirror holds, counted rather than restated.
+
+    This was a literal `5`, and adding a sixth reference model to the
+    Requirements Library failed three migration tests while the migration
+    itself was fine — the assertion was measuring the size of the library, not
+    a property of the migration. The same literal appeared in the fidelity
+    harness's provenance guard and in the register's "all 12 linter codes" row,
+    which is three instances of one habit: writing down how many there are
+    today instead of asserting what must be true.
+    """
+    return len(
+        [p for p in GOLD_DIR.glob("*.json") if p.name != "index.json"]
+    )
 
 PRE_MIGRATION_REVISION = "0012_add_column_quality_rules"
 BASELINE_TAG = "v1.6.0"
@@ -47,12 +69,32 @@ _STRICT = os.environ.get("MODELBOX_MIGRATION_STRICT") == "1"
 DOCKER = shutil.which("docker")
 
 
+def _unavailable(reason: str, strict: bool | None = None) -> None:
+    """Stop a gate that cannot run: fail under the strict flag, else skip.
+
+    Every path that would skip goes through here. The strict flag exists so
+    that a CI run cannot report green having migrated nothing, and a skip that
+    bypasses it is exactly that report. The baseline-worktree path once did.
+    """
+    if _STRICT if strict is None else strict:
+        pytest.fail(f"MODELBOX_MIGRATION_STRICT=1 but {reason}")
+    pytest.skip(f"{reason}; migration verification not run")
+
+
 def _need_docker() -> None:
     if DOCKER:
         return
-    if _STRICT:
-        pytest.fail("MODELBOX_MIGRATION_STRICT=1 but docker is unavailable")
-    pytest.skip("docker unavailable; migration verification not run")
+    _unavailable("docker is unavailable")
+
+
+def _add_baseline_worktree(target: Path, tag: str = BASELINE_TAG) -> None:
+    """Check out ``tag`` at ``target``, or stop the gate through `_unavailable`."""
+    result = subprocess.run(
+        ["git", "worktree", "add", "--detach", str(target), tag],
+        cwd=REPO, capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        _unavailable(f"the {tag} worktree cannot be created: {result.stderr[-300:]}")
 
 
 # ---------------------------------------------------------------------------
@@ -63,33 +105,43 @@ def postgres_dsn() -> str:
     """A throwaway Postgres, torn down whatever the outcome."""
     _need_docker()
     name = f"modelbox-migration-{uuid.uuid4().hex[:8]}"
-    # A free ephemeral port, not a fixed one: a fixed port silently binds to
-    # whatever a previous run left behind, and the test then migrates one
-    # database while asserting against another.
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = str(probe.getsockname()[1])
+    # Docker allocates the host port and we read back what it bound.
+    #
+    # The previous version probed for a free port, closed the socket, and then
+    # asked Docker to bind it — leaving a window in which anything else could
+    # take it first. Sprint 2 replaced a *fixed* port with that probe and closed
+    # the failure it was chasing; the window it left is the same defect one
+    # order smaller, and it is only reachable when something else is competing
+    # for ports. This gate failed once in Sprint 4 and once again in Sprint 5,
+    # both times while other containers were starting, and passed on every
+    # isolated re-run. Publishing port 0 removes the window rather than
+    # narrowing it: there is no interval between choosing and binding.
     subprocess.run(
         [DOCKER, "run", "-d", "--name", name,
          "-e", "POSTGRES_PASSWORD=verify", "-e", "POSTGRES_USER=verify",
-         "-e", "POSTGRES_DB=verify", "-p", f"{port}:5432",
-         "postgres:16-alpine"],
+         "-e", "POSTGRES_DB=verify", "-p", "0:5432",
+         POSTGRES_IMAGE],
         check=True, capture_output=True, text=True,
     )
     try:
+        port = published_port(name)
         for _ in range(60):
             ready = subprocess.run(
                 [DOCKER, "exec", name, "pg_isready", "-U", "verify", "-d", "verify"],
                 capture_output=True, text=True,
+                check=False,  # a non-zero exit means "not yet"; the loop retries
             )
             if ready.returncode == 0:
                 break
             time.sleep(1)
         else:
             pytest.fail("postgres container never became ready")
+        assert_reachable_from_host(port)
+        wait_for_queries(port)
         yield f"postgresql+asyncpg://verify:verify@localhost:{port}/verify"
     finally:
-        subprocess.run([DOCKER, "rm", "-f", name], capture_output=True)
+        # Cleanup: raising here would replace the test's own failure.
+        subprocess.run([DOCKER, "rm", "-f", name], capture_output=True, check=False)
 
 
 @pytest.fixture(scope="module")
@@ -97,17 +149,13 @@ def baseline_worktree(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A checkout of v1.6.0, so 'before' is produced by the code that shipped."""
     root = tmp_path_factory.mktemp("baseline")
     target = root / "v1_6_0"
-    result = subprocess.run(
-        ["git", "worktree", "add", "--detach", str(target), BASELINE_TAG],
-        cwd=REPO, capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        pytest.skip(f"cannot create {BASELINE_TAG} worktree: {result.stderr[-300:]}")
+    _add_baseline_worktree(target)
     try:
         yield target / "modelbox-ai" / "backend"
     finally:
+        # Cleanup: raising here would replace the test's own failure.
         subprocess.run(["git", "worktree", "remove", "--force", str(target)],
-                       cwd=REPO, capture_output=True)
+                       cwd=REPO, capture_output=True, check=False)
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +166,9 @@ def _alembic(backend: Path, dsn: str, *args: str) -> subprocess.CompletedProcess
     return subprocess.run(
         [sys.executable, "-m", "alembic", *args],
         cwd=backend, env=env, capture_output=True, text=True,
+        # Callers assert on the result, and some expect a refusal (0021's
+        # precondition): the exit code is data here, not an error.
+        check=False,
     )
 
 
@@ -164,6 +215,7 @@ def _run_helper(backend: Path, dsn: str, mode: str) -> dict:
         [sys.executable, str(Path(__file__).with_name("_migration_helper.py")),
          mode, str(GOLD_DIR)],
         cwd=backend, env=env, capture_output=True, text=True,
+        check=False,  # asserted below with the helper's output in the message
     )
     assert proc.returncode == 0, (
         f"helper '{mode}' failed in {backend}:\n{proc.stdout[-2000:]}\n{proc.stderr[-3000:]}"
@@ -212,7 +264,9 @@ def test_migration_0013_preserves_the_persisted_model(
     # 1. Previous schema, seeded and projected by the code that shipped it.
     _upgrade_to(baseline_worktree, postgres_dsn, PRE_MIGRATION_REVISION)
     before = _run_helper(baseline_worktree, postgres_dsn, "seed-and-export")
-    assert len(before["models"]) == 5, "expected all five gold graphs seeded"
+    assert len(before["models"]) == _gold_graph_count(), (
+        f"expected every gold graph seeded, got {sorted(before['models'])}"
+    )
     before_projection = _run_helper(
         baseline_worktree, postgres_dsn, "project-model"
     )["models"]
@@ -308,7 +362,7 @@ def test_downgrade_restores_the_previous_schema(
 
     # The old code must still be able to read the downgraded database.
     after_downgrade = _run_helper(baseline_worktree, postgres_dsn, "export-only")
-    assert len(after_downgrade["models"]) == 5
+    assert len(after_downgrade["models"]) == _gold_graph_count()
 
     result = _alembic(BACKEND, postgres_dsn, "upgrade", "head")
     assert result.returncode == 0, result.stderr[-3000:]

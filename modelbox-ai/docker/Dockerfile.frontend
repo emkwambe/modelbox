@@ -4,8 +4,11 @@
 # =============================================================================
 FROM node:20-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm install
+# `npm ci` installs exactly the lock and fails if it is incomplete, where
+# `npm install` would silently repair it (CLAUDE.md, the @esbuild incident).
+# The lock is required, so no wildcard on it.
+COPY package.json package-lock.json ./
+RUN npm ci
 
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -16,8 +19,13 @@ RUN npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
+# HOSTNAME: the standalone server listens on the address this resolves to. Left
+# to Docker it is the container's hostname, whose address is on one network
+# only, so a UI attached to a second network never answers there. Every
+# interface, so the published port reaches it on whichever network it uses.
 ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1
+    NEXT_TELEMETRY_DISABLED=1 \
+    HOSTNAME=0.0.0.0
 
 # Next.js standalone output bundles a minimal server + only required deps.
 COPY --from=builder /app/public ./public
