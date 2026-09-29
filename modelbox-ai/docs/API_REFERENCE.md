@@ -465,6 +465,25 @@ CHECK constraints over several columns are in the model.
 `413` File too large, `422` Unknown dialect, or nothing in the file could be
 imported (the report is in `detail`)
 
+### `POST /api/v1/model/{model_id}/drift`
+
+Compare a saved model with a freshly imported DDL file of the deployed schema (VIEWER+)
+
+| Param | In | Type | Required |
+|---|---|---|---|
+| `model_id` | path | string | yes |
+| `file` | form (multipart) | file | yes |
+| `dialect` | form | string, as for `/import/ddl` | yes |
+| `format` | form | `markdown`, `html` or `json` | no (default `markdown`) |
+
+The file is imported in memory and never saved. The response carries
+`summary` (breaking, non-breaking, informational, total, verified fields
+affected) and `files` (`drift_report.md`, `.html` or `.json`). Columns are
+matched by name, so a rename is a removal and an addition; each drift names
+its classification rule (D1-D19, listed in the user guide).
+
+**Responses:** `200` Successful Response, `403` Below VIEWER, `413` File too large, `422` Nothing importable or unknown dialect
+
 ### `GET /api/v1/model/{model_id}/import-report`
 
 The import's reconciliation report (VIEWER+): counts from the file and counts

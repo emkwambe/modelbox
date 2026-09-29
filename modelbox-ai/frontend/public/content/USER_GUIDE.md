@@ -128,6 +128,68 @@ Compare two model versions into migration DDL.
 
 **API:** `POST /api/v1/model/diff` with `{source_model_id, target_model_id, dialect}`.
 
+### Drift report: the design against the deployed schema
+
+A drift report compares a saved model, the documented design, with a DDL
+export of the schema actually deployed, imported fresh and never saved. It
+uses the same comparison as the migration diff and reports:
+
+- tables and columns added and removed;
+- for each column both sides hold: its type (the normalized type, with the
+  type as declared on each side), nullability, and default (shown in its
+  original text; a default respelled with the same meaning is not a drift);
+- primary keys, UNIQUE, foreign-key and CHECK constraints added, removed or
+  changed, composite ones included, and a primary key whose column order
+  changed;
+- table and column descriptions.
+
+**No renames are guessed.** Columns are matched by name, so a renamed column
+is reported as a removal and an addition. When a removed and an added column
+of one table have the same type at the same position, the report adds a
+**possible rename** hint naming them; it is only a hint, and both drifts stand.
+
+The header names both sources: the saved model with its version, and the
+imported file with the time it was imported. It states both reconciliation
+statuses; a report built on an unreconciled import says so at the top. A drift
+that touches a field the dictionary holds as **verified** is flagged **verified
+field affected by drift**, with the fields named.
+
+Every drift is classified by the first of these rules that applies:
+
+| Rule | When | Class |
+|---|---|---|
+| D1 | A table is removed. | breaking |
+| D2 | A table is added. | non-breaking |
+| D3 | A column is removed (a renamed column is a removal and an addition). | breaking |
+| D4 | A NOT NULL column with no default is added: existing inserts that omit it fail. | breaking |
+| D5 | A nullable column, or a NOT NULL column with a default, is added. | non-breaking |
+| D6 | A type is widened: every value of the old type fits the new one. | non-breaking |
+| D7 | A type is narrowed, or changed to another kind of type. | breaking |
+| D8 | The declared type's text changed and its normalized type did not. | informational |
+| D9 | A nullable column becomes NOT NULL. | breaking |
+| D10 | A NOT NULL column becomes nullable. | non-breaking |
+| D11 | A default is added, changed or removed: only rows inserted later are affected. | non-breaking |
+| D12 | The primary key is added, removed, or its columns or their order change. | breaking |
+| D13 | A UNIQUE constraint is added: writes the design allows can be refused. | breaking |
+| D14 | A UNIQUE constraint is removed: consumers relying on uniqueness lose it. | breaking |
+| D15 | A foreign key is added: writes the design allows can be refused. | breaking |
+| D16 | A foreign key is removed: consumers relying on the reference lose it. | breaking |
+| D17 | A CHECK constraint is added: writes the design allows can be refused. | breaking |
+| D18 | A CHECK constraint is removed: the deployed schema accepts more. | non-breaking |
+| D19 | A table or column description is added, changed or removed. | informational |
+
+**Breaking** means something that works against the design can fail against
+the deployed schema; **non-breaking**, nothing that works today can fail;
+**informational**, only text a person reads changed. A type counts as widened
+(D6) only when every value provably fits: a larger integer, a decimal with at
+least as many digits each side of the point, a longer or unbounded string of
+the same kind (fixed to varying and ASCII to Unicode also widen), a larger
+float, more fractional seconds. Any other type change, including one ModelBox
+cannot read, is D7.
+
+**API:** `POST /api/v1/model/{id}/drift`, multipart, with the file, its
+`dialect` (as for import) and `format` (`markdown`, `html` or `json`).
+
 ## Workflow 5 — Exporting data contracts & dbt
 
 Open **Export artifacts** on the canvas. Tabs:
