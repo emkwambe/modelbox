@@ -1,8 +1,11 @@
-"""The data dictionary exporter and endpoint (Pick 2; rebuilt in Sprint 8 Step 4a)."""
+"""The data dictionary exporter and endpoint (Pick 2; rebuilt in Sprint 8 Steps 4a and 4b)."""
 
 from __future__ import annotations
 
+import csv
+import io
 import json
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -19,6 +22,7 @@ from app.schemas.data_model import (
     SynthesizedModel,
     SynthesizeRequest,
 )
+from app.services import data_dictionary
 from app.services.exporter_service import ExporterError, ExporterService
 from app.services.synthesis_engine import SynthesisEngine
 from tests._test_db import make_test_engine
@@ -78,28 +82,38 @@ def _model() -> SynthesizedModel:
     )
 
 
-# R2_DICTIONARY_STTM_FIELDS.md, R2-2, the fields the model holds, in its order
-# (Sprint 8 Step 4a; owner decisions of 2026-09-29).
+# R2_DICTIONARY_STTM_FIELDS.md, R2-2, in its order (Sprint 8 Steps 4a and 4b;
+# owner decisions of 2026-09-29), then each field's status.
 R2_ORDER = ["name", "position", "data_type", "declared_type", "nullable", "default", "primary_key",
-            "unique", "foreign_key", "check", "description", "pii", "validation_rules"]
-LEFT_OUT = ["business name", "owner", "critical data element", "permissible", "review status",
-            "classification", "glossary"]
+            "unique", "foreign_key", "check", "description", "business_name", "permissible_values", "unit",
+            "classification", "pii", "critical_data_element", "authoritative_source", "validation_rules"]
+TABLE_ORDER = ["name", "business_name", "description", "grain", "entity_type", "business_owner", "it_steward",
+               "authoritative_source"]
+LEVEL = uuid.uuid4()
 
 
-def _export(fmt: str, model: SynthesizedModel | None = None, reconciliation: str | None = None) -> dict[str, str]:
-    return ExporterService().export_data_dictionary(model or _model(), fmt, "Sales", reconciliation)
+def _export(fmt: str, model: SynthesizedModel | None = None, reconciliation: str | None = None,
+            statuses: dict | None = None) -> dict[str, str]:
+    return ExporterService().export_data_dictionary(model or _model(), fmt, "Sales", reconciliation, statuses,
+                                                    {LEVEL: "Confidential"})
 
 
 def _with_everything() -> SynthesizedModel:
-    """Composite UNIQUE, a CHECK over two columns, rules, an unresolved relationship."""
+    """Composite UNIQUE, a CHECK over two columns, rules, every 4b field, an unresolved relationship."""
     return SynthesizedModel.model_validate({
         "paradigm": "3NF",
         "entities": [
-            {"entity_name": "orders", "columns": [
+            {"entity_name": "orders", "business_name": "Customer orders", "business_owner": "Sales ops",
+             "it_steward": "Data platform", "authoritative_source": "ERP",
+             "columns": [
                 {"name": "order_id", "data_type": "INTEGER"},
                 {"name": "region", "data_type": "VARCHAR(8)", "source_data_type": "varchar2(8 char)",
-                 "default_value": "'EU'", "source_default_value": "'EU' /* home */"},
-                {"name": "qty", "data_type": "INTEGER", "min_value": 0, "max_value": 99},
+                 "default_value": "'EU'", "source_default_value": "'EU' /* home */",
+                 "permissible_values": ["EU", "US"], "classification_level_id": str(LEVEL),
+                 "critical_data_element": False},
+                {"name": "qty", "data_type": "INTEGER", "min_value": 0, "max_value": 99, "unit": "each",
+                 "business_name": "Quantity ordered", "critical_data_element": True,
+                 "authoritative_source": "ERP order lines"},
                 {"name": "cap", "data_type": "INTEGER"}],
              "primary_key": ["order_id"],
              "unique_constraints": [{"columns": ["order_id", "region"]}],
@@ -111,24 +125,22 @@ def _with_everything() -> SynthesizedModel:
     })
 
 
-def test_the_fields_are_in_r2_order_and_nothing_unstored_is_shown() -> None:
-    doc = json.loads(_export("json")["data_dictionary.json"])
-    assert list(doc["entities"][0]["columns"][0]) == R2_ORDER
+def test_the_fields_are_in_r2_order() -> None:
+    doc = json.loads(_export("json", _with_everything())["data_dictionary.json"])
+    assert list(doc["entities"][0]["columns"][0]) == [*R2_ORDER, "status"]
+    assert list(doc["entities"][0]) == [*TABLE_ORDER, "status", "columns"]
     header = next(line for line in _export("markdown")["data_dictionary.md"].splitlines()
                   if line.startswith("| Column"))
     assert header == ("| Column | Position | Type | Declared type | Nullable | Default | Primary key | Unique "
-                      "| Foreign key | Check | Description | PII (as recorded) | Validation rules (as recorded) |")
+                      "| Foreign key | Check | Description | Business name | Permissible values | Unit "
+                      "| Classification | PII | Critical data element | Authoritative source | Validation rules |")
+
+
+def test_the_glossary_and_example_values_stay_out() -> None:
     for fmt, name in (("markdown", "data_dictionary.md"), ("html", "data_dictionary.html"),
-                      ("json", "data_dictionary.json")):
+                      ("json", "data_dictionary.json"), ("csv", "data_dictionary.csv")):
         text = _export(fmt, _with_everything())[name].lower()
-        assert [word for word in LEFT_OUT if word in text] == [], fmt
-
-
-def test_nothing_in_any_format_says_verified() -> None:
-    for fmt in ("markdown", "html", "json", "csv"):
-        for reconciliation in ("reconciled", "unreconciled", None):
-            for content in _export(fmt, _with_everything(), reconciliation).values():
-                assert "verif" not in content.lower(), (fmt, reconciliation)
+        assert "glossary" not in text and "example" not in text, fmt
 
 
 def test_each_field_reads_what_the_model_holds() -> None:
@@ -140,6 +152,14 @@ def test_each_field_reads_what_the_model_holds() -> None:
     assert orders["region"]["nullable"] is True and orders["order_id"]["nullable"] is False
     assert orders["qty"]["check"] == ["qty <= cap"] == orders["cap"]["check"]
     assert orders["qty"]["validation_rules"] == {"min": 0.0, "max": 99.0}
+    assert orders["region"]["permissible_values"] == ["EU", "US"]
+    assert orders["region"]["classification"] == "Confidential", "the level's name, read by its id"
+    assert orders["region"]["critical_data_element"] is False and orders["qty"]["critical_data_element"] is True
+    assert (orders["qty"]["business_name"], orders["qty"]["unit"], orders["qty"]["authoritative_source"]) == (
+        "Quantity ordered", "each", "ERP order lines")
+    table = doc["entities"][0]
+    assert (table["business_name"], table["business_owner"], table["it_steward"], table["authoritative_source"]) \
+        == ("Customer orders", "Sales ops", "Data platform", "ERP")
     email = next(c for e in json.loads(_export("json")["data_dictionary.json"])["entities"]
                  for c in e["columns"] if c["name"] == "email")
     assert email["pii"] == "EMAIL"
@@ -147,6 +167,47 @@ def test_each_field_reads_what_the_model_holds() -> None:
                 if e["name"] == "fact_orders")
     assert next(c for c in fact["columns"] if c["name"] == "customer_sk")["foreign_key"] == [
         "dim_customer.customer_sk"]
+
+
+def test_every_field_holding_a_value_has_a_status_and_the_header_counts_them() -> None:
+    doc = json.loads(_export("json", _with_everything())["data_dictionary.json"])
+    statuses = [s for e in doc["entities"] for s in [e["status"], *(c["status"] for c in e["columns"])]]
+    counted = sum(len(s) for s in statuses)
+    assert counted == doc["verification"]["fields"] > 0
+    assert {v for s in statuses for v in s.values()} == {"recorded"}, "nothing attested: every value recorded"
+    region = doc["entities"][0]["columns"][1]
+    assert "unit" not in region["status"], "an empty field is not counted"
+    assert region["status"]["critical_data_element"] == "recorded", "False is a value"
+    assert doc["verification"]["statement"] == f"0 of {counted} fields verified, {counted} pending review"
+
+
+def test_verified_appears_only_where_the_attestation_says_so() -> None:
+    statuses = {("orders", "qty", "unit"): "verified", ("orders", None, "business_owner"): "verified",
+                ("orders", "qty", "business_name"): "pending"}
+    model = _with_everything()
+    md = _export("markdown", model, "reconciled", statuses)["data_dictionary.md"]
+    assert md.count("[verified]") == 2
+    assert "| each [verified] |" in md and "- **Business owner:** Sales ops [verified]" in md
+    assert "| Quantity ordered [pending review] |" in md
+    doc = json.loads(_export("json", model, "reconciled", statuses)["data_dictionary.json"])
+    total = doc["verification"]["fields"]
+    assert doc["verification"] == {"verified": 2, "fields": total, "pending_review": total - 2,
+                                   "statement": f"2 of {total} fields verified, {total - 2} pending review"}
+    assert f"- **Status:** 2 of {total} fields verified" in md
+    html = _export("html", model, "reconciled", statuses)["data_dictionary.html"]
+    assert html.count("[verified]") == 2
+    rows = list(csv.DictReader(io.StringIO(_export("csv", model, "reconciled", statuses)["data_dictionary.csv"])))
+    qty = next(r for r in rows if r["name"] == "qty")
+    assert (qty["unit_status"], qty["business_name_status"], qty["business_owner_status"]) == (
+        "verified", "pending review", "verified")
+    assert sum(r[k] == "verified" for r in rows for k in r if k.endswith("_status")) == 1 + len(
+        [r for r in rows if r["table"] == "orders"]), "the table field repeats on each of its rows"
+
+
+def test_negative_control_with_no_attestation_nothing_is_verified_anywhere() -> None:
+    for fmt in ("markdown", "html", "json", "csv"):
+        for content in _export(fmt, _with_everything(), "reconciled").values():
+            assert "[verified]" not in content and ',verified' not in content, fmt
 
 
 def test_relationships_list_their_pairs_and_name_the_unresolved() -> None:
@@ -191,6 +252,11 @@ def test_dictionary_unknown_format_raises() -> None:
     except ExporterError:
         return
     raise AssertionError("expected ExporterError for unknown dictionary format")
+
+
+def test_the_attested_fields_are_every_field_but_the_identity() -> None:
+    assert [f.key for f in data_dictionary.ATTESTED_COLUMN_FIELDS] == R2_ORDER[2:]
+    assert [f.key for f in data_dictionary.ATTESTED_TABLE_FIELDS] == TABLE_ORDER[1:]
 
 
 # ---------------------------------------------------------------------------
@@ -266,3 +332,7 @@ async def test_dictionary_endpoint(session: AsyncSession) -> None:
     doc = json.loads(r.json()["files"]["data_dictionary.json"])
     # A synthesized model was not imported: the dictionary says there is no reconciliation.
     assert doc["source"]["reconciliation"] is None
+    # Synthesized values are AI drafts: pending review, never verified.
+    statuses = {v for e in doc["entities"] for s in [e["status"], *(c["status"] for c in e["columns"])]
+                for v in s.values()}
+    assert statuses == {"pending"} and doc["verification"]["verified"] == 0

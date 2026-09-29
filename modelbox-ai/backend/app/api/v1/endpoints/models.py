@@ -23,7 +23,12 @@ from app.api.v1.dependencies import (
     require_listed_workspaces,
     require_model_role,
 )
-from app.models.metadata_store import DataModel, User
+from app.models.metadata_store import (
+    VERIFIABLE_PROVENANCE,
+    DataModel,
+    FieldAttestation,
+    User,
+)
 from app.schemas.data_model import (
     ContractExportResponse,
     ContractFormat,
@@ -46,7 +51,16 @@ from app.schemas.data_model import (
     SyntheticSeedResponse,
     ValidationReport,
 )
-from app.services import audit_log
+from app.schemas.dictionary import (
+    AttestationsResponse,
+    AttestationSummary,
+    Conditions,
+    FieldStatusSchema,
+    VerifyRequest,
+    VerifyResponse,
+    VerifyResultSchema,
+)
+from app.services import attestation, audit_log
 from app.services.diff_engine import DiffEngine
 from app.services.exporter_service import ExporterError, ExporterService
 from app.services.graph_engine import GraphEngine
@@ -278,15 +292,95 @@ async def replace_model_graph(
 ) -> ValidationReport:
     """Replace a model's graph with the canvas's current state (FR-1.2).
 
-    Requires MEMBER+. Re-validates and bumps the model version.
+    Requires MEMBER+. Re-validates and bumps the model version. Each value
+    this save changes records the caller as its provenance, and a verified
+    field whose value changes lapses to pending (Step 4b).
     """
+    known = await attestation.levels(session, model.workspace_id)
+    foreign = sorted({str(c.classification_level_id) for e in payload.entities for c in e.columns
+                      if c.classification_level_id is not None and c.classification_level_id not in known})
+    if foreign:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"classification_level_id {foreign} is not a level of this workspace's classification scale",
+        )
     await GraphRepository(session).replace_graph(
-        model.model_id, payload.entities, payload.relationships
+        model.model_id, payload.entities, payload.relationships,
+        source="person", actor=attestation.Actor(user.user_id, user.email),
     )
     model.version_number += 1
     await session.flush()
     await _audit("MODEL_UPDATED", user, model, fields=["graph"], version=model.version_number)
     return GraphEngine().validate(payload.entities, payload.relationships)
+
+
+def _field_status(key: tuple[str, str | None, str], row: FieldAttestation | None) -> dict[str, object]:
+    entity, column, field = key
+    return {
+        "entity": entity, "column": column, "field": field,
+        "status": row.status if row is not None else "recorded",
+        "provenance": row.provenance if row is not None else None,
+        "provenance_by": row.provenance_by if row is not None else None,
+        "provenance_at": row.provenance_at if row is not None else None,
+        "verified_by": row.verified_by if row is not None else None,
+        "verified_at": row.verified_at if row is not None else None,
+    }
+
+
+@router.get(
+    "/{model_id}/attestations",
+    response_model=AttestationsResponse,
+    summary="Each dictionary field's status and provenance",
+)
+async def list_attestations(session: SessionDep, model: ModelViewerDep) -> AttestationsResponse:
+    """Every field that holds a value, with its status: verified, pending
+    (provenance recorded, awaiting review) or recorded (no provenance)."""
+    listed, counts = await attestation.field_list(session, model)
+    return AttestationsResponse(
+        model_id=model.model_id,
+        summary=AttestationSummary(**counts),
+        fields=[FieldStatusSchema(**_field_status(key, row)) for key, row in listed],  # type: ignore[arg-type]
+    )
+
+
+@router.post(
+    "/{model_id}/attestations/verify",
+    response_model=VerifyResponse,
+    summary="Verify fields whose three conditions hold (APPROVER or higher)",
+)
+async def verify_fields(
+    payload: VerifyRequest,
+    session: SessionDep,
+    user: CurrentUserDep,
+    model: Annotated[DataModel, Depends(require_model_role("APPROVER"))],
+) -> VerifyResponse:
+    """Ask for fields to be verified; the application decides.
+
+    A field becomes verified only when all three hold: the model is a
+    reconciled import, the field's definition passes the machine-checkable
+    ISO/IEC 11179-4 rules, and the field's provenance is recorded and is not
+    an AI draft. The request cannot state a status. Every field is answered
+    with the conditions as found, so a reviewer sees what is missing.
+    """
+    requested = None if payload.fields is None else [(f.entity, f.column, f.field) for f in payload.fields]
+    try:
+        results = await attestation.verify(session, model, requested, attestation.Actor(user.user_id, user.email))
+    except attestation.UnknownField as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    _, counts = await attestation.field_list(session, model)
+    return VerifyResponse(
+        model_id=model.model_id,
+        summary=AttestationSummary(**counts),
+        results=[VerifyResultSchema(
+            **_field_status(evaluation.key, row),  # type: ignore[arg-type]
+            conditions=Conditions(
+                reconciled_import=evaluation.reconciled_import,
+                definition_failures=evaluation.definition_failures,
+                provenance=evaluation.provenance,
+                provenance_verifiable=evaluation.provenance in VERIFIABLE_PROVENANCE,
+            ),
+        ) for evaluation, row in results],
+    )
 
 
 @router.post(
@@ -452,6 +546,7 @@ async def export_semantic(
 async def export_dictionary(
     engine: SynthesisEngineDep,
     exporter: ExporterServiceDep,
+    session: SessionDep,
     model: ModelViewerDep,
     user: CurrentUserDep,
     dictionary_format: DictionaryFormat = Query(
@@ -461,10 +556,13 @@ async def export_dictionary(
     """Generate a documentation artifact from a persisted model (Pick 2)."""
     result = await engine.get_model(model.model_id)
     assert result is not None  # guaranteed by AuthorizedModelDep
+    rows = await attestation.statuses(session, model.model_id)
     try:
         files = exporter.export_data_dictionary(
             _to_synthesized(result), dictionary_format.value, dataset_name=model.title,
             reconciliation=model.reconciliation_status,
+            statuses=attestation.status_map(rows),
+            levels=await attestation.levels(session, model.workspace_id),
         )
     except ExporterError as exc:
         raise HTTPException(

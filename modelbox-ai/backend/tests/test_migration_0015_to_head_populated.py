@@ -13,7 +13,12 @@ SQL, never through the ORM (register standard 1):
   a user, and an API key (no ``role_cap`` column yet);
 * at 0024, a model in the shape keys had before 0025 (column flags and
   relationship column ids), covering every case 0025 converts or lists;
+* at 0025, a model with every PII shape 0026 maps across (typed, untyped, a
+  type without its flag, not PII), and every column's PII value, read by raw
+  SQL, to compare with after;
 * then head, confirmed by reading ``alembic_version`` back (`_upgrade_to`).
+
+0026 is also taken down to 0025 and up again on a database of its own.
 
 After it: every model and ledger row is still there, ``scope`` was backfilled
 from ``workspace_id``, the key was backfilled to ``VIEWER``, no existing user
@@ -156,8 +161,10 @@ def upgraded(server: str, release_worktree: Path) -> dict:
     dsn = _database(server, "populated")
     seeded: dict = {"release_worktree": release_worktree}
     asyncio.run(_populate_and_upgrade(dsn, seeded))
-    # The gold models, plus the one written in the pre-0025 shape at 0024.
-    return {"dsn": dsn, "models": len(seeded["models"]) + 1, "legacy_model": seeded["legacy_model"]}
+    # The gold models, plus the one written in the pre-0025 shape at 0024 and
+    # the PII shapes written at 0025.
+    return {"dsn": dsn, "models": len(seeded["models"]) + 2, "legacy_model": seeded["legacy_model"],
+            "pii_model": seeded["pii_model"], "pii_before": seeded["pii_before"]}
 
 
 async def _populate_and_upgrade(dsn: str, seeded: dict) -> None:
@@ -197,7 +204,31 @@ async def _populate_and_upgrade(dsn: str, seeded: dict) -> None:
     _upgrade_to(BACKEND, dsn, "0024_column_source_type")
     seeded["legacy_model"] = await _seed_legacy_keys(dsn, workspace_id)
 
+    _upgrade_to(BACKEND, dsn, "0025_keys_and_constraints")
+    seeded["pii_model"] = await _seed_pii(dsn, workspace_id)
+    # Every column's PII value as it stood before 0026, by raw SQL.
+    seeded["pii_before"] = {
+        str(r["column_id"]): (r["is_pii"], r["pii_type"])
+        for r in await _fetch(dsn, "SELECT column_id, is_pii, pii_type FROM entity_columns")}
+
     _upgrade_to(BACKEND, dsn, "head")
+
+
+async def _seed_pii(dsn: str, workspace_id: uuid.UUID) -> uuid.UUID:
+    """A model at 0025 with every PII shape 0026 maps: a typed PII column, an
+    untyped one, a type left without its flag, and a column that is not PII."""
+    model_id, entity_id = uuid.uuid4(), uuid.uuid4()
+    await _execute(dsn, "INSERT INTO data_models (model_id, workspace_id, title, target_dialect) "
+                        "VALUES (:m, :w, 'pii shapes', 'postgres')", m=model_id, w=workspace_id)
+    await _execute(dsn, "INSERT INTO model_entities (entity_id, model_id, entity_name, entity_type) "
+                        "VALUES (:e, :m, 'person', 'TABLE')", e=entity_id, m=model_id)
+    for position, (name, is_pii, pii_type) in enumerate([
+        ("email", True, "EMAIL"), ("nickname", True, None), ("phone", False, "PHONE"), ("age", False, None),
+    ]):
+        await _execute(dsn, "INSERT INTO entity_columns (column_id, entity_id, column_name, data_type, is_pii, "
+                            "pii_type, ordinal_position, stable_id) VALUES (:c, :e, :n, 'TEXT', :p, :t, :o, :s)",
+                       c=uuid.uuid4(), e=entity_id, n=name, p=is_pii, t=pii_type, o=position, s=position + 1)
+    return model_id
 
 
 async def _seed_legacy_keys(dsn: str, workspace_id: uuid.UUID) -> uuid.UUID:
@@ -336,7 +367,83 @@ async def test_0025_converts_the_seeded_gold_models_with_nothing_to_list(upgrade
 
 async def test_the_database_reached_head(upgraded) -> None:
     rows = await _fetch(upgraded["dsn"], "SELECT version_num FROM alembic_version")
-    assert rows == [{"version_num": "0025_keys_and_constraints"}]
+    assert rows == [{"version_num": "0026_dictionary_fields"}]
+
+
+# --- 0026: dictionary fields, the scale, PII mapped across ------------------------
+
+
+async def test_0026_maps_every_pii_value_across_as_recorded_field_by_field(upgraded) -> None:
+    """Every column that was PII (flag or type) has exactly one attestation, for
+    its `pii` field, recorded, with no provenance and no reviewer; no other
+    column has one; and every column's PII value is what it was."""
+    dsn = upgraded["dsn"]
+    attested = await _fetch(dsn, "SELECT column_id, entity_id, model_id, field_key, status, provenance, "
+                                 "provenance_by, provenance_at, value_digest, verified_by, verified_at "
+                                 "FROM field_attestations")
+    expected = {cid for cid, (is_pii, pii_type) in upgraded["pii_before"].items() if is_pii or pii_type}
+    assert len(expected) >= 3, "fixture sanity: the seed has PII columns"
+    assert sorted(str(a["column_id"]) for a in attested) == sorted(expected)
+    for row in attested:
+        assert (row["field_key"], row["status"], row["provenance"], row["provenance_by"], row["provenance_at"],
+                row["value_digest"], row["verified_by"], row["verified_at"]) == (
+            "pii", "recorded", None, None, None, None, None, None), row
+    after = {str(r["column_id"]): (r["is_pii"], r["pii_type"])
+             for r in await _fetch(dsn, "SELECT column_id, is_pii, pii_type FROM entity_columns")}
+    assert after == upgraded["pii_before"], "a PII value changed across 0026"
+    # The attestation belongs to its own model and entity.
+    owners = await _fetch(dsn, "SELECT count(*) AS n FROM field_attestations a JOIN entity_columns c "
+                               "ON c.column_id = a.column_id JOIN model_entities e ON e.entity_id = c.entity_id "
+                               "WHERE e.entity_id = a.entity_id AND e.model_id = a.model_id")
+    assert owners[0]["n"] == len(attested)
+    shapes = await _fetch(dsn, "SELECT c.column_name FROM field_attestations a JOIN entity_columns c "
+                               "ON c.column_id = a.column_id JOIN model_entities e ON e.entity_id = c.entity_id "
+                               "WHERE e.model_id = :m ORDER BY c.ordinal_position", m=upgraded["pii_model"])
+    assert [r["column_name"] for r in shapes] == ["email", "nickname", "phone"]
+
+
+async def test_0026_gives_every_workspace_the_default_scale(upgraded) -> None:
+    dsn = upgraded["dsn"]
+    workspaces = await _fetch(dsn, "SELECT count(*) AS n FROM workspaces")
+    levels = await _fetch(dsn, "SELECT s.workspace_id, string_agg(l.name, ',' ORDER BY l.rank) AS levels "
+                               "FROM classification_scales s JOIN classification_levels l ON l.scale_id = s.scale_id "
+                               "GROUP BY s.workspace_id")
+    assert len(levels) == workspaces[0]["n"] > 0
+    assert {r["levels"] for r in levels} == {"Public,Internal,Confidential,Restricted"}
+
+
+async def test_0026_new_fields_are_empty_on_existing_models(upgraded) -> None:
+    columns = await _fetch(upgraded["dsn"], "SELECT count(*) AS n, count(business_name) AS b, "
+                                            "count(permissible_values) AS p, count(unit) AS u, "
+                                            "count(critical_data_element) AS c, count(authoritative_source) AS a, "
+                                            "count(classification_level_id) AS l FROM entity_columns")
+    entities = await _fetch(upgraded["dsn"], "SELECT count(business_name) + count(business_owner) + "
+                                             "count(it_steward) + count(authoritative_source) AS n FROM model_entities")
+    assert columns[0]["n"] > 0
+    assert {k: v for k, v in columns[0].items() if k != "n"} == dict.fromkeys("bpucal", 0)
+    assert entities[0]["n"] == 0
+
+
+async def test_0026_a_level_in_use_cannot_be_deleted_by_any_path(upgraded) -> None:
+    """The foreign key refuses it, below the API's own check."""
+    dsn = upgraded["dsn"]
+    level = (await _fetch(dsn, "SELECT l.level_id FROM classification_levels l JOIN classification_scales s "
+                               "ON s.scale_id = l.scale_id JOIN data_models m ON m.workspace_id = s.workspace_id "
+                               "WHERE m.model_id = :m AND l.name = 'Confidential'", m=upgraded["pii_model"]))[0]
+    await _execute(dsn, "UPDATE entity_columns SET classification_level_id = :l WHERE column_name = 'email' "
+                        "AND entity_id IN (SELECT entity_id FROM model_entities WHERE model_id = :m)",
+                   l=level["level_id"], m=upgraded["pii_model"])
+    try:
+        with pytest.raises(sa.exc.IntegrityError, match="classification_level"):
+            await _execute(dsn, "DELETE FROM classification_levels WHERE level_id = :l", l=level["level_id"])
+    finally:
+        await _execute(dsn, "UPDATE entity_columns SET classification_level_id = NULL")
+
+
+async def test_0026_refuses_a_verified_row_without_provenance(upgraded) -> None:
+    with pytest.raises(sa.exc.IntegrityError, match="ck_field_attestations_verified"):
+        await _execute(upgraded["dsn"], "UPDATE field_attestations SET status = 'verified', "
+                                        "verified_by = 'x@example.com', verified_at = now()")
 
 
 async def test_models_from_before_0023_are_not_marked_imported(upgraded) -> None:
@@ -392,6 +499,44 @@ async def test_the_ledgers_refuse_rewrites_after_the_upgrade(upgraded) -> None:
     for sql in ("UPDATE audit_event SET outcome = 'DENIED'", "DELETE FROM egress_audit"):
         with pytest.raises(sa.exc.DBAPIError, match="append-only"):
             await _execute(upgraded["dsn"], sql)
+
+
+# --- 0026's downgrade ----------------------------------------------------------
+
+
+async def test_0026_downgrades_and_upgrades_again(server: str) -> None:
+    """Down to 0025 drops what 0026 added and keeps every PII value and audit
+    row; up again maps the PII values across afresh."""
+    dsn = _database(server, "downgrade_0026")
+    _upgrade_to(BACKEND, dsn, "0025_keys_and_constraints")
+    workspace = uuid.uuid4()
+    await _execute(dsn, "INSERT INTO workspaces (workspace_id, name) VALUES (:w, 'W')", w=workspace)
+    await _seed_pii(dsn, workspace)
+    _upgrade_to(BACKEND, dsn, "head")
+    # Use what 0026 added: a status change in the audit log, a classified column.
+    await _execute(dsn, "INSERT INTO audit_event (audit_id, action, outcome, scope, workspace_id) "
+                        "VALUES (:a, 'FIELD_STATUS_CHANGED', 'SUCCESS', 'workspace', :w)", a=uuid.uuid4(), w=workspace)
+    before = await _fetch(dsn, "SELECT column_id, is_pii, pii_type FROM entity_columns ORDER BY column_id")
+
+    result = _alembic(BACKEND, dsn, "downgrade", "0025_keys_and_constraints")
+    assert result.returncode == 0, result.stderr[-3000:]
+    assert await _fetch(dsn, "SELECT version_num FROM alembic_version") == [
+        {"version_num": "0025_keys_and_constraints"}]
+    tables = await _fetch(dsn, "SELECT table_name FROM information_schema.tables WHERE table_name IN "
+                               "('field_attestations', 'classification_scales', 'classification_levels')")
+    assert tables == []
+    added = await _fetch(dsn, "SELECT column_name FROM information_schema.columns WHERE table_name IN "
+                              "('entity_columns', 'model_entities') AND column_name IN ('business_name', "
+                              "'permissible_values', 'unit', 'critical_data_element', 'authoritative_source', "
+                              "'classification_level_id', 'business_owner', 'it_steward')")
+    assert added == []
+    assert await _fetch(dsn, "SELECT column_id, is_pii, pii_type FROM entity_columns ORDER BY column_id") == before
+    audit = await _fetch(dsn, "SELECT action FROM audit_event")
+    assert audit == [{"action": "FIELD_STATUS_CHANGED"}], "an audit row is never removed"
+
+    _upgrade_to(BACKEND, dsn, "head")
+    mapped = await _fetch(dsn, "SELECT count(*) AS n FROM field_attestations WHERE status = 'recorded'")
+    assert mapped[0]["n"] == 3
 
 
 # --- 0021's precondition ------------------------------------------------------

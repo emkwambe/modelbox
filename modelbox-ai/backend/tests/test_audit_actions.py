@@ -212,6 +212,24 @@ async def _appliance_owner_designated(c: AsyncClient, w: dict[str, Any]) -> None
     assert code == 0, "designate-appliance-owner refused"
 
 
+async def _field_status_changed(c: AsyncClient, w: dict[str, Any]) -> None:
+    """A person supplies a business name (its first status, not a change),
+    then clears it: the field's status goes with its value."""
+    if "model_id" not in w:
+        await _model_created(c, w)
+    graph = (await _ok(await c.get(f"/api/v1/model/{w['model_id']}", headers=bearer(w["admin"])), 200)).json()
+    for business_name in ("Customer email", None):
+        graph["entities"][0]["columns"][0]["business_name"] = business_name
+        await _ok(await c.put(f"/api/v1/model/{w['model_id']}/graph",
+                              json={"entities": graph["entities"], "relationships": graph["relationships"]},
+                              headers=bearer(w["admin"])), 200)
+
+
+async def _classification_changed(c: AsyncClient, w: dict[str, Any]) -> None:
+    await _ok(await c.post(f"/api/v1/workspaces/{w['ws'].workspace_id}/classification/levels",
+                           json={"name": "Secret"}, headers=bearer(w["admin"])), 201)
+
+
 TRIGGERS: dict[str, Trigger] = {
     "AUTH_LOGIN": _login,
     "AUTH_LOGIN_FAILED": _login_failed,
@@ -226,6 +244,8 @@ TRIGGERS: dict[str, Trigger] = {
     "USER_PROVISIONED": _user_provisioned,
     "USER_DEPROVISIONED": _user_deprovisioned,
     "APPLIANCE_OWNER_DESIGNATED": _appliance_owner_designated,
+    "FIELD_STATUS_CHANGED": _field_status_changed,
+    "CLASSIFICATION_CHANGED": _classification_changed,
 }
 
 

@@ -28,10 +28,13 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    event,
     func,
+    insert,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -318,6 +321,12 @@ class ModelEntity(Base):
     position: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
+    # Dictionary fields a person supplies (migration 0026). NULL until someone
+    # does; nothing is inferred.
+    business_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    business_owner: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    it_steward: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    authoritative_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     data_model: Mapped[DataModel] = relationship(back_populates="entities")
     columns: Mapped[list[EntityColumn]] = relationship(
@@ -385,8 +394,175 @@ class EntityColumn(Base):
     # ColumnSchema.source_default_value: the DEFAULT as an imported file
     # declared it (migration 0025). NULL for a column that was not imported.
     source_default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Dictionary fields a person supplies (migration 0026). NULL until someone
+    # does. permissible_values is a JSON list of values; critical_data_element
+    # NULL means not assessed, which is not the same as False.
+    business_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    permissible_values: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    critical_data_element: Mapped[bool | None] = mapped_column(nullable=True)
+    authoritative_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # A level of the workspace's classification scale, by id: renaming the
+    # level renames every use, and a level in use cannot be deleted.
+    classification_level_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("classification_levels.level_id"),
+        nullable=True,
+        index=True,
+    )
 
     entity: Mapped[ModelEntity] = relationship(back_populates="columns")
+
+
+class ClassificationScale(Base):
+    """A workspace's classification scale (migration 0026): one per workspace."""
+
+    __tablename__ = "classification_scales"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", name="uq_classification_scale_workspace"),
+    )
+
+    scale_id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+    levels: Mapped[list[ClassificationLevel]] = relationship(
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ClassificationLevel.rank",
+    )
+
+
+#: The scale every workspace starts with, least to most sensitive.
+DEFAULT_CLASSIFICATION_LEVELS: tuple[str, ...] = ("Public", "Internal", "Confidential", "Restricted")
+
+
+class ClassificationLevel(Base):
+    """One level of a classification scale, ranked least to most sensitive."""
+
+    __tablename__ = "classification_levels"
+    __table_args__ = (
+        UniqueConstraint("scale_id", "name", name="uq_classification_level_name"),
+    )
+
+    level_id: Mapped[uuid.UUID] = _uuid_pk()
+    scale_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("classification_scales.scale_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+@event.listens_for(Workspace, "after_insert")
+def _default_classification_scale(_mapper: object, connection: Connection, workspace: Workspace) -> None:
+    """Every workspace starts with the default scale, wherever it is created
+    (five code paths create workspaces; migration 0026 gave existing ones
+    theirs)."""
+    scale_id = uuid.uuid4()
+    connection.execute(insert(ClassificationScale).values(
+        scale_id=scale_id, workspace_id=workspace.workspace_id, name="Sensitivity"))
+    connection.execute(insert(ClassificationLevel), [
+        {"level_id": uuid.uuid4(), "scale_id": scale_id, "name": name, "rank": rank}
+        for rank, name in enumerate(DEFAULT_CLASSIFICATION_LEVELS, start=1)])
+
+
+ATTESTATION_STATUSES = ("recorded", "pending", "verified")
+#: Where a field's value came from. ``ai_draft`` is recorded provenance of a
+#: kind that can never support "verified": an AI draft is a first draft a
+#: modeller reviews (R2-1.3).
+PROVENANCE_KINDS = ("ddl", "source_comment", "person", "ai_draft")
+VERIFIABLE_PROVENANCE = ("ddl", "source_comment", "person")
+
+
+class FieldAttestation(Base):
+    """One dictionary field's current status and provenance (migration 0026).
+
+    Current state only. Every status change is also an ``audit_event`` row
+    (FIELD_STATUS_CHANGED), written in the same transaction, and the
+    append-only audit log is the review history; there is no second ledger.
+
+    A table-level field has no ``column_id``. ``verified`` is never written by
+    a client: the application sets it only when the three conditions hold
+    (``app.services.attestation``), and the CHECK below refuses a verified row
+    without a reviewer, a time, and provenance that can support it.
+    """
+
+    __tablename__ = "field_attestations"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('recorded', 'pending', 'verified')",
+            name="ck_field_attestations_status",
+        ),
+        CheckConstraint(
+            "provenance IS NULL OR provenance IN ('ddl', 'source_comment', 'person', 'ai_draft')",
+            name="ck_field_attestations_provenance",
+        ),
+        # `provenance IS NOT NULL` is not redundant: `NULL IN (...)` is
+        # unknown, and a CHECK passes on unknown, so without it a verified row
+        # with no provenance was accepted (found by its negative control).
+        CheckConstraint(
+            "status <> 'verified' OR (verified_by IS NOT NULL AND verified_at IS NOT NULL "
+            "AND provenance IS NOT NULL AND provenance IN ('ddl', 'source_comment', 'person'))",
+            name="ck_field_attestations_verified",
+        ),
+        Index(
+            "uq_field_attestation_column", "column_id", "field_key", unique=True,
+            postgresql_where=text("column_id IS NOT NULL"),
+            sqlite_where=text("column_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_field_attestation_table", "entity_id", "field_key", unique=True,
+            postgresql_where=text("column_id IS NULL"),
+            sqlite_where=text("column_id IS NULL"),
+        ),
+    )
+
+    attestation_id: Mapped[uuid.UUID] = _uuid_pk()
+    model_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("data_models.model_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("model_entities.entity_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    column_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("entity_columns.column_id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    field_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    provenance: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Who supplied the value when provenance is 'person' (the email, copied).
+    provenance_by: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    provenance_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # SHA-256 of the value the status refers to: a verified field whose value
+    # no longer has this digest has lapsed.
+    value_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verified_by: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    verified_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
 
 
 CONSTRAINT_KINDS = ("PRIMARY KEY", "UNIQUE", "CHECK")
@@ -833,6 +1009,8 @@ AUDIT_ACTIONS: tuple[str, ...] = (
     "USER_DEPROVISIONED",
     "ARTIFACT_GENERATED",
     "APPLIANCE_OWNER_DESIGNATED",
+    "FIELD_STATUS_CHANGED",
+    "CLASSIFICATION_CHANGED",
 )
 
 #: Outcomes. `DENIED` is separate from `FAILURE` on purpose: a refused
@@ -916,26 +1094,33 @@ class AuditEvent(Base):
 
 
 __all__ = [
+    "ATTESTATION_STATUSES",
     "AUDIT_ACTIONS",
     "AUDIT_OUTCOMES",
     "CARDINALITIES",
     "CONNECTION_ENGINES",
+    "DEFAULT_CLASSIFICATION_LEVELS",
     "EGRESS_ATTEMPT",
     "EGRESS_EVENTS",
     "EGRESS_FAILURE",
     "EGRESS_SUCCESS",
     "JOB_STATUSES",
     "PARADIGMS",
+    "PROVENANCE_KINDS",
+    "VERIFIABLE_PROVENANCE",
     "WORKSPACE_ROLES",
     "ApiKey",
     "AuditEvent",
     "Base",
+    "ClassificationLevel",
+    "ClassificationScale",
     "DataModel",
     "DatabaseConnection",
     "EgressAudit",
     "EntityColumn",
     "EntityRelationship",
     "FederatedIdentity",
+    "FieldAttestation",
     "ModelEntity",
     "SynthesisJob",
     "TrainerAssignment",

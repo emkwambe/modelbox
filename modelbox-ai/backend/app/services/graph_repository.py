@@ -37,6 +37,8 @@ from app.schemas.data_model import (
     RelationshipSchema,
     unify_foreign_keys,
 )
+from app.services import attestation
+from app.services.attestation import Actor
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +60,18 @@ class GraphRepository:
         model_id: uuid.UUID,
         entities: list[EntitySchema],
         relationships: list[RelationshipSchema],
+        *,
+        source: str = "transform",
+        actor: Actor | None = None,
     ) -> None:
         """Make the model's stored graph match the one provided.
+
+        ``source`` says who supplied the values this save changes (a person,
+        a DDL import, introspection, an AI draft, or a transform), and so what
+        provenance each changed field records; ``actor`` is the person, when
+        there is one. The default, a transform, records no provenance: a value
+        nobody is known to have supplied is only "recorded". Every changed
+        value that was verified lapses to pending (``app.services.attestation``).
 
         Entities are **upserted** on their natural key ``(model_id,
         entity_name)`` rather than deleted and recreated. That is what allows
@@ -71,9 +83,11 @@ class GraphRepository:
         Entities and relationships keep the order they are given in, so a
         model reopens as it was saved.
         """
+        snapshot = await attestation.before_save(self._session, model_id)
         # Every writer's graph gets the same reading: an older-form reference
         # becomes the relationship it describes before anything is stored.
         await self._persist(model_id, entities, unify_foreign_keys(entities, relationships))
+        await attestation.after_save(self._session, model_id, snapshot, source, actor)
 
     async def _persist(
         self,
@@ -136,6 +150,10 @@ class GraphRepository:
             row.tier = str(getattr(entity.tier, "value", entity.tier)) if entity.tier else None
             row.freshness_sla = entity.freshness_sla
             row.agg_time_column = entity.agg_time_column
+            row.business_name = entity.business_name
+            row.business_owner = entity.business_owner
+            row.it_steward = entity.it_steward
+            row.authoritative_source = entity.authoritative_source
             if row.next_stable_id is None:
                 row.next_stable_id = 1
             await self._session.flush()
@@ -254,6 +272,12 @@ class GraphRepository:
             row.default_value = col.default_value
             row.source_data_type = col.source_data_type
             row.source_default_value = col.source_default_value
+            row.business_name = col.business_name
+            row.permissible_values = col.permissible_values
+            row.unit = col.unit
+            row.critical_data_element = col.critical_data_element
+            row.authoritative_source = col.authoritative_source
+            row.classification_level_id = col.classification_level_id
             # is_primary_key, is_unique, check_expression, is_foreign_key and
             # references are derived from the entity's constraints and the
             # model's relationships, and stored there (migration 0025).

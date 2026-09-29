@@ -405,6 +405,10 @@ class SynthesisEngine:
                     tier=entity.tier,  # type: ignore[arg-type]
                     freshness_sla=entity.freshness_sla,
                     agg_time_column=entity.agg_time_column,
+                    business_name=entity.business_name,
+                    business_owner=entity.business_owner,
+                    it_steward=entity.it_steward,
+                    authoritative_source=entity.authoritative_source,
                     canvas_position_x=entity.canvas_position_x,
                     canvas_position_y=entity.canvas_position_y,
                     columns=[self._column_to_schema(c) for c in columns],
@@ -696,7 +700,7 @@ class SynthesisEngine:
         # One persistence path (Q8). The model is new, so `replace_graph` has
         # nothing to delete and reduces to a write.
         await GraphRepository(self._session).replace_graph(
-            model.model_id, synthesized.entities, synthesized.relationships
+            model.model_id, synthesized.entities, synthesized.relationships, source="ai"
         )
         return model
 
@@ -755,4 +759,10 @@ class SynthesisEngine:
             default_value=col.default_value,
             source_data_type=col.source_data_type,
             source_default_value=col.source_default_value,
+            business_name=col.business_name,
+            permissible_values=col.permissible_values,
+            unit=col.unit,
+            critical_data_element=col.critical_data_element,
+            authoritative_source=col.authoritative_source,
+            classification_level_id=col.classification_level_id,
         )

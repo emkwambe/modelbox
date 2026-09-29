@@ -262,6 +262,17 @@ EXEMPT: dict[str, str] = {
     "check_expression": "DDL CHECK and the seed generator; compared by dbt build (H11)",
     "source_data_type": "provenance of an imported column; no artifact emits it, each renders data_type",
     "source_default_value": "provenance of an imported default; artifacts render default_value",
+    # Sprint 8 Step 4b: dictionary fields a person supplies. Only the data
+    # dictionary shows them, with each field's status (test_data_dictionary,
+    # test_dictionary_verification); no contract format or DDL carries them yet,
+    # so there is no second projection to compare against.
+    "business_name": "data dictionary only (Step 4b); no contract or DDL format carries it yet",
+    "permissible_values": "data dictionary only (Step 4b); contracts' enum mapping is not decided",
+    "unit": "data dictionary only (Step 4b); no contract or DDL format carries it yet",
+    "critical_data_element": "data dictionary only (Step 4b); no contract or DDL format carries it yet",
+    "authoritative_source": "data dictionary only (Step 4b); no contract or DDL format carries it yet",
+    "classification_level_id": "data dictionary only (Step 4b), shown by the level's name; contracts' "
+                               "classification mapping is not decided",
 }
 
 # Nullability is genuinely absent from Protobuf output, and that is a finding

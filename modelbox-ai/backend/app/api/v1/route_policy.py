@@ -71,8 +71,14 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", f"{_V1}/model/{{model_id}}/export/dictionary"): "VIEWER",
     ("GET", f"{_V1}/model/{{model_id}}/export/zip"): "VIEWER",
     ("POST", f"{_V1}/model/{{model_id}}/transform-paradigm"): "MEMBER",
+    ("GET", f"{_V1}/model/{{model_id}}/attestations"): "VIEWER",
+    ("POST", f"{_V1}/model/{{model_id}}/attestations/verify"): "APPROVER",
     # --- workspaces --------------------------------------------------------
     ("GET", f"{_V1}/workspaces"): AUTHENTICATED,
+    ("GET", f"{_V1}/workspaces/{{workspace_id}}/classification"): "VIEWER",
+    ("POST", f"{_V1}/workspaces/{{workspace_id}}/classification/levels"): "ADMIN",
+    ("PATCH", f"{_V1}/workspaces/{{workspace_id}}/classification/levels/{{level_id}}"): "ADMIN",
+    ("DELETE", f"{_V1}/workspaces/{{workspace_id}}/classification/levels/{{level_id}}"): "ADMIN",
     # --- trainer -----------------------------------------------------------
     ("POST", f"{_V1}/trainer/assignments"): "MEMBER",
     ("GET", f"{_V1}/trainer/assignments"): "VIEWER",
