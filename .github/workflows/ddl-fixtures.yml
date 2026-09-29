@@ -1,0 +1,177 @@
+name: DDL Fixtures
+
+# Genuine tool exports for the DDL importer's fixtures. Oracle's DBMS_METADATA
+# and SQL Server's SMO (the engine behind SSMS scripting) run against their own
+# databases, loaded with public sample schemas, and write each fixture plus a
+# manifest counted from the database's catalog views. The outputs are uploaded
+# as artifacts; once committed under backend/tests/fixtures/ddl/, every run
+# regenerates them and fails unless the committed copies are what the tools
+# produce (compare_fixture.py). Heavy by design, so it runs here and never on a
+# developer machine, and only when the generators or fixtures change.
+on:
+  push:
+    branches: [ "**" ]
+    paths:
+      - .github/workflows/ddl-fixtures.yml
+      - modelbox-ai/scripts/ddl_fixtures/**
+      - modelbox-ai/backend/tests/fixtures/ddl/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Pinned by digest, and recorded in each fixture's provenance header.
+  ORACLE_IMAGE: gvenzl/oracle-free:23.26.3-slim-faststart@sha256:f5ff19033860d662c821cb04eb10483fa94f14f78eae252d054291ea07028093
+  MSSQL_IMAGE: mcr.microsoft.com/mssql/server:2022-CU27-ubuntu-22.04@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090
+  ORACLE_SAMPLES_SHA: 6660bad68c07bd143430ace58565b3f727e17263
+  AW_BAK_URL: https://github.com/microsoft/sql-server-samples/releases/download/adventureworks/AdventureWorks2022.bak
+  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+jobs:
+  oracle:
+    name: Oracle (DBMS_METADATA)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install the Oracle client library
+        run: pip install oracledb==26.0.1
+
+      - name: Start Oracle Database Free
+        run: |
+          pw="Ora$(openssl rand -hex 12)"
+          echo "::add-mask::$pw"
+          echo "ORACLE_PASSWORD=$pw" >> "$GITHUB_ENV"
+          docker run -d --name modelbox-fixture-oracle -e ORACLE_PASSWORD="$pw" -p 127.0.0.1::1521 "$ORACLE_IMAGE"
+          for _ in $(seq 1 60); do
+            if docker logs modelbox-fixture-oracle 2>&1 | grep -q 'DATABASE IS READY TO USE'; then break; fi
+            sleep 5
+          done
+          docker logs modelbox-fixture-oracle 2>&1 | grep -q 'DATABASE IS READY TO USE' || { docker logs modelbox-fixture-oracle | tail -50; exit 1; }
+          port="$(docker port modelbox-fixture-oracle 1521 | head -n 1 | awk -F: '{print $NF}')"
+          [ -n "$port" ] || { echo "::error::no host port for Oracle"; exit 1; }
+          echo "ORACLE_PORT=$port" >> "$GITHUB_ENV"
+
+      - name: Install the HR and CO sample schemas
+        run: |
+          base="https://raw.githubusercontent.com/oracle-samples/db-sample-schemas/${ORACLE_SAMPLES_SHA}"
+          curl -fsSL -o hr_create.sql "$base/human_resources/hr_create.sql"
+          curl -fsSL -o co_create.sql "$base/customer_orders/co_create.sql"
+          docker cp hr_create.sql modelbox-fixture-oracle:/tmp/hr_create.sql
+          docker cp co_create.sql modelbox-fixture-oracle:/tmp/co_create.sql
+          for schema in hr co; do
+            printf '%s\n' "WHENEVER SQLERROR EXIT FAILURE" \
+              "CREATE USER $schema IDENTIFIED BY \"$ORACLE_PASSWORD\" DEFAULT TABLESPACE users QUOTA UNLIMITED ON users;" \
+              "GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW, CREATE PROCEDURE, CREATE TRIGGER TO $schema;" \
+              "EXIT" | docker exec -i modelbox-fixture-oracle sqlplus -s "system/$ORACLE_PASSWORD@FREEPDB1"
+            printf '%s\n' "WHENEVER SQLERROR EXIT FAILURE" "@/tmp/${schema}_create.sql" "EXIT" \
+              | docker exec -i modelbox-fixture-oracle sqlplus -s "$schema/$ORACLE_PASSWORD@FREEPDB1" > "${schema}_install.log"
+            tail -5 "${schema}_install.log"
+          done
+
+      - name: Export with DBMS_METADATA and count from the catalog
+        run: |
+          for pair in "HR human_resources/hr_create.sql" "CO customer_orders/co_create.sql"; do
+            set -- $pair
+            python modelbox-ai/scripts/ddl_fixtures/oracle_export.py \
+              --dsn "127.0.0.1:${ORACLE_PORT}/FREEPDB1" --schema "$1" --out out/oracle \
+              --image "$ORACLE_IMAGE" --source "oracle-samples/db-sample-schemas@${ORACLE_SAMPLES_SHA} $2" \
+              --run "$RUN_URL"
+          done
+
+      - name: Upload the regenerated fixtures
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ddl-fixtures-oracle
+          path: out/oracle
+
+      - name: The committed fixtures are what the tool produces
+        run: |
+          committed=modelbox-ai/backend/tests/fixtures/ddl/oracle
+          if [ -d "$committed" ]; then
+            python modelbox-ai/scripts/ddl_fixtures/compare_fixture.py "$committed" out/oracle
+          else
+            echo "::warning::no committed Oracle fixtures yet; the upload is the candidate set"
+          fi
+
+  mssql:
+    name: SQL Server (SMO, as SSMS scripts)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Start SQL Server 2022 (Developer)
+        run: |
+          pw="Aa1!$(openssl rand -hex 12)"
+          echo "::add-mask::$pw"
+          echo "MSSQL_SA_PASSWORD=$pw" >> "$GITHUB_ENV"
+          docker run -d --name modelbox-fixture-mssql -e ACCEPT_EULA=Y -e MSSQL_PID=Developer \
+            -e MSSQL_SA_PASSWORD="$pw" -p 127.0.0.1::1433 "$MSSQL_IMAGE"
+          for _ in $(seq 1 60); do
+            if docker exec modelbox-fixture-mssql /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$pw" -Q "SELECT 1" -b >/dev/null 2>&1; then break; fi
+            sleep 3
+          done
+          docker exec modelbox-fixture-mssql /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$pw" -Q "SELECT @@VERSION" -b
+          port="$(docker port modelbox-fixture-mssql 1433 | head -n 1 | awk -F: '{print $NF}')"
+          [ -n "$port" ] || { echo "::error::no host port for SQL Server"; exit 1; }
+          echo "MSSQL_PORT=$port" >> "$GITHUB_ENV"
+
+      - name: Restore AdventureWorks2022
+        run: |
+          curl -fsSL -o aw.bak "$AW_BAK_URL"
+          sha="$(sha256sum aw.bak | cut -d' ' -f1)"
+          echo "AdventureWorks2022.bak sha256 $sha"
+          echo "AW_BAK_SHA256=$sha" >> "$GITHUB_ENV"
+          docker exec -u 0 modelbox-fixture-mssql mkdir -p /var/opt/mssql/backup
+          docker cp aw.bak modelbox-fixture-mssql:/var/opt/mssql/backup/aw.bak
+          docker exec -u 0 modelbox-fixture-mssql chown -R mssql /var/opt/mssql/backup
+          docker exec modelbox-fixture-mssql /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -b -Q \
+            "RESTORE DATABASE AdventureWorks2022 FROM DISK = '/var/opt/mssql/backup/aw.bak' WITH MOVE 'AdventureWorks2022' TO '/var/opt/mssql/data/AdventureWorks2022.mdf', MOVE 'AdventureWorks2022_log' TO '/var/opt/mssql/data/AdventureWorks2022_log.ldf'"
+
+      - name: Install the SqlServer PowerShell module (SMO)
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module SqlServer -RequiredVersion 22.4.5.1 -Scope CurrentUser -Force -AllowClobber
+          Get-Module SqlServer -ListAvailable | Select-Object Name, Version
+
+      - name: Script with SMO and count from the catalog
+        shell: pwsh
+        run: |
+          ./modelbox-ai/scripts/ddl_fixtures/mssql_export.ps1 `
+            -Server "127.0.0.1,$env:MSSQL_PORT" -Database AdventureWorks2022 -Out out/tsql `
+            -Image $env:MSSQL_IMAGE `
+            -Source "microsoft/sql-server-samples release 'adventureworks', AdventureWorks2022.bak sha256 $env:AW_BAK_SHA256" `
+            -Run $env:RUN_URL
+
+      - name: Upload the regenerated fixtures
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ddl-fixtures-tsql
+          path: out/tsql
+
+      - name: The committed fixtures are what the tool produces
+        run: |
+          committed=modelbox-ai/backend/tests/fixtures/ddl/tsql
+          if [ -d "$committed" ]; then
+            python modelbox-ai/scripts/ddl_fixtures/compare_fixture.py "$committed" out/tsql
+          else
+            echo "::warning::no committed SQL Server fixtures yet; the upload is the candidate set"
+          fi
