@@ -10,13 +10,18 @@ Two ways it could report green having tested nothing on PostgreSQL:
 * a module builds its own SQLite engine and never asks ``_test_db``. No test
   file but ``_test_db.py`` may name a SQLite URL.
 
+``conftest.py`` is loaded by the fidelity harness too, in the tools
+environment where SQLAlchemy is not installed, so its module-level imports are
+checked as well.
+
 Negative controls (Amendment 2): with the URL removed in-process, the dialect
-check fails; given a module that builds its own SQLite engine, the structural
-check fails.
+check fails; given a module that builds its own SQLite engine, or a conftest
+that imports the helper at module level, the structural checks fail.
 """
 
 from __future__ import annotations
 
+import ast
 import os
 from pathlib import Path
 
@@ -56,6 +61,32 @@ async def test_the_suite_runs_on_the_expected_database() -> None:
     await _check_dialect(os.environ.get(EXPECT_ENV, "sqlite"))
 
 
+def test_conftest_reads_the_same_variable() -> None:
+    """conftest.py restates the name so it can avoid importing SQLAlchemy."""
+    from tests import conftest
+
+    assert conftest.DATABASE_ENV == DATABASE_ENV
+
+
+CONFTEST_MAY_IMPORT = {"__future__", "os", "collections", "pytest"}
+
+
+def _module_level_imports(source: str) -> set[str]:
+    tree = ast.parse(source)
+    return {
+        (node.module if isinstance(node, ast.ImportFrom) else alias.name).split(".")[0]
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    }
+
+
+def test_conftest_imports_nothing_the_tools_environment_lacks() -> None:
+    """The fidelity harness loads conftest.py where SQLAlchemy is absent."""
+    source = (TESTS / "conftest.py").read_text(encoding="utf-8")
+    assert _module_level_imports(source) <= CONFTEST_MAY_IMPORT
+
+
 def test_no_test_module_builds_its_own_sqlite_engine() -> None:
     sources = {p.name: p.read_text(encoding="utf-8") for p in TESTS.glob("*.py")}
     assert "_test_db.py" in sources and len(sources) > 20, "test sources not found"
@@ -69,6 +100,13 @@ async def test_negative_control_without_the_url_postgresql_is_not_what_runs(
     monkeypatch.setenv(DATABASE_ENV, "")
     with pytest.raises(AssertionError, match="tests ran on sqlite, not postgresql"):
         await _check_dialect("postgresql")
+
+
+def test_negative_control_a_conftest_importing_the_helper_fails() -> None:
+    """The shape that broke the fidelity harness in f44bcff."""
+    source = "import pytest\n\nfrom tests._test_db import drop_test_databases\n"
+    with pytest.raises(AssertionError):
+        assert _module_level_imports(source) <= CONFTEST_MAY_IMPORT
 
 
 def test_negative_control_a_module_with_its_own_sqlite_engine_fails() -> None:
