@@ -247,6 +247,15 @@ export interface WorkspaceInfo {
   role: string;
 }
 
+export type WorkspaceRole = 'OWNER' | 'ADMIN' | 'APPROVER' | 'MEMBER' | 'VIEWER';
+
+/** A member of a workspace (Sprint 8 Step 6). */
+export interface MemberInfo {
+  user_id: string;
+  email: string;
+  role: WorkspaceRole;
+}
+
 /** One level of a workspace's classification scale, least sensitive first. */
 export interface ClassificationLevel {
   level_id: string;
