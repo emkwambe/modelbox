@@ -10,9 +10,11 @@ writes two files:
   ``--restrict-key``: pg_dump otherwise writes a random key into its
   ``\\restrict`` line on every run, and a fixture must be reproducible;
 * ``<name>.manifest.json``: the counts an import must reconcile against, **read
-  from the pg_catalog views**, never from a parser. Constraints are counted
-  where they are declared (``conparentid = 0``): a partition's copies of its
-  parent's keys are not written by pg_dump, and are not counted.
+  from the pg_catalog views**, never from a parser. Every constraint the catalog
+  holds on a table is counted, and those a partition inherits from its parent
+  (``conparentid <> 0``) are also counted apart, because pg_dump treats them
+  differently by kind: it writes each partition's primary key as its own
+  ``ADD CONSTRAINT``, and never writes the foreign keys a partition inherits.
 
 Usage::
 
@@ -45,13 +47,21 @@ SELECT c.relname AS name,
        (SELECT count(*) FROM pg_attribute a
          WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped) AS columns,
        (SELECT count(*) FROM pg_constraint k
-         WHERE k.conrelid = c.oid AND k.contype = 'p' AND k.conparentid = 0) AS primary_keys,
+         WHERE k.conrelid = c.oid AND k.contype = 'p') AS primary_keys,
        (SELECT count(*) FROM pg_constraint k
-         WHERE k.conrelid = c.oid AND k.contype = 'f' AND k.conparentid = 0) AS foreign_keys,
+         WHERE k.conrelid = c.oid AND k.contype = 'p' AND k.conparentid <> 0) AS primary_keys_inherited,
        (SELECT count(*) FROM pg_constraint k
-         WHERE k.conrelid = c.oid AND k.contype = 'u' AND k.conparentid = 0) AS unique_constraints,
+         WHERE k.conrelid = c.oid AND k.contype = 'f') AS foreign_keys,
        (SELECT count(*) FROM pg_constraint k
-         WHERE k.conrelid = c.oid AND k.contype = 'c' AND k.conparentid = 0) AS check_constraints,
+         WHERE k.conrelid = c.oid AND k.contype = 'f' AND k.conparentid <> 0) AS foreign_keys_inherited,
+       (SELECT count(*) FROM pg_constraint k
+         WHERE k.conrelid = c.oid AND k.contype = 'u') AS unique_constraints,
+       (SELECT count(*) FROM pg_constraint k
+         WHERE k.conrelid = c.oid AND k.contype = 'u' AND k.conparentid <> 0) AS unique_constraints_inherited,
+       (SELECT count(*) FROM pg_constraint k
+         WHERE k.conrelid = c.oid AND k.contype = 'c') AS check_constraints,
+       (SELECT count(*) FROM pg_constraint k
+         WHERE k.conrelid = c.oid AND k.contype = 'c' AND k.conparentid <> 0) AS check_constraints_inherited,
        (SELECT count(*) FROM pg_attribute a
          WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped AND a.attnotnull) AS not_null_columns,
        (SELECT count(*) FROM pg_description d
@@ -64,9 +74,17 @@ SELECT c.relname AS name,
 """
 
 COUNT_KEYS = (
-    "columns", "primary_keys", "foreign_keys", "unique_constraints",
-    "check_constraints", "not_null_columns", "table_descriptions",
-    "column_descriptions",
+    "columns", "primary_keys", "primary_keys_inherited", "foreign_keys",
+    "foreign_keys_inherited", "unique_constraints", "unique_constraints_inherited",
+    "check_constraints", "check_constraints_inherited", "not_null_columns",
+    "table_descriptions", "column_descriptions",
+)
+NOTE = (
+    "Constraint counts are every constraint the catalog holds on the table; the "
+    "*_inherited counts are those a partition inherits from its parent. pg_dump "
+    "writes each partition's inherited primary key as its own ADD CONSTRAINT, and "
+    "never writes the foreign keys a partition inherits. CHECK constraints on "
+    "domains are not table constraints and are not counted."
 )
 
 
@@ -129,7 +147,8 @@ def main() -> int:
         "fixture": f"{stem}.sql",
         "dialect": "postgres",
         "schema": "public",
-        "counts_from": "catalog views (pg_class, pg_attribute, pg_constraint with conparentid = 0, pg_inherits, pg_description)",
+        "counts_from": "catalog views (pg_class, pg_attribute, pg_constraint, pg_inherits, pg_description)",
+        "note": NOTE,
         "counts": {
             "tables": len(tables),
             "partitions": sum(1 for t in tables if t["partition_of"]),
