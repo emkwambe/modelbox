@@ -45,9 +45,11 @@ from conftest import (
     World,
     bearer,
     check,
+    import_fixture,
     login,
     psql,
     remember_secret,
+    sql_ok,
     token,
     weakened_by_insecure,
 )
@@ -237,3 +239,42 @@ def test_b9_a_write_the_appliance_acknowledged_is_visible_to_the_next_request(
             f"round {round_number} of {READ_YOUR_WRITES_ROUNDS}: a key the appliance had just "
             f"returned got HTTP {status} on the next request",
         )
+
+
+# --- B10: genuine exports import with zero reconciliation gaps -------------------------
+
+
+@pytest.mark.parametrize(
+    ("fixture", "dialect"),
+    [("oracle/hr.sql", "oracle"), ("tsql/adventureworks.sql", "tsql")],
+    ids=["oracle-hr", "adventureworks"],
+)
+def test_b10_a_genuine_export_imports_with_zero_gaps(
+    client: httpx.Client, world: World, fixture: str, dialect: str
+) -> None:
+    """The file travels over HTTP to the running appliance, which reconciles it.
+
+    Three readings, each from a different place: the import response, the
+    stored report as the import page downloads it, and the model's row read
+    with SQL. Configuration cannot weaken an import; the in-process controls
+    that a dropped statement is a gap are `test_ddl_import_core.py`
+    (`test_negative_control_a_statement_the_importer_drops_is_a_gap_by_statement`)
+    and `test_ddl_import_api.py` (`test_an_import_with_gaps_is_saved_unreconciled`),
+    and the journey's Snowflake path shows an unreconciled import through the UI.
+    """
+    imported = import_fixture(client, world, fixture, dialect)
+    reconciliation = imported["report"]["reconciliation"]
+    check(imported["status"] == "reconciled" and reconciliation["gaps"] == [],
+          f"{fixture}: status {imported['status']!r}, gaps {reconciliation['gaps'][:3]}")
+
+    owner = bearer(token(client, world.owner.email, world.owner.password))
+    stored = client.get(f"/api/v1/model/{imported['model_id']}/import-report",
+                        params={"format": "json"}, headers=owner)
+    assert stored.status_code == 200, f"setup: the stored report got HTTP {stored.status_code}"
+    stored_report = json.loads(stored.text)
+    check(stored_report["reconciliation"]["gaps"] == [],
+          f"{fixture}: the stored report has gaps {stored_report['reconciliation']['gaps'][:3]}")
+
+    row = sql_ok("SELECT reconciliation_status FROM data_models WHERE model_id = :'model_id';",
+                 variables={"model_id": imported["model_id"]})
+    check(row == "reconciled", f"{fixture}: the database records {row!r}")
