@@ -82,6 +82,7 @@ an answer. Unchanged since 2026-09-03 except where marked.
 | **The reference-free instrument is severity-blind.** `findings_per_entity` weights a missing description equal to unmarked PII. | The same defect as the raw-count problem, one level up. |
 | **`EntitySchema.entity_type` defaults to the enum member, not its value.** A model whose entities omit the field is persisted as `"EntityType.TABLE"` and fails to reload. | A provider response that omits the field takes the same path. |
 | **`users.email` has a redundant index.** Migration 0002 created both `uq_users_email` and a plain `ix_users_email`. | Harmless but wasteful; removing it needs a new migration. |
+| **Computed columns are not exported.** A PostgreSQL DDL export names each computed column as an export gap and leaves it out. Seven of AdventureWorks' ten are expressible as PostgreSQL generated columns (`GENERATED ALWAYS AS (...) STORED`): WorkOrder.StockedQty, PurchaseOrderDetail.LineTotal and .StockedQty, PurchaseOrderHeader.TotalDue, SalesOrderDetail.LineTotal, SalesOrderHeader.SalesOrderNumber and .TotalDue. PostgreSQL 16 has stored generated columns only, so a SQL Server column that is not `PERSISTED` (computed on read) would become stored. The other three call a `hierarchyid` method or a user function the model does not hold. | The export loses those columns' definitions, and the model does not yet hold the expression (the import report does). |
 
 ---
 

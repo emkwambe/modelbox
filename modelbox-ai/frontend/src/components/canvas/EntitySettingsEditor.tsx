@@ -13,6 +13,18 @@ import { useCanvasStore } from '@/store/canvasStore';
 import type { AssetTier } from '@/types/schema';
 import { color } from '@/styles/tokens';
 
+/** The table-level data dictionary fields a person supplies (Sprint 8 Step 4b). */
+const DICTIONARY_FIELDS: {
+  key: 'business_name' | 'business_owner' | 'it_steward' | 'authoritative_source';
+  label: string;
+  placeholder: string;
+}[] = [
+  { key: 'business_name', label: 'Business name', placeholder: 'e.g. Customer orders' },
+  { key: 'business_owner', label: 'Business owner', placeholder: 'Who answers for its meaning' },
+  { key: 'it_steward', label: 'IT steward', placeholder: 'Who answers for its data' },
+  { key: 'authoritative_source', label: 'Authoritative source', placeholder: 'The system of record' },
+];
+
 const TIERS: { value: AssetTier | ''; label: string }[] = [
   { value: '', label: '— none —' },
   { value: 'TIER_1_CRITICAL', label: 'Tier 1 · Critical' },
@@ -145,6 +157,18 @@ export default function EntitySettingsEditor() {
             : 'No date or time column, so this entity has no time axis.'}
         </span>
       </label>
+
+      {DICTIONARY_FIELDS.map(({ key, label, placeholder }) => (
+        <label key={key} style={field}>
+          <span style={lbl}>{label}</span>
+          <input
+            value={d[key] ?? ''}
+            onChange={(e) => updateEntity(selectedNodeId, { [key]: e.target.value || null })}
+            placeholder={placeholder}
+            style={input}
+          />
+        </label>
+      ))}
 
       <p style={{ fontSize: 11, color: color.neutral[500], margin: '8px 0 0' }}>
         Save to persist. Tier &amp; SLA flow into ODCS + dbt exports; a Tier 1/2

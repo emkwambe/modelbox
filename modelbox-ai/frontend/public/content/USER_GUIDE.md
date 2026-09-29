@@ -162,16 +162,68 @@ Open **Export artifacts → Dictionary**. Choose a format:
 - **HTML** — a self-contained, styled documentation page.
 - **JSON** — machine-readable metadata; feed it to AI agents or a catalog.
 - **CSV** — two files: `data_dictionary.csv`, one row per column with its
-  table's description, grain and type, and `data_dictionary_relationships.csv`.
+  table's fields, and a `<field>_status` column beside each field; and
+  `data_dictionary_relationships.csv`.
 
 Every format shows the same fields, read from the model, in this order:
 column name, position, type, the type as declared in the source DDL,
 nullable, default (in its original text), primary-key position, UNIQUE
 constraints (including composite ones), foreign-key target, CHECK
-constraints, description, PII, and validation rules (min, max, regex).
-PII and validation rules are labelled **as recorded**: they show what the
-model holds, not a review of it. A field the model does not hold is left out
-rather than shown blank.
+constraints, description, business name, permissible values, unit,
+classification, PII, critical data element, authoritative source, and
+validation rules (min, max, regex). Each table shows its business name,
+description, grain, type, business owner, IT steward and authoritative
+source.
+
+**Every field that holds a value shows its status**, and the dictionary's
+header counts them: "N of M fields verified, K pending review".
+
+- **verified** — an approver asked, and all three conditions held (below).
+- **pending review** — where the value came from is recorded (the DDL, a
+  source comment, a named person on a date, or an AI draft), and nobody has
+  verified it yet.
+- **recorded** — the value is there, but nothing records where it came from
+  (values saved before this release, including PII flags).
+
+A field is marked verified only where its attestation says so; apart from
+those fields, the word appears only in the header's count and the legend.
+
+### Supplying and verifying dictionary fields
+
+Select a column on the canvas to edit its definition, business name,
+permissible values (one per line), unit, classification, critical data
+element (not assessed, yes, or no) and authoritative source; select an entity
+for its business name, owners and authoritative source. Save the model. A
+value you change is recorded as supplied by you, on that date, and is
+pending review. A model's synthesis never fills these fields: a business
+name or an owner the model guessed would read as fact.
+
+A person with the **APPROVER** role verifies fields with
+`POST /api/v1/model/{id}/attestations/verify`. A field becomes verified only
+when all three hold:
+
+1. the model was imported from a DDL file and **reconciled**;
+2. its **definition** (the column's or table's description) passes the
+   ISO/IEC 11179-4 rules a tool can check: it is present, it is a phrase or
+   sentence rather than one word, it does not state only what the concept is
+   not, and it is not the name restated;
+3. its **provenance** is recorded, and it is not an AI draft.
+
+Each field is answered with the three conditions as found, so a field that
+stays pending shows what it lacks. The rest of ISO/IEC 11179-4 is judgement,
+and passing these rules does not claim it. **A verified field returns to
+pending when its value changes**, as a model's approval lapses when the model
+is edited. Every status change is written to the audit log, which is the
+review history.
+
+### The classification scale
+
+Each workspace has one classification scale, least to most sensitive: Public,
+Internal, Confidential and Restricted to begin with. A workspace owner or
+admin changes it at **Classification** (`/settings/classification`): add,
+rename, move and delete levels. Columns refer to a level, not its name, so a
+rename changes it everywhere at once. A level any column uses cannot be
+deleted; reclassify those columns first. PII type stays a separate field.
 
 The dictionary starts by stating where the model came from. A model imported
 from a DDL file that did not reconcile with its source says so at the top, in

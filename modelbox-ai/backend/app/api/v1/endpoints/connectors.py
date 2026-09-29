@@ -28,6 +28,7 @@ from app.schemas.data_model import (
     SynthesizeResponse,
 )
 from app.services import audit_log
+from app.services.attestation import Actor
 from app.services.graph_engine import GraphEngine
 from app.services.graph_repository import GraphRepository
 from app.services.introspection import (
@@ -186,7 +187,8 @@ async def introspect_connection(
     session.add(model)
     await session.flush()
     await GraphRepository(session).replace_graph(
-        model.model_id, graph.entities, graph.relationships
+        model.model_id, graph.entities, graph.relationships,
+        source="introspection", actor=Actor(user.user_id, user.email),
     )
     await audit_log.record(
         action="MODEL_CREATED",

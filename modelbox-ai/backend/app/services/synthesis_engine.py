@@ -110,6 +110,28 @@ _SYSTEM_PROMPT = (
 )
 
 
+# The data dictionary fields a person supplies (Sprint 8 Step 4b). A model
+# cannot know a business name, an owner, the values a column may hold, its
+# unit, its classification (a level id it has never seen), whether it is a
+# critical data element, or its system of record; anything it returned would
+# be invented and would read as fact. Cleared after synthesis, whatever the
+# response held, rather than left to an instruction the model may not follow.
+PERSON_SUPPLIED_COLUMN_FIELDS = ("business_name", "permissible_values", "unit", "critical_data_element",
+                                 "authoritative_source", "classification_level_id")
+PERSON_SUPPLIED_ENTITY_FIELDS = ("business_name", "business_owner", "it_steward", "authoritative_source")
+
+
+def clear_person_supplied(model: SynthesizedModel) -> SynthesizedModel:
+    """``model`` with every person-supplied dictionary field emptied."""
+    for entity in model.entities:
+        for name in PERSON_SUPPLIED_ENTITY_FIELDS:
+            setattr(entity, name, None)
+        for column in entity.columns:
+            for name in PERSON_SUPPLIED_COLUMN_FIELDS:
+                setattr(column, name, None)
+    return model
+
+
 _REPAIRABLE_CODES: frozenset[str] = frozenset(
     {
         "CYCLIC_FK",
@@ -305,7 +327,7 @@ class SynthesisEngine:
                 }
             )
 
-        return synthesized, report
+        return clear_person_supplied(synthesized), report
 
     async def synthesize(
         self,
@@ -352,6 +374,7 @@ class SynthesisEngine:
             relationships=synthesized.relationships,
             suggested_metrics=synthesized.suggested_metrics,
             validation=report,
+            workspace_id=model.workspace_id,
         )
 
     async def _record_created(self, model: DataModel, user_id: uuid.UUID | None) -> None:
@@ -405,6 +428,10 @@ class SynthesisEngine:
                     tier=entity.tier,  # type: ignore[arg-type]
                     freshness_sla=entity.freshness_sla,
                     agg_time_column=entity.agg_time_column,
+                    business_name=entity.business_name,
+                    business_owner=entity.business_owner,
+                    it_steward=entity.it_steward,
+                    authoritative_source=entity.authoritative_source,
                     canvas_position_x=entity.canvas_position_x,
                     canvas_position_y=entity.canvas_position_y,
                     columns=[self._column_to_schema(c) for c in columns],
@@ -467,6 +494,7 @@ class SynthesisEngine:
             ],
             validation=report,
             conversion_findings=[ConversionFinding.model_validate(f) for f in findings],
+            workspace_id=model.workspace_id,
         )
 
     async def _constraints(
@@ -696,7 +724,7 @@ class SynthesisEngine:
         # One persistence path (Q8). The model is new, so `replace_graph` has
         # nothing to delete and reduces to a write.
         await GraphRepository(self._session).replace_graph(
-            model.model_id, synthesized.entities, synthesized.relationships
+            model.model_id, synthesized.entities, synthesized.relationships, source="ai"
         )
         return model
 
@@ -755,4 +783,10 @@ class SynthesisEngine:
             default_value=col.default_value,
             source_data_type=col.source_data_type,
             source_default_value=col.source_default_value,
+            business_name=col.business_name,
+            permissible_values=col.permissible_values,
+            unit=col.unit,
+            critical_data_element=col.critical_data_element,
+            authoritative_source=col.authoritative_source,
+            classification_level_id=col.classification_level_id,
         )

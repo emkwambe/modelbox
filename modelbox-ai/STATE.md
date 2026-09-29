@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `sprint-8/step-4a-dictionary-export`, branched
-from `main` at `240963c`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-29 on `sprint-8/step-4b-dictionary-verification`,
+branched from `main` at `fe8dbd4`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,11 +9,11 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `240963c` | keys, constraints and the saved-model journey (#19), on SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `fe8dbd4` | exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), on keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36516574170: gate, backend and frontend images all green) |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-8/step-4a-dictionary-export` | this branch | exported DDL applied to PostgreSQL; the data dictionary rebuilt (below) |
-| `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-8/step-4b-dictionary-verification` | this branch | dictionary fields, a classification scale, per-field verification (below) |
+| `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
 ## Offline DDL import (on `main`)
 
@@ -28,7 +28,25 @@ import with zero gaps against their catalog manifests (Pagila as 15 tables and
 55 partitions); the Snowflake fixture fails by name on its HYBRID TABLE and is
 saved unreconciled.
 
-## In progress on this branch: DDL applied to PostgreSQL, and the dictionary
+## In progress on this branch: dictionary fields and per-field verification
+
+Migration 0026 adds, additively, the dictionary fields a person supplies
+(on columns: business name, permissible values, unit, critical data element,
+authoritative source, a classification level; on tables: business name,
+business owner, IT steward, authoritative source), a classification scale
+per workspace (Public, Internal, Confidential, Restricted by default,
+editable by its admins; a level in use cannot be deleted), and
+`field_attestations`, each field's status and provenance. Existing PII values
+are mapped across as "recorded". A field is verified only when an APPROVER
+asks and the model is a reconciled import, its definition passes the
+machine-checkable ISO/IEC 11179-4 rules, and its provenance is recorded and
+is not an AI draft; a verified value that changes returns to pending, and
+every status change is an audit event. Synthesis never fills these fields.
+The dictionary shows each field's status and "N of M fields verified, K
+pending review". The canvas edits the new fields; `/settings/classification`
+edits the scale.
+
+## DDL applied to PostgreSQL, and the dictionary (on `main`)
 
 Each certified fixture's exported PostgreSQL DDL (HR, CO, Pagila,
 AdventureWorks) is applied to the appliance's own PostgreSQL 16.15 in CI
@@ -42,8 +60,7 @@ user-defined types the model does not hold (Pagila); and SQL Server `money`,
 PostgreSQL accepts. Each is a named export gap.
 
 The data dictionary is built once and rendered as Markdown, HTML, JSON and
-CSV, with every column field the model holds in a fixed order, PII and
-validation rules labelled as recorded, relationships with their column pairs
+CSV, with every column field the model holds in a fixed order, relationships with their column pairs
 (unresolved ones shown as such), and the source model's reconciliation stated
 at the top. HR's and AdventureWorks' dictionaries match their catalog
 manifests table by table (`test_dictionary_evidence`).
@@ -96,8 +113,7 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0025_keys_and_constraints`, on `main` and this branch (no
-schema change on this branch).
+Migration head: `0026_dictionary_fields` on this branch (`0025_keys_and_constraints` on `main`).
 
 ## Versions
 

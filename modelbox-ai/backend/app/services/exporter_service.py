@@ -47,6 +47,8 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, ClassVar
 
 import yaml
@@ -935,17 +937,21 @@ class ExporterService:
         dictionary_format: str,
         dataset_name: str = "modelbox_dataset",
         reconciliation: str | None = None,
+        statuses: Mapping[tuple[str, str | None, str], str] | None = None,
+        levels: Mapping[uuid.UUID, str] | None = None,
     ) -> dict[str, str]:
         """The data dictionary (``app.services.data_dictionary``).
 
         ``reconciliation`` is the source model's import status
         (``reconciled``, ``unreconciled``, or None when it was not imported);
         every format states it, and an unreconciled source says so first.
+        ``statuses`` are the fields' attested statuses and ``levels`` the
+        workspace's classification level names, by id.
         """
         from app.services import data_dictionary
 
         fmt = dictionary_format.lower()
-        doc = data_dictionary.build(model, dataset_name, reconciliation)
+        doc = data_dictionary.build(model, dataset_name, reconciliation, statuses, levels)
         if fmt in ("markdown", "md"):
             return {"data_dictionary.md": data_dictionary.to_markdown(doc)}
         if fmt == "html":

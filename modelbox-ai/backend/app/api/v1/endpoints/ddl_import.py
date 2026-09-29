@@ -35,6 +35,7 @@ from app.api.v1.dependencies import (
 )
 from app.models.metadata_store import DataModel, User
 from app.services import audit_log
+from app.services.attestation import Actor
 from app.services.ddl_import import report as report_render
 from app.services.ddl_import.dialects import IMPORT_DIALECTS
 from app.services.ddl_import.importer import import_ddl
@@ -119,7 +120,8 @@ async def import_ddl_file(
     session.add(model)
     await session.flush()
     await GraphRepository(session).replace_graph(
-        model.model_id, result.model.entities, result.model.relationships
+        model.model_id, result.model.entities, result.model.relationships,
+        source="ddl_import", actor=Actor(user.user_id, user.email),
     )
     await audit_log.record(
         action="MODEL_CREATED",

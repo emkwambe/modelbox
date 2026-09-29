@@ -92,6 +92,33 @@ List the caller's workspaces and their role in each
 
 **Responses:** `200` Successful Response
 
+### `GET /api/v1/workspaces/{workspace_id}/classification`
+
+The workspace's classification scale (VIEWER): its levels, least to most
+sensitive, each with `columns_using`. Every workspace starts with Public,
+Internal, Confidential and Restricted.
+
+**Responses:** `200` Successful Response, `403` Not a member, `404` No such workspace
+
+### `POST /api/v1/workspaces/{workspace_id}/classification/levels`
+
+Add a level at the top of the scale (ADMIN). **Request body:** `{"name": ...}`.
+
+**Responses:** `201` Created, `409` A level has that name, `422` Validation Error
+
+### `PATCH /api/v1/workspaces/{workspace_id}/classification/levels/{level_id}`
+
+Rename or move a level (ADMIN). **Request body:** `{"name": ...}` and/or
+`{"rank": ...}`. Columns hold a level by id, so a rename changes every use.
+
+**Responses:** `200` Successful Response, `404` No such level, `409` A level has that name
+
+### `DELETE /api/v1/workspaces/{workspace_id}/classification/levels/{level_id}`
+
+Delete a level (ADMIN). Refused while any column uses it.
+
+**Responses:** `204` Deleted, `404` No such level, `409` In use
+
 ---
 
 ## Models, Diff & Exports
@@ -260,7 +287,55 @@ A payload that also sends a column flag contradicting its lists is refused
 with `422`. The older form, with keys only as column flags and relationships
 as `"entity.column"` strings, is still accepted and read from its flags.
 
+Dictionary fields ride in the same payload: on a column `business_name`,
+`permissible_values` (a JSON list), `unit`, `critical_data_element`
+(`null` means not assessed), `authoritative_source` and
+`classification_level_id` (a level of the model's workspace scale, else
+`422`); on an entity `business_name`, `business_owner`, `it_steward` and
+`authoritative_source`. Each value this save changes records the caller as
+its provenance and is pending review; a verified field whose value changes
+returns to pending. A field's status is never part of the graph: an entity
+or column carrying `field_status`, `verification_status`, `attestation` or
+`attestations` is refused with `422`.
+
 **Responses:** `200` Successful Response, `422` Validation Error
+
+### `GET /api/v1/model/{model_id}/attestations`
+
+Each dictionary field's status and provenance (VIEWER)
+
+| Param | In | Type | Required |
+|---|---|---|---|
+| `model_id` | path | string | yes |
+
+Every field that holds a value, with `status` (`verified`, `pending`, or
+`recorded` when no provenance is recorded), its `provenance` (`ddl`,
+`source_comment`, `person`, `ai_draft`), who supplied it and when, and who
+verified it and when. `summary.statement` reads "N of M fields verified,
+K pending review".
+
+**Responses:** `200` Successful Response, `422` Validation Error
+
+### `POST /api/v1/model/{model_id}/attestations/verify`
+
+Verify fields whose three conditions hold (APPROVER or higher)
+
+| Param | In | Type | Required |
+|---|---|---|---|
+| `model_id` | path | string | yes |
+
+**Request body:** `{"fields": [{"entity": ..., "column": ... or null, "field": ...}]}`;
+omit `fields` to ask for every field that holds a value.
+
+A field becomes `verified` only when all three hold: the model is a reconciled
+import; the field's definition (its column's or table's description) passes
+the machine-checkable ISO/IEC 11179-4 rules (present, a phrase or sentence,
+not only negative, not the name restated); and its provenance is recorded and
+is not an AI draft. Each result carries `conditions` as found, so a field that
+stays pending shows why. The request cannot state a status: any other key is
+refused with `422`.
+
+**Responses:** `200` Successful Response, `403` Below APPROVER, `422` Validation Error
 
 ### `POST /api/v1/model/{model_id}/validate`
 

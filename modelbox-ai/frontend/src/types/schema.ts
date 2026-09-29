@@ -108,6 +108,16 @@ export interface Column {
   source_data_type?: string | null;
   /** The DEFAULT exactly as an imported DDL file declared it; null if not imported. */
   source_default_value?: string | null;
+  // Dictionary fields a person supplies (Sprint 8 Step 4b).
+  business_name?: string | null;
+  /** The values the column may hold: a JSON list. */
+  permissible_values?: (string | number | boolean)[] | null;
+  unit?: string | null;
+  /** Critical data element; null means not assessed, which is not "no". */
+  critical_data_element?: boolean | null;
+  authoritative_source?: string | null;
+  /** A level of the workspace's classification scale, by id. */
+  classification_level_id?: string | null;
 }
 
 export interface UniqueConstraint {
@@ -136,6 +146,11 @@ export interface Entity {
    * column has no time axis, and gets no measures rather than an invented one.
    */
   agg_time_column?: string | null;
+  // Dictionary fields a person supplies (Sprint 8 Step 4b).
+  business_name?: string | null;
+  business_owner?: string | null;
+  it_steward?: string | null;
+  authoritative_source?: string | null;
   canvas_position_x: number;
   canvas_position_y: number;
   columns: Column[];
@@ -193,6 +208,8 @@ export interface SynthesizeResponse {
   validation?: ValidationReport | null;
   /** What the keys-and-constraints migration kept but could not convert exactly. */
   conversion_findings?: ConversionFinding[];
+  /** The model's workspace, whose classification scale its columns use. */
+  workspace_id?: string | null;
 }
 
 export interface TransformParadigmRequest {
@@ -228,6 +245,22 @@ export interface WorkspaceInfo {
   workspace_id: string;
   name: string;
   role: string;
+}
+
+/** One level of a workspace's classification scale, least sensitive first. */
+export interface ClassificationLevel {
+  level_id: string;
+  name: string;
+  rank: number;
+  /** Columns classified at this level; a level in use cannot be deleted. */
+  columns_using: number;
+}
+
+export interface ClassificationScale {
+  workspace_id: string;
+  scale_id: string;
+  name: string;
+  levels: ClassificationLevel[];
 }
 
 /**
@@ -464,6 +497,10 @@ export interface EntityNodeData extends Record<string, unknown> {
   tier?: AssetTier | null;
   freshness_sla?: string | null;
   agg_time_column?: string | null;
+  business_name?: string | null;
+  business_owner?: string | null;
+  it_steward?: string | null;
+  authoritative_source?: string | null;
   columns: Column[];
   primary_key?: string[];
   unique_constraints?: UniqueConstraint[];

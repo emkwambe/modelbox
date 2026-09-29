@@ -100,6 +100,8 @@ interface CanvasState {
 
   // --- context ---
   modelId: string | null;
+  /** The loaded model's workspace, whose classification scale its columns use. */
+  workspaceId: string | null;
   /**
    * The prompt a library template was loaded from, when the graph on the
    * canvas came from one. Non-null exactly when `modelId` is null and the
@@ -199,6 +201,11 @@ function entityToNode(entity: Entity): EntityNode {
       freshness_sla: entity.freshness_sla,
       // Dropped here until Sprint 8 Step 3, so every canvas save cleared it.
       agg_time_column: entity.agg_time_column ?? null,
+      // Dictionary fields (Step 4b): carried, or every save would clear them.
+      business_name: entity.business_name ?? null,
+      business_owner: entity.business_owner ?? null,
+      it_steward: entity.it_steward ?? null,
+      authoritative_source: entity.authoritative_source ?? null,
       columns: entity.columns,
       primary_key: entity.primary_key ?? entity.columns.filter((c) => c.is_primary_key).map((c) => c.name),
       unique_constraints: entity.unique_constraints ?? [],
@@ -287,6 +294,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     nodes: [],
     edges: [],
     modelId: null,
+    workspaceId: null,
     sourcePrompt: null,
     paradigm: null,
     dialect: 'snowflake',
@@ -533,6 +541,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       commit();
       set({
         modelId: null,
+        workspaceId: null,
         sourcePrompt,
         paradigm,
         nodes: entities.map(entityToNode),
@@ -549,6 +558,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       commit();
       set({
         modelId: model.model_id,
+        workspaceId: model.workspace_id ?? null,
         // A real model supersedes whatever template seeded the canvas.
         sourcePrompt: null,
         paradigm: model.paradigm,
@@ -626,6 +636,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         nodes: [],
         edges: [],
         modelId: null,
+        workspaceId: null,
         sourcePrompt: null,
         paradigm: null,
         validation: null,

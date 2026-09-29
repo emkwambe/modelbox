@@ -21,7 +21,7 @@ import logging
 import re
 import uuid
 from collections.abc import Mapping
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -631,6 +631,19 @@ class ColumnSchema(BaseModel):
         max_length=4000,
         description="The column's DEFAULT exactly as the imported file declared it.",
     )
+    # Dictionary fields a person supplies (Sprint 8 Step 4b, migration 0026).
+    business_name: str | None = Field(default=None, max_length=255)
+    permissible_values: list[str | int | float | bool] | None = Field(
+        default=None, max_length=1000,
+        description="The values the column may hold, as a JSON list.",
+    )
+    unit: str | None = Field(default=None, max_length=64, description="Unit of measure.")
+    critical_data_element: bool | None = Field(
+        default=None, description="Critical data element; null means not assessed.")
+    authoritative_source: str | None = Field(
+        default=None, max_length=255, description="The system of record for this column's values.")
+    classification_level_id: uuid.UUID | None = Field(
+        default=None, description="A level of the workspace's classification scale.")
 
     @model_validator(mode="after")
     def _primary_keys_are_never_nullable(self) -> ColumnSchema:
@@ -768,6 +781,11 @@ class EntitySchema(BaseModel):
         max_length=128,
         description="Name of this entity's default aggregation time dimension.",
     )
+    # Dictionary fields a person supplies (Sprint 8 Step 4b, migration 0026).
+    business_name: str | None = Field(default=None, max_length=255)
+    business_owner: str | None = Field(default=None, max_length=255)
+    it_steward: str | None = Field(default=None, max_length=255)
+    authoritative_source: str | None = Field(default=None, max_length=255)
     canvas_position_x: float = 0.0
     canvas_position_y: float = 0.0
     columns: list[ColumnSchema] = Field(default_factory=list)
@@ -1108,6 +1126,9 @@ class ValidationReport(BaseModel):
 # ---------------------------------------------------------------------------
 # API request / response contracts
 # ---------------------------------------------------------------------------
+_STATUS_KEYS = frozenset({"field_status", "verification_status", "attestation", "attestations"})
+
+
 class GraphUpdateRequest(BaseModel):
     """PUT /api/v1/model/{id}/graph — full replacement of a model's graph.
 
@@ -1118,6 +1139,26 @@ class GraphUpdateRequest(BaseModel):
 
     entities: list[EntitySchema] = Field(default_factory=list)
     relationships: list[RelationshipSchema] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_field_status(cls, data: Any) -> Any:
+        """A field's verification status is never written by a client.
+
+        Refused rather than ignored, so a client that tries learns where the
+        status comes from: ``POST /model/{id}/attestations/verify``, which sets
+        "verified" only when the three conditions hold (Step 4b).
+        """
+        if isinstance(data, dict):
+            for entity in data.get("entities") or []:
+                if not isinstance(entity, dict):
+                    continue
+                for node in (entity, *(c for c in entity.get("columns") or [] if isinstance(c, dict))):
+                    if refused := _STATUS_KEYS & set(node):
+                        raise ValueError(
+                            f"{sorted(refused)}: a field's status is set only by "
+                            "POST /model/{model_id}/attestations/verify, never in the graph")
+        return data
 
     @model_validator(mode="after")
     def _foreign_keys_have_one_source(self) -> GraphUpdateRequest:
@@ -1164,6 +1205,8 @@ class SynthesizeResponse(BaseModel):
     validation: ValidationReport | None = None
     # What migration 0025 could not convert in this model, kept and listed.
     conversion_findings: list[ConversionFinding] = Field(default_factory=list)
+    # The model's workspace, whose classification scale its columns use (Step 4b).
+    workspace_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def _foreign_keys_have_one_source(self) -> SynthesizeResponse:

@@ -14,6 +14,7 @@
  * persists them and they flow into the MetricFlow / Cube / LookML exports.
  */
 
+import ColumnDictionaryFields from '@/components/canvas/ColumnDictionaryFields';
 import { useCanvasStore } from '@/store/canvasStore';
 import { color } from '@/styles/tokens';
 
@@ -425,6 +426,8 @@ export default function ColumnSemanticEditor() {
           </label>
         )}
       </div>
+
+      <ColumnDictionaryFields entityName={selectedColumn.entityName} column={column} />
 
       <p style={{ fontSize: 11, color: color.neutral[500], margin: '10px 0 0' }}>
         Save the model to persist. Declared measures drive the exports; classified
