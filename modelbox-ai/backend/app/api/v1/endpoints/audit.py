@@ -29,9 +29,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import (
     SessionDep,
+    StreamingSessionDep,
     require_appliance_owner,
     require_query_workspace_role,
 )
@@ -117,7 +119,11 @@ async def _page(
     )
 
 
-def _jsonl(session: SessionDep, workspace_id: uuid.UUID | None, filename: str) -> StreamingResponse:
+def _jsonl(
+    session: AsyncSession, workspace_id: uuid.UUID | None, filename: str
+) -> StreamingResponse:
+    # `session` must outlive the handler: rows are read as the body is sent.
+    # Callers pass a StreamingSessionDep, which stays open until then.
     async def _lines():
         result = await session.stream(
             _filtered(workspace_id, None, None).order_by(AuditEvent.occurred_at.asc())
@@ -139,7 +145,7 @@ def _jsonl(session: SessionDep, workspace_id: uuid.UUID | None, filename: str) -
     summary="Export the audit trail as JSONL for a SIEM",
 )
 async def export_audit_events(
-    session: SessionDep,
+    session: StreamingSessionDep,
     workspace_id: AdminWorkspace,
 ) -> StreamingResponse:
     """Stream every audit row for a workspace as newline-delimited JSON.
@@ -190,7 +196,7 @@ async def list_appliance_events(
     summary="Export appliance-wide events as JSONL for a SIEM",
 )
 async def export_appliance_events(
-    session: SessionDep, _owner: ApplianceOwner
+    session: StreamingSessionDep, _owner: ApplianceOwner
 ) -> StreamingResponse:
     """Stream every appliance-scope row as newline-delimited JSON, unpaginated."""
     return _jsonl(session, None, "audit-appliance.jsonl")

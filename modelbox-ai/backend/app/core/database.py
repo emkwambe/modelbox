@@ -53,6 +53,8 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency yielding a transactional async session.
 
     Commits on success, rolls back on any exception, and always closes.
+    Declared with ``scope="function"`` (``SessionDep``), so the commit, or its
+    failure, happens before the response is sent.
     """
     async with get_sessionmaker()() as session:
         try:
@@ -61,6 +63,21 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+async def get_streaming_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """A read-only session that stays open while a response streams.
+
+    For the routes that read from the database as they send their body, the
+    JSONL audit exports. Declared with ``scope="request"`` (see
+    ``StreamingSessionDep``) so it outlives the handler; it never commits, and
+    anything written through it is rolled back.
+    """
+    async with get_sessionmaker()() as session:
+        try:
+            yield session
+        finally:
+            await session.rollback()
 
 
 async def dispose_engine() -> None:

@@ -3,11 +3,27 @@
 One entry per version. Each release's full notes, breaking changes and upgrade
 steps are in `docs/RELEASE_NOTES_v<version>.md`; this file is the index.
 
+## v1.11.1
+
+Tagged from `main` after this file lands. Full notes:
+[`docs/RELEASE_NOTES_v1.11.1.md`](docs/RELEASE_NOTES_v1.11.1.md). Supersedes
+v1.11.0; upgrade by pulling the new images, with no migration and no
+configuration change.
+
+- **Transactions:** every API request that writes commits, or fails, before its response is
+  sent, so a success always describes committed work and a failed commit is a
+  500. The JSONL audit exports read through a read-only session that stays
+  open while they stream.
+- **Black-box reports:** the acceptance suite redacts every credential it handles from its
+  failure reports, enforced by a test, and checks read-your-writes against the
+  running appliance fifty times over.
+
 ## v1.11.0
 
-Tagged from `main` after this file lands; the merge that carries the work is
-`d81f569` (pull request #9). Full notes:
-[`docs/RELEASE_NOTES_v1.11.0.md`](docs/RELEASE_NOTES_v1.11.0.md).
+**Superseded by v1.11.1.** Tagged 2026-09-29 (UTC) at `d5822f1` on `main`,
+published by the gated release workflow (run 36511971512); the tag and its
+images remain. The merge that carries the work is `d81f569` (pull request #9).
+Full notes: [`docs/RELEASE_NOTES_v1.11.0.md`](docs/RELEASE_NOTES_v1.11.0.md).
 
 Secure by default, and proven against the running appliance. It carries Sprints
 5, 6, 6.5 and 7, the first merge to `main` since v1.9.0.

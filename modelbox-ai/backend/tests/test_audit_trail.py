@@ -86,7 +86,7 @@ def _event(
 
 async def _client(session: AsyncSession, user: User) -> AsyncClient:
     from app.api.v1.dependencies import get_current_user
-    from app.core.database import get_db_session
+    from app.core.database import get_db_session, get_streaming_db_session
     from app.main import create_app
 
     app = create_app()
@@ -95,6 +95,7 @@ async def _client(session: AsyncSession, user: User) -> AsyncClient:
         yield session
 
     app.dependency_overrides[get_db_session] = _session_override
+    app.dependency_overrides[get_streaming_db_session] = _session_override
     app.dependency_overrides[get_current_user] = lambda: user
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
