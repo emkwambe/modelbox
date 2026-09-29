@@ -30,6 +30,8 @@ import type {
   Entity,
   ExportFormat,
   ExportResponse,
+  ImportDialectInfo,
+  ImportResponse,
   IntrospectRequest,
   JobCreatedResponse,
   JobStatus,
@@ -320,6 +322,43 @@ export async function introspectConnection(
 
 export async function deleteConnection(connectionId: string): Promise<void> {
   await apiClient.delete(`/connectors/${connectionId}`);
+}
+
+// --- Offline DDL import (Sprint 8) ---
+export async function listImportDialects(): Promise<ImportDialectInfo[]> {
+  const { data } = await apiClient.get<ImportDialectInfo[]>('/import/dialects');
+  return data;
+}
+
+export async function importDdl(payload: {
+  workspaceId: string;
+  file: File;
+  dialect: string;
+  title?: string;
+}): Promise<ImportResponse> {
+  const form = new FormData();
+  form.append('file', payload.file);
+  form.append('dialect', payload.dialect);
+  if (payload.title) form.append('title', payload.title);
+  // The instance default is JSON, under which axios would serialise the form
+  // to JSON; multipart lets it add the boundary itself.
+  const { data } = await apiClient.post<ImportResponse>('/import/ddl', form, {
+    params: { workspace_id: payload.workspaceId },
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data;
+}
+
+export async function getImportReport(
+  modelId: string,
+  format: 'markdown' | 'json',
+): Promise<string> {
+  const { data } = await apiClient.get<string>(`/model/${modelId}/import-report`, {
+    params: { format },
+    responseType: 'text',
+    transformResponse: (raw) => raw,
+  });
+  return data;
 }
 
 // --- Schema diffing (FR-2.2) ---
