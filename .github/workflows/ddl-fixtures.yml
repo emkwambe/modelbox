@@ -9,6 +9,12 @@ name: DDL Fixtures
 # regenerates them and fails unless the committed copies are what the tools
 # produce (compare_fixture.py). Heavy by design, so it runs here and never on a
 # developer machine, and only when the generators or fixtures change.
+#
+# Drift fixtures (Sprint 8 Step 5): after each baseline export, the job applies
+# a committed ALTER script (backend/tests/fixtures/ddl_drift/<dialect>/changes)
+# to the same database and exports again with the same exporter. The result
+# is a deployed schema that genuinely drifted from the baseline, committed
+# under ddl_drift/<dialect> and held to its regeneration the same way.
 on:
   push:
     branches: [ "**" ]
@@ -16,6 +22,7 @@ on:
       - .github/workflows/ddl-fixtures.yml
       - modelbox-ai/scripts/ddl_fixtures/**
       - modelbox-ai/backend/tests/fixtures/ddl/**
+      - modelbox-ai/backend/tests/fixtures/ddl_drift/**
       # The PostgreSQL fixture is the appliance image's own pg_dump output.
       - modelbox-ai/docker/docker-compose.appliance.yml
   workflow_dispatch:
@@ -116,6 +123,38 @@ jobs:
             echo "::warning::no committed Oracle fixtures yet; the upload is the candidate set"
           fi
 
+      - name: Apply the drift script to HR
+        run: |
+          script=modelbox-ai/backend/tests/fixtures/ddl_drift/oracle/changes/hr.alter.sql
+          echo "HR_ALTER_SHA256=$(sha256sum "$script" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+          docker cp "$script" modelbox-fixture-oracle:/tmp/hr_alter.sql
+          printf '%s\n' "WHENEVER SQLERROR EXIT FAILURE" "SET ECHO ON" "@/tmp/hr_alter.sql" "EXIT" \
+            | docker exec -i modelbox-fixture-oracle sqlplus -s "hr/$ORACLE_PASSWORD@FREEPDB1"
+
+      - name: Export the drifted HR
+        run: |
+          python modelbox-ai/scripts/ddl_fixtures/oracle_export.py \
+            --dsn "127.0.0.1:${ORACLE_PORT}/FREEPDB1" --schema HR --out out/oracle-drift \
+            --image "$ORACLE_IMAGE" \
+            --source "oracle-samples/db-sample-schemas@${ORACLE_SAMPLES_SHA} human_resources/hr_create.sql, then ddl_drift/oracle/changes/hr.alter.sql sha256 ${HR_ALTER_SHA256}" \
+            --run "$RUN_URL"
+
+      - name: Upload the regenerated drift fixture
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ddl-drift-fixtures-oracle
+          path: out/oracle-drift
+
+      - name: The committed drift fixture is what the tool produces
+        run: |
+          committed=modelbox-ai/backend/tests/fixtures/ddl_drift/oracle
+          if [ -f "$committed/hr.sql" ]; then
+            python modelbox-ai/scripts/ddl_fixtures/compare_fixture.py "$committed" out/oracle-drift
+          else
+            echo "::warning::no committed Oracle drift fixture yet; the upload is the candidate"
+          fi
+
   postgres:
     name: PostgreSQL (pg_dump)
     runs-on: ubuntu-24.04
@@ -184,6 +223,37 @@ jobs:
             python modelbox-ai/scripts/ddl_fixtures/compare_fixture.py "$committed" out/postgres
           else
             echo "::warning::no committed PostgreSQL fixtures yet; the upload is the candidate set"
+          fi
+
+      - name: Apply the drift script to Pagila
+        run: |
+          script=modelbox-ai/backend/tests/fixtures/ddl_drift/postgres/changes/pagila.alter.sql
+          echo "PAGILA_ALTER_SHA256=$(sha256sum "$script" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+          docker exec -i -e PGPASSWORD="$PGPASSWORD" modelbox-fixture-postgres \
+            psql -v ON_ERROR_STOP=1 -e -h 127.0.0.1 -U postgres -d pagila < "$script"
+
+      - name: Export the drifted Pagila
+        run: |
+          python modelbox-ai/scripts/ddl_fixtures/postgres_export.py \
+            --container modelbox-fixture-postgres --user postgres --database pagila \
+            --dsn-port "$POSTGRES_PORT" --out out/postgres-drift --image "$POSTGRES_IMAGE" \
+            --source "devrimgunduz/pagila@${PAGILA_SHA} pagila-schema.sql, then ddl_drift/postgres/changes/pagila.alter.sql sha256 ${PAGILA_ALTER_SHA256}" \
+            --run "$RUN_URL"
+
+      - name: Upload the regenerated drift fixture
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ddl-drift-fixtures-postgres
+          path: out/postgres-drift
+
+      - name: The committed drift fixture is what the tool produces
+        run: |
+          committed=modelbox-ai/backend/tests/fixtures/ddl_drift/postgres
+          if [ -f "$committed/pagila.sql" ]; then
+            python modelbox-ai/scripts/ddl_fixtures/compare_fixture.py "$committed" out/postgres-drift
+          else
+            echo "::warning::no committed PostgreSQL drift fixture yet; the upload is the candidate"
           fi
 
   mssql:
@@ -257,4 +327,37 @@ jobs:
             python modelbox-ai/scripts/ddl_fixtures/compare_fixture.py "$committed" out/tsql
           else
             echo "::warning::no committed SQL Server fixtures yet; the upload is the candidate set"
+          fi
+
+      - name: Apply the drift script to AdventureWorks
+        run: |
+          script=modelbox-ai/backend/tests/fixtures/ddl_drift/tsql/changes/adventureworks.alter.sql
+          echo "AW_ALTER_SHA256=$(sha256sum "$script" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+          docker cp "$script" modelbox-fixture-mssql:/tmp/aw_alter.sql
+          docker exec modelbox-fixture-mssql /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$MSSQL_SA_PASSWORD" \
+            -b -e -d AdventureWorks2022 -i /tmp/aw_alter.sql
+
+      - name: Script the drifted AdventureWorks
+        shell: pwsh
+        run: |
+          ./modelbox-ai/scripts/ddl_fixtures/mssql_export.ps1 `
+            -Server "127.0.0.1,$env:MSSQL_PORT" -Database AdventureWorks2022 -Out out/tsql-drift `
+            -Image $env:MSSQL_IMAGE `
+            -Source "microsoft/sql-server-samples release 'adventureworks', AdventureWorks2022.bak sha256 $env:AW_BAK_SHA256, then ddl_drift/tsql/changes/adventureworks.alter.sql sha256 $env:AW_ALTER_SHA256" `
+            -Run $env:RUN_URL
+
+      - name: Upload the regenerated drift fixture
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ddl-drift-fixtures-tsql
+          path: out/tsql-drift
+
+      - name: The committed drift fixture is what the tool produces
+        run: |
+          committed=modelbox-ai/backend/tests/fixtures/ddl_drift/tsql
+          if [ -f "$committed/adventureworks.sql" ]; then
+            python modelbox-ai/scripts/ddl_fixtures/compare_fixture.py "$committed" out/tsql-drift
+          else
+            echo "::warning::no committed SQL Server drift fixture yet; the upload is the candidate"
           fi
