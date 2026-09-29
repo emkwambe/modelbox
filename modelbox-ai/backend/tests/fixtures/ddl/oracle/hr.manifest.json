@@ -1,0 +1,99 @@
+{
+  "fixture": "hr.sql",
+  "dialect": "oracle",
+  "schema": "HR",
+  "counts_from": "catalog views (ALL_TABLES, ALL_TAB_COLUMNS, ALL_CONSTRAINTS, ALL_TAB_COMMENTS, ALL_COL_COMMENTS)",
+  "counts": {
+    "tables": 7,
+    "columns": 35,
+    "primary_keys": 7,
+    "foreign_keys": 10,
+    "unique_constraints": 1,
+    "check_constraints": 2,
+    "not_null_constraints": 13,
+    "table_descriptions": 7,
+    "column_descriptions": 35
+  },
+  "tables": [
+    {
+      "name": "COUNTRIES",
+      "columns": 3,
+      "primary_keys": 1,
+      "foreign_keys": 1,
+      "unique_constraints": 0,
+      "check_constraints": 0,
+      "not_null_constraints": 1,
+      "table_descriptions": 1,
+      "column_descriptions": 3
+    },
+    {
+      "name": "DEPARTMENTS",
+      "columns": 4,
+      "primary_keys": 1,
+      "foreign_keys": 2,
+      "unique_constraints": 0,
+      "check_constraints": 0,
+      "not_null_constraints": 1,
+      "table_descriptions": 1,
+      "column_descriptions": 4
+    },
+    {
+      "name": "EMPLOYEES",
+      "columns": 11,
+      "primary_keys": 1,
+      "foreign_keys": 3,
+      "unique_constraints": 1,
+      "check_constraints": 1,
+      "not_null_constraints": 4,
+      "table_descriptions": 1,
+      "column_descriptions": 11
+    },
+    {
+      "name": "JOBS",
+      "columns": 4,
+      "primary_keys": 1,
+      "foreign_keys": 0,
+      "unique_constraints": 0,
+      "check_constraints": 0,
+      "not_null_constraints": 1,
+      "table_descriptions": 1,
+      "column_descriptions": 4
+    },
+    {
+      "name": "JOB_HISTORY",
+      "columns": 5,
+      "primary_keys": 1,
+      "foreign_keys": 3,
+      "unique_constraints": 0,
+      "check_constraints": 1,
+      "not_null_constraints": 4,
+      "table_descriptions": 1,
+      "column_descriptions": 5
+    },
+    {
+      "name": "LOCATIONS",
+      "columns": 6,
+      "primary_keys": 1,
+      "foreign_keys": 1,
+      "unique_constraints": 0,
+      "check_constraints": 0,
+      "not_null_constraints": 1,
+      "table_descriptions": 1,
+      "column_descriptions": 6
+    },
+    {
+      "name": "REGIONS",
+      "columns": 2,
+      "primary_keys": 1,
+      "foreign_keys": 0,
+      "unique_constraints": 0,
+      "check_constraints": 0,
+      "not_null_constraints": 1,
+      "table_descriptions": 1,
+      "column_descriptions": 2
+    }
+  ],
+  "catalog_query": "SELECT t.table_name, (SELECT COUNT(*) FROM all_tab_columns c WHERE c.owner = t.owner AND c.table_name = t.table_name) AS columns, (SELECT COUNT(*) FROM all_constraints k WHERE k.owner = t.owner AND k.table_name = t.table_name AND k.constraint_type = 'P') AS primary_keys, (SELECT COUNT(*) FROM all_constraints k WHERE k.owner = t.owner AND k.table_name = t.table_name AND k.constraint_type = 'R') AS foreign_keys, (SELECT COUNT(*) FROM all_constraints k WHERE k.owner = t.owner AND k.table_name = t.table_name AND k.constraint_type = 'U') AS unique_constraints, (SELECT COUNT(*) FROM all_constraints k WHERE k.owner = t.owner AND k.table_name = t.table_name AND k.constraint_type = 'C' AND NOT REGEXP_LIKE(k.search_condition_vc, '^\"[^\"]+\" IS NOT NULL$')) AS check_constraints, (SELECT COUNT(*) FROM all_constraints k WHERE k.owner = t.owner AND k.table_name = t.table_name AND k.constraint_type = 'C' AND REGEXP_LIKE(k.search_condition_vc, '^\"[^\"]+\" IS NOT NULL$')) AS not_null_constraints, (SELECT COUNT(*) FROM all_tab_comments m WHERE m.owner = t.owner AND m.table_name = t.table_name AND m.comments IS NOT NULL) AS table_descriptions, (SELECT COUNT(*) FROM all_col_comments m WHERE m.owner = t.owner AND m.table_name = t.table_name AND m.comments IS NOT NULL) AS column_descriptions FROM all_tables t WHERE t.owner = :owner AND t.nested = 'NO' AND t.secondary = 'N' AND (t.iot_type IS NULL OR t.iot_type = 'IOT') AND t.dropped = 'NO' ORDER BY t.table_name",
+  "generated": "2026-09-29",
+  "run": "https://github.com/emkwambe/modelbox/actions/runs/36533878941"
+}
