@@ -43,6 +43,86 @@ jobs:
           cd modelbox-ai/backend
           pytest -v
 
+  backend-test-postgres:
+    # The whole backend suite again, with every test database on the
+    # PostgreSQL the appliance ships (tests/_test_db.py). A difference from the
+    # SQLite run is a finding to diagnose, never a test to skip.
+    # test_test_database.py fails if the engines are not PostgreSQL.
+    name: Backend Pytest (Postgres)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: modelbox-ai/backend/requirements.lock
+
+      - name: Install Backend Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r modelbox-ai/backend/requirements.lock
+
+      - name: Start the appliance's PostgreSQL
+        # The image is read from the appliance compose file, so this job
+        # cannot drift from the pinned version and digest. Docker chooses the
+        # host port and reports it, rather than the job racing to guess one.
+        run: |
+          image="$(python -c 'import yaml; print(yaml.safe_load(open("modelbox-ai/docker/docker-compose.appliance.yml"))["services"]["postgres-db"]["image"])')"
+          echo "image: $image"
+          docker run -d --name modelbox-test-postgres \
+            -e POSTGRES_USER=mbtest -e POSTGRES_PASSWORD=mbtest -e POSTGRES_DB=mbtest \
+            -p 127.0.0.1::5432 "$image"
+          # `docker port` can be briefly empty straight after `docker run -d`.
+          port=""
+          for _ in $(seq 1 30); do
+            port="$(docker port modelbox-test-postgres 5432 | head -n 1 | awk -F: '{print $NF}')"
+            [ -n "$port" ] && break
+            sleep 1
+          done
+          if [ -z "$port" ]; then
+            echo "::error::docker published no host port for the test database"
+            exit 1
+          fi
+          echo "MODELBOX_TEST_DATABASE_URL=postgresql+asyncpg://mbtest:mbtest@127.0.0.1:${port}/mbtest" >> "$GITHUB_ENV"
+          echo "MODELBOX_TEST_DATABASE_EXPECT=postgresql" >> "$GITHUB_ENV"
+          echo "PGPORT_FOR_READINESS=${port}" >> "$GITHUB_ENV"
+
+      - name: Wait until a query completes over the host port
+        # The image initialises on a temporary server without TCP, then
+        # restarts; a completed query over the host port is the readiness the
+        # tests need (the same rule as tests/_docker_postgres.py).
+        run: |
+          python - <<'PY'
+          import os, sys, time
+          import psycopg2
+          port = int(os.environ["PGPORT_FOR_READINESS"])
+          last = None
+          for _ in range(60):
+              try:
+                  conn = psycopg2.connect(host="127.0.0.1", port=port, user="mbtest",
+                                          password="mbtest", dbname="mbtest", connect_timeout=3)
+                  with conn.cursor() as cur:
+                      cur.execute("SELECT version()")
+                      print(cur.fetchone()[0])
+                  conn.close()
+                  sys.exit(0)
+              except psycopg2.OperationalError as exc:
+                  last = exc
+                  time.sleep(1)
+          print(f"::error::postgres never answered a query on 127.0.0.1:{port}: {last}")
+          sys.exit(1)
+          PY
+
+      - name: Run Pytest Suite on PostgreSQL
+        run: |
+          cd modelbox-ai/backend
+          pytest -v
+
   artifact-fidelity:
     name: Artifact Fidelity Harness
     runs-on: ubuntu-24.04
