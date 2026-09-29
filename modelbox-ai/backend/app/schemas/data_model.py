@@ -499,6 +499,7 @@ class DictionaryFormat(str, enum.Enum):
     MARKDOWN = "markdown"
     HTML = "html"
     JSON = "json"
+    CSV = "csv"
 
 
 class DictionaryExportResponse(BaseModel):

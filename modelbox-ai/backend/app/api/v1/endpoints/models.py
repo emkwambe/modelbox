@@ -447,7 +447,7 @@ async def export_semantic(
 @router.get(
     "/{model_id}/export/dictionary",
     response_model=DictionaryExportResponse,
-    summary="Export a data dictionary + business glossary (Markdown/HTML/JSON)",
+    summary="Export a data dictionary (Markdown/HTML/JSON/CSV)",
 )
 async def export_dictionary(
     engine: SynthesisEngineDep,
@@ -463,7 +463,8 @@ async def export_dictionary(
     assert result is not None  # guaranteed by AuthorizedModelDep
     try:
         files = exporter.export_data_dictionary(
-            _to_synthesized(result), dictionary_format.value, dataset_name=model.title
+            _to_synthesized(result), dictionary_format.value, dataset_name=model.title,
+            reconciliation=model.reconciliation_status,
         )
     except ExporterError as exc:
         raise HTTPException(
