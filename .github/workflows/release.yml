@@ -31,52 +31,13 @@ jobs:
         run: python3 modelbox-ai/scripts/check_release_gate.py --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"
 
   publish:
-    name: Build & push ${{ matrix.service }} image
+    # The build itself is images.yml, shared with release-dry-run.yml so the
+    # dry run exercises the same actions and pins. Only this call pushes.
+    name: Build & push images
     needs: gate
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - service: backend
-            context: ./modelbox-ai/backend
-            dockerfile: ./modelbox-ai/docker/Dockerfile.backend
-          - service: frontend
-            context: ./modelbox-ai/frontend
-            dockerfile: ./modelbox-ai/docker/Dockerfile.frontend
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Buildx
-        # Third-party actions are pinned to a commit, not a movable tag.
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Derive image tags
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/modelbox-${{ matrix.service }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-
-      - name: Build and push
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/images.yml
+    with:
+      push: true

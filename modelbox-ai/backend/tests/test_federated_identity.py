@@ -25,8 +25,7 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
 from app.core.security import hash_password
@@ -38,6 +37,7 @@ from app.models.metadata_store import (
     WorkspaceMember,
 )
 from app.services import federated_identity
+from tests._test_db import make_test_engine
 
 ISSUER = "https://login.example-idp.com/tenant-1"
 OTHER_ISSUER = "https://login.example-idp.com/tenant-2"
@@ -45,11 +45,7 @@ OTHER_ISSUER = "https://login.example-idp.com/tenant-2"
 
 @pytest_asyncio.fixture
 async def session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession]:
-    engine = create_async_engine(
-        "sqlite+aiosqlite://",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    engine = make_test_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

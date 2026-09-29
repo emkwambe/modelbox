@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `sprint-7/records`, branched from `main` at
-`627686d`. This file is rewritten at every stop, merge, deploy
+*Regenerated 2026-09-29 on `sprint-8/engagement-toolkit`, branched from `main`
+at `70568f7`. This file is rewritten at every stop, merge, deploy
 and tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,11 +9,25 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `627686d` | the Verify Release workflow and release records (#11) on top of v1.11.1 (#12); CI green (run 36518253457, ten jobs) |
+| `main` | `70568f7` | the v1.11.1 Verify Release records (#13); CI green (run 36519786048, ten jobs) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36516574170: gate, backend and frontend images all green) |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-7/records` | this branch | records the Verify Release run for v1.11.1 |
-| `sprint-7/secure-by-default`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-8/engagement-toolkit` | this branch | records and CI hygiene, no product behaviour change (below) |
+| `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+
+## In progress on this branch
+
+- **Records.** Trainer items (Blueprint Q3, register H1 and H3) are deferred
+  with no date; `docs/OUTSTANDING_ISSUES.md` is brought to v1.11.1.
+- **Release images.** The `docker/*` actions run on their Node 24 majors, pinned
+  by commit, in one shared build (`images.yml`). `release.yml` pushes only after
+  its gate; `release-dry-run.yml` builds without pushing whenever the release
+  path changes (run 36528929083: both images built, `push: false`).
+- **Backend Pytest (Postgres).** The whole backend suite runs a second time with
+  every test database on the appliance's pinned PostgreSQL 16.15. At `32614ff`
+  (run 36530209919) both jobs report 1210 passed, 51 skipped, 24 xfailed, and
+  the skipped and expected-failure sets are identical. The job is not yet
+  required.
 
 Migration head: `0022_append_only_ledgers`.
 

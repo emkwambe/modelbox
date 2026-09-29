@@ -131,7 +131,11 @@ If masking must survive for a specific buyer conversation, scope it to one-way r
 of identifiers *and* refuse to send free-text requirements in the same request — but
 that is a different product behaviour and should be specified as such.
 
-### Q3 — Does `POST /trainer/grade` have real users? **(blocking Sprint 8)**
+### Q3 — Does `POST /trainer/grade` have real users? ~~**(blocking Sprint 8)**~~
+
+*2026-09-29: no longer blocking anything. Trainer work is deferred with no date, so this
+question waits with it; the recommendation below stands as the starting point when it
+returns.*
 
 **Recommendation: assume none; delete the 3-invariant rubric and grade everything
 through the 12-code linter.** The product is pre-launch with no external instructors.

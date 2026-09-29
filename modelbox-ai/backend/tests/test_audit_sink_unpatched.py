@@ -8,8 +8,8 @@ records nothing outside tests while every patched test passes.
 
 Here the only change is the database URL, set the way a deployment sets it,
 with the engine caches cleared so the real `get_engine()` and
-`get_sessionmaker()` build from it. The row is read back with raw `sqlite3`,
-not through the ORM.
+`get_sessionmaker()` build from it. The row is read back with the database's
+own driver (`sqlite3`, or `psycopg2` on PostgreSQL), not through the ORM.
 
 A write that fails is logged at ERROR and counted on `/health`, which reports
 `degraded` while the count is non-zero.
@@ -30,19 +30,21 @@ from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.engine import make_url
 
 from app.core import database
 from app.models.metadata_store import Base
 from app.services import audit_log
+from tests._test_db import make_test_database_url
 
 
 @pytest.fixture
 async def real_sink_database(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[Path]:
-    """The real engine and session factory, built from a SQLite file URL."""
-    path = tmp_path / "audit.db"
-    monkeypatch.setattr(database.settings, "database_url", f"sqlite+aiosqlite:///{path}")
+) -> AsyncIterator[str]:
+    """The real engine and session factory, built from a database URL."""
+    url = make_test_database_url(tmp_path / "audit.db")
+    monkeypatch.setattr(database.settings, "database_url", url)
     # Held directly: a negative control removes `get_sessionmaker` from the
     # module, and this teardown runs before monkeypatch restores it.
     get_engine, get_sessionmaker = database.get_engine, database.get_sessionmaker
@@ -50,7 +52,7 @@ async def real_sink_database(
     get_sessionmaker.cache_clear()
     async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    yield path
+    yield url
     await get_engine().dispose()
     get_engine.cache_clear()
     get_sessionmaker.cache_clear()
@@ -61,12 +63,33 @@ def fresh_failure_count(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(audit_log, "_failures", audit_log._WriteFailures())
 
 
-def _check_row_written(path: Path, email: str) -> None:
+def _raw_rows(url: str, email: str) -> list[tuple[str, str, str]]:
+    """The audit rows for ``email``, read with the driver rather than the ORM."""
+    parsed = make_url(url)
+    if parsed.get_backend_name() == "sqlite":
+        with sqlite3.connect(str(parsed.database)) as conn:
+            return conn.execute(
+                "SELECT action, outcome, scope FROM audit_event WHERE actor_email = ?", (email,)
+            ).fetchall()
+    import psycopg2
+
+    conn = psycopg2.connect(
+        host=parsed.host, port=parsed.port, user=parsed.username,
+        password=parsed.password, dbname=parsed.database,
+    )
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT action, outcome, scope FROM audit_event WHERE actor_email = %s", (email,)
+            )
+            return [tuple(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def _check_row_written(url: str, email: str) -> None:
     """The check, shared by the test and its negative control."""
-    with sqlite3.connect(path) as conn:
-        rows = conn.execute(
-            "SELECT action, outcome, scope FROM audit_event WHERE actor_email = ?", (email,)
-        ).fetchall()
+    rows = _raw_rows(url, email)
     assert rows == [("AUTH_LOGIN", "SUCCESS", "appliance")], (
         f"the unpatched sink stored {rows!r} for {email}"
     )
@@ -93,7 +116,7 @@ async def _check_health_reports_one_failure() -> None:
 
 
 async def test_the_unpatched_sink_writes_a_row(
-    real_sink_database: Path, fresh_failure_count: None
+    real_sink_database: str, fresh_failure_count: None
 ) -> None:
     email = f"{uuid.uuid4().hex}@example.com"
     await audit_log.record(action="AUTH_LOGIN", actor_email=email)
@@ -132,7 +155,7 @@ async def test_a_failed_write_logs_error_and_degrades_health(
 
 
 async def test_negative_control_without_get_sessionmaker_nothing_is_stored(
-    real_sink_database: Path, fresh_failure_count: None, monkeypatch: pytest.MonkeyPatch
+    real_sink_database: str, fresh_failure_count: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delattr(database, "get_sessionmaker")
     email = f"{uuid.uuid4().hex}@example.com"

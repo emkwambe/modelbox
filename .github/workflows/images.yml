@@ -1,0 +1,65 @@
+name: Build Images
+
+# The one definition of how the backend and frontend images are built. Called
+# by release.yml (push: true, only after its gate) and by
+# release-dry-run.yml (push: false), so the dry run exercises exactly the
+# actions, pins and build settings a release uses, without publishing.
+on:
+  workflow_call:
+    inputs:
+      push:
+        description: Push the images to GHCR. Only release.yml passes true.
+        type: boolean
+        required: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.service }} image
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: backend
+            context: ./modelbox-ai/backend
+            dockerfile: ./modelbox-ai/docker/Dockerfile.backend
+          - service: frontend
+            context: ./modelbox-ai/frontend
+            dockerfile: ./modelbox-ai/docker/Dockerfile.frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        # Third-party actions are pinned to a commit, not a movable tag. Each
+        # of these majors runs on Node 24 (runs.using in its action.yml).
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/modelbox-${{ matrix.service }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build, and push only when asked
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ inputs.push }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

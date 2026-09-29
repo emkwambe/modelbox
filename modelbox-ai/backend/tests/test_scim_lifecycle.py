@@ -30,12 +30,12 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
 from app.core.security import generate_api_key, hash_password
 from app.models.metadata_store import ApiKey, AuditEvent, Base, User, Workspace
+from tests._test_db import make_test_engine
 
 # A throwaway credential for tests; never a real one.
 TOKEN = "scim-secret-token"
@@ -43,11 +43,7 @@ TOKEN = "scim-secret-token"
 
 @pytest_asyncio.fixture
 async def session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession]:
-    engine = create_async_engine(
-        "sqlite+aiosqlite://",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    engine = make_test_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

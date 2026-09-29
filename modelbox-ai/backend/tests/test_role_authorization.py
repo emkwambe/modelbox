@@ -26,8 +26,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.v1.dependencies import _ROLE_LEVEL
 from app.core.security import hash_password
@@ -40,6 +39,7 @@ from app.models.metadata_store import (
     Workspace,
     WorkspaceMember,
 )
+from tests._test_db import make_test_engine
 
 ROLES = ("VIEWER", "MEMBER", "APPROVER", "ADMIN", "OWNER")
 
@@ -60,11 +60,7 @@ async def session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession
     reason and looked like a missing feature. Binding the sink here keeps the
     production behaviour under test rather than stubbing it out.
     """
-    engine = create_async_engine(
-        "sqlite+aiosqlite://",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    engine = make_test_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

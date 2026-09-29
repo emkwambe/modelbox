@@ -13,8 +13,7 @@ from typing import Any
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.security import hash_password
 from app.models.metadata_store import Base, User, Workspace, WorkspaceMember
@@ -27,6 +26,7 @@ from app.schemas.data_model import (
 )
 from app.services.seed_generator import SyntheticSeedGenerator
 from app.services.synthesis_engine import SynthesisEngine
+from tests._test_db import make_test_engine
 
 
 # ---------------------------------------------------------------------------
@@ -171,11 +171,7 @@ class _StubGateway:
 
 @pytest_asyncio.fixture
 async def session() -> AsyncIterator[AsyncSession]:
-    engine = create_async_engine(
-        "sqlite+aiosqlite://",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    engine = make_test_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
