@@ -126,6 +126,11 @@ RULES: tuple[Rule, ...] = (
               r"|NOKEEP|KEEP|NOSCALE|SCALE(?:\s+(?:NO)?EXTEND)?))+")),
     Rule("constraint_state", "ENABLE, DISABLE, VALIDATE, NOVALIDATE, RELY, NORELY",
          _sub(r"\b(?:ENABLE|DISABLE|NOVALIDATE|VALIDATE|NORELY|RELY)\b")),
+    # A key declared inside CREATE TABLE writes its index's build options
+    # after USING INDEX (found by the drifted HR fixture, Sprint 8 Step 5:
+    # a primary key added by ALTER TABLE is exported inline).
+    Rule("index_statistics", "COMPUTE STATISTICS, an index build option after USING INDEX",
+         _sub(r"\bCOMPUTE\s+STATISTICS\b")),
     Rule("using_index", "USING INDEX, with the index's name if one is given",
          _sub(r"\bUSING\s+INDEX(?:\s+\x00\d+\x00(?:\.\x00\d+\x00)?)?")),
 )

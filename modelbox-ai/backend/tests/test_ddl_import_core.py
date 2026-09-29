@@ -123,8 +123,11 @@ def _case_for(rule: str) -> tuple[str, str]:
     """A real statement from the Oracle fixtures on which ``rule`` fires."""
     if rule == "partition_by":
         return PARTITIONED, "create_table"
-    for stem in ("hr", "co"):
-        for statement in splitter.split(_text("oracle", stem), "oracle"):
+    # The drifted HR export (Sprint 8 Step 5) is genuine DBMS_METADATA output
+    # too, and the only one with a key declared inside CREATE TABLE.
+    drifted = (DDL.parent / "ddl_drift" / "oracle" / "hr.sql").read_text(encoding="utf-8")
+    for text in (_text("oracle", "hr"), _text("oracle", "co"), drifted):
+        for statement in splitter.split(text, "oracle"):
             kind, _ = importer.classify(statement)
             if kind not in ("create_table", "alter_table"):
                 continue
