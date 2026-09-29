@@ -115,7 +115,10 @@ export default function DictionaryPanel({ onClose }: { onClose: () => void }) {
     });
   }
 
-  const selectedRefs = shown.filter((f) => selected.has(key(f)));
+  // References only: the server refuses a request that carries a status.
+  const selectedRefs: FieldRef[] = shown
+    .filter((f) => selected.has(key(f)))
+    .map((f) => ({ entity: f.entity, column: f.column, field: f.field }));
 
   return (
     <section aria-label="Dictionary review" style={container}>

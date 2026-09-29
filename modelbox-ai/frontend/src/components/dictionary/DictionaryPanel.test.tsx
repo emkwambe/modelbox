@@ -73,6 +73,9 @@ describe('DictionaryPanel', () => {
     render(<DictionaryPanel onClose={() => {}} />);
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Select LOCATIONS.CITY · data_type' }));
     fireEvent.click(screen.getByRole('button', { name: 'Verify selected (1)' }));
+    // Only the reference: the server refuses a request carrying a status.
+    await waitFor(() => expect(api.verifyFields).toHaveBeenCalledWith('m1', [
+      { entity: 'LOCATIONS', column: 'CITY', field: 'data_type' }]));
     expect(await screen.findByText(/Stayed pending review because the model is not a reconciled import; its definition fails the ISO\/IEC 11179-4 rules: CIRCULAR; no provenance is recorded\./)).toBeInTheDocument();
   });
 
