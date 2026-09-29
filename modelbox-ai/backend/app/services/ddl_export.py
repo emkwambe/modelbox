@@ -21,7 +21,7 @@ names, which is every name a synthesized model uses, are emitted as before.
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 import sqlglot
 from sqlglot import exp
@@ -79,6 +79,9 @@ class ExportGap:
 class DdlExport:
     sql: str
     gaps: list[ExportGap]
+    # Each CREATE TABLE and COMMENT ON, in order, without a terminator: what
+    # the file holds, one statement at a time, for a caller that applies it.
+    statements: list[str] = field(default_factory=list)
 
 
 class DdlExportError(ValueError):
@@ -326,7 +329,7 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
         header = [f"-- Export gaps ({len(gaps)}): what the model holds that this file does not state."]
         header += ["-- " + " ".join(f"{g.kind} [{g.entity}]: {g.detail}".split()) for g in gaps]
         body = "\n".join(header) + "\n\n" + body
-    return DdlExport(sql=body, gaps=gaps)
+    return DdlExport(sql=body, gaps=gaps, statements=tables + comments)
 
 
 def _descriptions(entity: EntitySchema, emitted: set[str]) -> list[tuple[str, str, str]]:
