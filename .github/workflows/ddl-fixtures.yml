@@ -1,8 +1,9 @@
 name: DDL Fixtures
 
-# Genuine tool exports for the DDL importer's fixtures. Oracle's DBMS_METADATA
-# and SQL Server's SMO (the engine behind SSMS scripting) run against their own
-# databases, loaded with public sample schemas, and write each fixture plus a
+# Genuine tool exports for the DDL importer's fixtures. Oracle's DBMS_METADATA,
+# SQL Server's SMO (the engine behind SSMS scripting) and the appliance's own
+# pg_dump run against their own databases, loaded with public sample schemas,
+# and write each fixture plus a
 # manifest counted from the database's catalog views. The outputs are uploaded
 # as artifacts; once committed under backend/tests/fixtures/ddl/, every run
 # regenerates them and fails unless the committed copies are what the tools
@@ -15,6 +16,8 @@ on:
       - .github/workflows/ddl-fixtures.yml
       - modelbox-ai/scripts/ddl_fixtures/**
       - modelbox-ai/backend/tests/fixtures/ddl/**
+      # The PostgreSQL fixture is the appliance image's own pg_dump output.
+      - modelbox-ai/docker/docker-compose.appliance.yml
   workflow_dispatch:
 
 permissions:
@@ -25,6 +28,9 @@ env:
   ORACLE_IMAGE: gvenzl/oracle-free:23.26.3-slim-faststart@sha256:f5ff19033860d662c821cb04eb10483fa94f14f78eae252d054291ea07028093
   MSSQL_IMAGE: mcr.microsoft.com/mssql/server:2022-CU27-ubuntu-22.04@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090
   ORACLE_SAMPLES_SHA: 6660bad68c07bd143430ace58565b3f727e17263
+  # The last Pagila commit that loads on PostgreSQL 16: later ones add
+  # pgvector and PostgreSQL 18 features (uuidv7(), virtual generated columns).
+  PAGILA_SHA: 23f7fe7a1e9f5772f85fc14f530583ffa258c6d2
   AW_BAK_URL: https://github.com/microsoft/sql-server-samples/releases/download/adventureworks/AdventureWorks2022.bak
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
@@ -108,6 +114,76 @@ jobs:
             python modelbox-ai/scripts/ddl_fixtures/compare_fixture.py "$committed" out/oracle
           else
             echo "::warning::no committed Oracle fixtures yet; the upload is the candidate set"
+          fi
+
+  postgres:
+    name: PostgreSQL (pg_dump)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install the client library and YAML reader, at the locked versions
+        run: |
+          pip install "$(grep -E '^psycopg2-binary==' modelbox-ai/backend/requirements.lock)" \
+                      "$(grep -E '^PyYAML==' modelbox-ai/backend/requirements.lock)"
+
+      - name: Start the appliance's PostgreSQL
+        # The image is read from the appliance compose file, pinned by digest,
+        # so the fixture is what the appliance's own pg_dump writes.
+        run: |
+          image="$(python -c 'import yaml; print(yaml.safe_load(open("modelbox-ai/docker/docker-compose.appliance.yml"))["services"]["postgres-db"]["image"])')"
+          echo "POSTGRES_IMAGE=$image" >> "$GITHUB_ENV"
+          pw="Pg$(openssl rand -hex 12)"
+          echo "::add-mask::$pw"
+          echo "PGPASSWORD=$pw" >> "$GITHUB_ENV"
+          docker run -d --name modelbox-fixture-postgres -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=pagila -p 127.0.0.1::5432 "$image"
+          # A TCP query inside the container: the image's initdb server listens
+          # on no TCP port, so an answer means the real server is up.
+          for _ in $(seq 1 60); do
+            if docker exec -e PGPASSWORD="$pw" modelbox-fixture-postgres psql -h 127.0.0.1 -U postgres -d pagila -tAc 'SELECT 1' >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker exec -e PGPASSWORD="$pw" modelbox-fixture-postgres psql -h 127.0.0.1 -U postgres -d pagila -tAc 'SELECT version()'
+          port="$(docker port modelbox-fixture-postgres 5432 | head -n 1 | awk -F: '{print $NF}')"
+          [ -n "$port" ] || { echo "::error::no host port for PostgreSQL"; exit 1; }
+          echo "POSTGRES_PORT=$port" >> "$GITHUB_ENV"
+
+      - name: Load the Pagila schema
+        run: |
+          curl -fsSL -o pagila-schema.sql "https://raw.githubusercontent.com/devrimgunduz/pagila/${PAGILA_SHA}/pagila-schema.sql"
+          docker exec -i -e PGPASSWORD="$PGPASSWORD" modelbox-fixture-postgres \
+            psql -v ON_ERROR_STOP=1 -q -h 127.0.0.1 -U postgres -d pagila < pagila-schema.sql > pagila_load.log
+          tail -3 pagila_load.log
+
+      - name: Export with pg_dump and count from the catalog
+        run: |
+          python modelbox-ai/scripts/ddl_fixtures/postgres_export.py \
+            --container modelbox-fixture-postgres --user postgres --database pagila \
+            --dsn-port "$POSTGRES_PORT" --out out/postgres --image "$POSTGRES_IMAGE" \
+            --source "devrimgunduz/pagila@${PAGILA_SHA} pagila-schema.sql" --run "$RUN_URL"
+
+      - name: Upload the regenerated fixtures
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ddl-fixtures-postgres
+          path: out/postgres
+
+      - name: The committed fixtures are what the tool produces
+        run: |
+          committed=modelbox-ai/backend/tests/fixtures/ddl/postgres
+          if [ -d "$committed" ]; then
+            python modelbox-ai/scripts/ddl_fixtures/compare_fixture.py "$committed" out/postgres
+          else
+            echo "::warning::no committed PostgreSQL fixtures yet; the upload is the candidate set"
           fi
 
   mssql:
