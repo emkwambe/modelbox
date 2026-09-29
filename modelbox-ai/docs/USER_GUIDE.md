@@ -140,6 +140,14 @@ Open **Export artifacts** on the canvas. Tabs:
   a dialect cannot express is listed as an **export gap** at the top of the
   file, by table and reason — for example a CHECK in Snowflake, which has no
   CHECK constraints, or a relationship whose columns were never chosen.
+  When tables reference each other in a cycle, the foreign key that cannot be
+  declared with its table is added by `ALTER TABLE` after every table exists
+  (PostgreSQL, Snowflake, Redshift, Databricks); other dialects list it as an
+  export gap. For PostgreSQL, a default that calls a sequence the model does
+  not hold is left out, a schema-qualified user-defined type the model does
+  not define is written as `TEXT` (without the default's cast to it), and SQL Server `money`, `smallmoney`, `bit` and
+  `geography` are written as `NUMERIC(19, 4)`, `NUMERIC(10, 4)`, `BOOLEAN` and
+  `TEXT`. Each of these is listed as an export gap.
 - **Contracts** — **OpenDataContract** YAML, **Apache Avro**, **Protobuf**.
 - **Semantic** — Cube.js, **LookML**, **dbt MetricFlow**.
 
@@ -150,12 +158,31 @@ Open **Export artifacts** on the canvas. Tabs:
 
 Open **Export artifacts → Dictionary**. Choose a format:
 
-- **Markdown** — per-entity column tables (type/key/PII/description), resolved FK
-  targets, a relationships table, and a business glossary.
+- **Markdown** — per-entity column tables and a relationships table.
 - **HTML** — a self-contained, styled documentation page.
 - **JSON** — machine-readable metadata; feed it to AI agents or a catalog.
+- **CSV** — two files: `data_dictionary.csv`, one row per column with its
+  table's description, grain and type, and `data_dictionary_relationships.csv`.
 
-**API:** `GET /api/v1/model/{id}/export/dictionary?format=markdown|html|json`.
+Every format shows the same fields, read from the model, in this order:
+column name, position, type, the type as declared in the source DDL,
+nullable, default (in its original text), primary-key position, UNIQUE
+constraints (including composite ones), foreign-key target, CHECK
+constraints, description, PII, and validation rules (min, max, regex).
+PII and validation rules are labelled **as recorded**: they show what the
+model holds, not a review of it. A field the model does not hold is left out
+rather than shown blank.
+
+The dictionary starts by stating where the model came from. A model imported
+from a DDL file that did not reconcile with its source says so at the top, in
+every format (in the CSV, in the `source_reconciliation` column), so the
+dictionary is not read as describing the source database exactly.
+
+The relationships table lists each relationship's column pairs. A
+relationship whose columns have not been chosen is shown as **unresolved**,
+so you can see which still need them.
+
+**API:** `GET /api/v1/model/{id}/export/dictionary?format=markdown|html|json|csv`.
 
 ## Workflow 7 — CI/CD integration via API keys
 

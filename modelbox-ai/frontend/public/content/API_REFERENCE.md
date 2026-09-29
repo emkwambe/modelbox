@@ -201,7 +201,7 @@ Export a governance data contract (ODCS / Avro / Protobuf)
 
 ### `GET /api/v1/model/{model_id}/export/dictionary`
 
-Export a data dictionary + business glossary (Markdown/HTML/JSON)
+Export a data dictionary (Markdown/HTML/JSON/CSV)
 
 | Param | In | Type | Required |
 |---|---|---|---|

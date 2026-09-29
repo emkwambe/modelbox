@@ -86,6 +86,7 @@ const DICTIONARY_FORMATS: { value: DictionaryFormat; label: string }[] = [
   { value: 'markdown', label: 'Markdown' },
   { value: 'html', label: 'HTML' },
   { value: 'json', label: 'JSON' },
+  { value: 'csv', label: 'CSV' },
 ];
 
 /** Pick a Monaco language id from a file path. */
