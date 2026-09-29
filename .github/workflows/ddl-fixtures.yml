@@ -60,21 +60,28 @@ jobs:
           [ -n "$port" ] || { echo "::error::no host port for Oracle"; exit 1; }
           echo "ORACLE_PORT=$port" >> "$GITHUB_ENV"
 
-      - name: Install the HR and CO sample schemas
+      - name: Install the HR and CO sample schemas, with their data
+        # Populated, not only created: an empty table's DDL says SEGMENT
+        # CREATION DEFERRED and carries no STORAGE clause, while a table with
+        # rows is exported the way a production schema is, with SEGMENT
+        # CREATION IMMEDIATE and STORAGE(INITIAL … NEXT …).
         run: |
           base="https://raw.githubusercontent.com/oracle-samples/db-sample-schemas/${ORACLE_SAMPLES_SHA}"
-          curl -fsSL -o hr_create.sql "$base/human_resources/hr_create.sql"
-          curl -fsSL -o co_create.sql "$base/customer_orders/co_create.sql"
-          docker cp hr_create.sql modelbox-fixture-oracle:/tmp/hr_create.sql
-          docker cp co_create.sql modelbox-fixture-oracle:/tmp/co_create.sql
           for schema in hr co; do
+            dir=human_resources; [ "$schema" = co ] && dir=customer_orders
+            for part in create populate; do
+              curl -fsSL -o "${schema}_${part}.sql" "$base/$dir/${schema}_${part}.sql"
+              docker cp "${schema}_${part}.sql" "modelbox-fixture-oracle:/tmp/${schema}_${part}.sql"
+            done
             printf '%s\n' "WHENEVER SQLERROR EXIT FAILURE" \
               "CREATE USER $schema IDENTIFIED BY \"$ORACLE_PASSWORD\" DEFAULT TABLESPACE users QUOTA UNLIMITED ON users;" \
               "GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW, CREATE PROCEDURE, CREATE TRIGGER TO $schema;" \
               "EXIT" | docker exec -i modelbox-fixture-oracle sqlplus -s "system/$ORACLE_PASSWORD@FREEPDB1"
-            printf '%s\n' "WHENEVER SQLERROR EXIT FAILURE" "@/tmp/${schema}_create.sql" "EXIT" \
-              | docker exec -i modelbox-fixture-oracle sqlplus -s "$schema/$ORACLE_PASSWORD@FREEPDB1" > "${schema}_install.log"
-            tail -5 "${schema}_install.log"
+            for part in create populate; do
+              printf '%s\n' "WHENEVER SQLERROR EXIT FAILURE" "@/tmp/${schema}_${part}.sql" "EXIT" \
+                | docker exec -i modelbox-fixture-oracle sqlplus -s "$schema/$ORACLE_PASSWORD@FREEPDB1" > "${schema}_${part}.log"
+              tail -3 "${schema}_${part}.log"
+            done
           done
 
       - name: Export with DBMS_METADATA and count from the catalog

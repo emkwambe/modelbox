@@ -2,8 +2,9 @@
 """Export Oracle sample schemas with DBMS_METADATA, and count them from the catalog.
 
 Runs in CI (``.github/workflows/ddl-fixtures.yml``) against an Oracle Database
-Free container into which the HR and CO sample schemas were installed. For each
-schema it writes two files:
+Free container into which the HR and CO sample schemas were installed and
+populated (so tables have segments, and their DDL carries the storage clauses a
+production export does). For each schema it writes two files:
 
 * ``<schema>.sql``: every table as ``DBMS_METADATA.GET_DDL('TABLE', …)``
   returns it, with the default transform parameters (storage, segment
