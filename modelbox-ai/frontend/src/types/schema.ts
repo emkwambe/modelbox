@@ -449,6 +449,8 @@ export interface DiffResponse {
   alter_statements: string[];
   breaking_changes: string[];
   semantic_breaks: string[];
+  /** Every statement that destroys data, in words; the same text heads it in the DDL. */
+  data_loss?: string[];
 }
 
 export interface SyntheticSeedRequest {

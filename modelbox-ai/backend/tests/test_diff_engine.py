@@ -109,7 +109,8 @@ def test_renamed_column_is_a_rename_not_a_drop_and_add() -> None:
     tgt = _model(
         [_identified(_entity("a", [_col("id", pk=True), _col("customer_email")]))]
     )
-    statements, breaking, _ = DiffEngine().diff(src, tgt)
+    # Two versions of one model: its column ids are its own (Sprint 8 Step 6).
+    statements, breaking, _ = DiffEngine().diff(src, tgt, same_model=True)
     joined = _joined(statements)
 
     assert "RENAME COLUMN CUST_EMAIL TO CUSTOMER_EMAIL" in joined
@@ -210,10 +211,55 @@ def test_renaming_the_primary_key_column_is_not_a_key_change() -> None:
     """
     src = _model([_identified(_entity("a", [_col("cust_id", "INT", pk=True)]))])
     tgt = _model([_identified(_entity("a", [_col("customer_id", "INT", pk=True)]))])
-    statements, breaking, _ = DiffEngine().diff(src, tgt)
+    statements, breaking, _ = DiffEngine().diff(src, tgt, same_model=True)
 
     assert "RENAME COLUMN CUST_ID TO CUSTOMER_ID" in _joined(statements)
     assert not any("primary key" in b.lower() for b in breaking), breaking
+
+
+# ---------------------------------------------------------------------------
+# Separately saved models: no pairing by internal id (Sprint 8 Step 6, A1)
+# ---------------------------------------------------------------------------
+def _separately_saved() -> tuple[SynthesizedModel, SynthesizedModel]:
+    """The confirmed case: two saved models each number their columns from 1,
+    so `email` (id 2) in one and `phone` (id 2) in the other share an id."""
+    src = _model([_identified(_entity("a", [_col("id", "INT", pk=True), _col("email")]))])
+    tgt = _model([_identified(_entity("a", [_col("id", "INT", pk=True), _col("phone"), _col("email")]))])
+    return src, tgt
+
+
+def test_separately_saved_models_pair_by_name_so_an_added_column_is_an_addition() -> None:
+    src, tgt = _separately_saved()
+    result = DiffEngine().diff_report(src, tgt)
+    joined = _joined(result.statements)
+    assert "RENAME" not in joined, "a rename was inferred from ids two models share by accident"
+    assert "ADD COLUMN PHONE" in joined
+    assert "DROP COLUMN" not in joined and result.data_loss == [], "email is on both sides: nothing is dropped"
+
+
+def test_negative_control_id_pairing_across_models_brings_the_false_rename_back() -> None:
+    src, tgt = _separately_saved()
+    joined = _joined(DiffEngine().diff(src, tgt, same_model=True)[0])
+    assert "RENAME COLUMN EMAIL TO PHONE" in joined
+
+
+def test_an_uncertain_rename_is_a_drop_and_an_add_and_the_migration_says_so() -> None:
+    src = _model([_identified(_entity("a", [_col("id", "INT", pk=True), _col("cust_email")]))])
+    tgt = _model([_identified(_entity("a", [_col("id", "INT", pk=True), _col("customer_email")]))])
+    result = DiffEngine().diff_report(src, tgt)
+    drop = next(s for s in result.statements if "DROP COLUMN" in s.upper())
+    assert drop.startswith("-- DATA LOSS: Drops column a.cust_email and its data.")
+    assert "if this column was renamed, replace the DROP and the ADD with a RENAME" in drop
+    assert result.data_loss == [drop.splitlines()[0].removeprefix("-- DATA LOSS: ")]
+    assert any("ADD COLUMN CUSTOMER_EMAIL" in s.upper() for s in result.statements)
+
+
+def test_a_dropped_table_says_its_data_goes_too() -> None:
+    src = _model([_entity("a", [_col("id", pk=True)]), _entity("b", [_col("id", pk=True)])])
+    tgt = _model([_entity("a", [_col("id", pk=True)])])
+    result = DiffEngine().diff_report(src, tgt)
+    assert result.data_loss == ["Drops table b and all of its data."]
+    assert result.statements[0].startswith("-- DATA LOSS: Drops table b")
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +506,38 @@ async def test_diff_endpoint_reports_migration_and_breaking(
     assert "ADD COLUMN PHONE" in joined
     assert "ADD COLUMN AMOUNT" in joined
     assert "Dropped table: legacy_log" in body["breaking_changes"]
+    assert body["data_loss"] == ["Drops table legacy_log and all of its data."]
+
+
+async def test_the_diff_endpoint_never_renames_across_separately_saved_models(session: AsyncSession) -> None:
+    """The confirmed Step 5 case through the real path: two models saved
+    separately (each numbering its columns from 1) and diffed by the API."""
+    from app.api.v1.dependencies import get_current_user
+    from app.core.database import get_db_session
+    from app.main import create_app
+
+    user, workspace_id = await _seed_user_workspace(session, "renames@example.com")
+    v1 = _model([_entity("a", [_col("id", "INT", pk=True), _col("email")])])
+    v2 = _model([_entity("a", [_col("id", "INT", pk=True), _col("phone"), _col("email")])])
+    source_id = await _persist(session, workspace_id, v1)
+    target_id = await _persist(session, workspace_id, v2)
+
+    app = create_app()
+
+    async def _session_override() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    app.dependency_overrides[get_db_session] = _session_override
+    app.dependency_overrides[get_current_user] = lambda: user
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/v1/model/diff", json={
+            "source_model_id": source_id, "target_model_id": target_id, "dialect": "postgres"})
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200, resp.text
+    joined = "\n".join(resp.json()["alter_statements"]).upper()
+    assert "RENAME" not in joined and "ADD COLUMN PHONE" in joined
+    assert resp.json()["data_loss"] == []
 
 
 @pytest.mark.asyncio

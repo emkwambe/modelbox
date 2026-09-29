@@ -417,6 +417,9 @@ class DiffResponse(BaseModel):
     breaking_changes: list[str] = Field(default_factory=list)
     # In-model semantic-layer impact (declared measures / metric formulas).
     semantic_breaks: list[str] = Field(default_factory=list)
+    # Every statement that destroys data, said in words (Sprint 8 Step 6): the
+    # same text heads the statement in alter_statements.
+    data_loss: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

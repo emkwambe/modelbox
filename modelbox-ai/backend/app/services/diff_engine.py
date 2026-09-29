@@ -182,6 +182,17 @@ _SQLGLOT_DIALECTS: dict[str, str] = {
 }
 
 
+@dataclass(frozen=True)
+class MigrationDiff:
+    """The migration diff: DDL, breaking changes, semantic breaks, and data loss."""
+
+    statements: list[str]
+    breaking: list[str]
+    semantic: list[str]
+    #: Every statement that destroys data, said in words: shown with the DDL.
+    data_loss: list[str]
+
+
 class DiffEngine:
     """Diffs two SynthesizedModel graphs into migration DDL."""
 
@@ -189,28 +200,53 @@ class DiffEngine:
         self._dialect = _SQLGLOT_DIALECTS.get(dialect.lower(), "postgres")
 
     def diff(
-        self, source: SynthesizedModel, target: SynthesizedModel
+        self, source: SynthesizedModel, target: SynthesizedModel, *, same_model: bool = False
     ) -> tuple[list[str], list[str], list[str]]:
-        """Return ``(alter_statements, breaking_changes, semantic_breaks)``.
+        """Return ``(alter_statements, breaking_changes, semantic_breaks)``."""
+        result = self.diff_report(source, target, same_model=same_model)
+        return result.statements, result.breaking, result.semantic
 
-        Rendered from :func:`compare` (identity pairing). The migration diff
-        states what DDL it emits and what it calls breaking, which is a subset
-        of the changes: it does not migrate nullability, defaults, UNIQUE,
-        CHECK or descriptions, and reports a primary key as changed only when
-        its set of columns differs.
+    def diff_report(
+        self, source: SynthesizedModel, target: SynthesizedModel, *, same_model: bool = False
+    ) -> MigrationDiff:
+        """The migration diff, rendered from :func:`compare`.
+
+        **Columns are paired by internal id only between versions of the same
+        model** (``same_model``). Every saved model numbers its columns from 1,
+        so between two separately saved models equal ids name unrelated
+        columns, and pairing by them turned an added column into a rename of
+        another and dropped its data (Sprint 8 Step 5; owner decision, Step 6).
+        Between separate models columns are paired by name, and a rename that
+        is not certain is a removal plus an addition: the migration and
+        ``data_loss`` say, for each, that the removed column's data is dropped.
+        A destructive statement is never emitted on a guess.
+
+        The migration diff states what DDL it emits and what it calls breaking,
+        which is a subset of the changes: it does not migrate nullability,
+        defaults, UNIQUE, CHECK or descriptions, and reports a primary key as
+        changed only when its set of columns differs.
         """
-        changes = compare(source, target, identity=True)
+        changes = compare(source, target, identity=same_model)
 
         def of(kind: str, table: str | None = None) -> list[Change]:
             return [c for c in changes if c.kind == kind and (table is None or c.table == table)]
 
         statements: list[str] = []
         breaking: list[str] = []
+        # Statement index -> the data it destroys, stated above the statement.
+        warnings: dict[int, str] = {}
+        data_loss: list[str] = []
+        renames_possible = not same_model
+
+        def destroys(text: str) -> None:
+            warnings[len(statements) - 1] = text
+            data_loss.append(text)
 
         # Dropped entities (destructive).
         for change in of("table_removed"):
             statements.append(f"DROP TABLE {change.table} CASCADE")
             breaking.append(f"Dropped table: {change.table}")
+            destroys(f"Drops table {change.table} and all of its data.")
 
         # Added entities.
         for change in of("table_added"):
@@ -229,6 +265,11 @@ class DiffEngine:
             for c in of("column_removed", name):
                 statements.append(f"ALTER TABLE {name} DROP COLUMN {c.column}")
                 breaking.append(f"Dropped column: {name}.{c.column}")
+                destroys(
+                    f"Drops column {name}.{c.column} and its data."
+                    + (" Columns of separately saved models are matched by name, so a rename is a removal and"
+                       " an addition: if this column was renamed, replace the DROP and the ADD with a RENAME."
+                       if renames_possible else ""))
             for c in of("type_changed", name):
                 statements.append(f"ALTER TABLE {name} ALTER COLUMN {c.column} TYPE {c.after}")
                 breaking.append(f"Type change: {name}.{c.column} {c.before} -> {c.after}")
@@ -237,8 +278,12 @@ class DiffEngine:
         breaking += self._relationship_breaks(of("foreign_key_removed"))
 
         transpiled = [self._transpile(s) for s in statements]
+        # The warning goes into the migration itself, as a comment above the
+        # statement, so it travels with the DDL wherever it is pasted.
+        transpiled = [f"-- DATA LOSS: {warnings[i]}\n{sql}" if i in warnings else sql
+                      for i, sql in enumerate(transpiled)]
         semantic = self._semantic_breaks(source, target)
-        return transpiled, breaking, semantic
+        return MigrationDiff(transpiled, breaking, semantic, data_loss)
 
     @staticmethod
     def _match_columns(
