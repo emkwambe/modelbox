@@ -595,6 +595,45 @@ def _is_temporal_type(data_type: str) -> bool:
     return any(token in upper for token in _TEMPORAL_TOKENS)
 
 
+# The family a declared physical type belongs to, read by whole type names
+# rather than substrings: a list of substrings once left SQL Server's `money`
+# out of "numeric", and the semantic exporters wrote an amount as a label.
+_BOOLEAN_TYPE = re.compile(r"\bBOOL(EAN)?\b|^BIT$")
+_NUMERIC_TYPE = re.compile(r"\b(TINYINT|SMALLINT|MEDIUMINT|INT\d*|INTEGER|BIGINT|NUMBER|NUMERIC|DECIMAL|DEC|"
+                           r"FLOAT\d*|REAL|DOUBLE|MONEY|SMALLMONEY|SERIAL|BIGSERIAL|SMALLSERIAL)\b")
+_TEXT_TYPE = re.compile(r"CHAR|TEXT|STRING|CLOB|CITEXT")
+_BINARY_TYPE = re.compile(r"BINARY|BLOB|BYTEA|IMAGE|\bRAW\b")
+_INTEGER_TYPE = re.compile(r"\b(TINYINT|SMALLINT|MEDIUMINT|INT\d*|INTEGER|BIGINT|SERIAL|BIGSERIAL|SMALLSERIAL)\b")
+_ZERO_SCALE = re.compile(r"\b(NUMBER|NUMERIC|DECIMAL|DEC)\s*\(\s*(\d+|\*)\s*(,\s*0\s*)?\)")
+
+
+def type_family(data_type: str) -> str:
+    """``temporal``, ``boolean``, ``text``, ``binary``, ``numeric`` or ``other``.
+
+    Money types (SQL Server ``money`` and ``smallmoney``, PostgreSQL ``money``)
+    are numeric. A one-bit ``BIT`` is boolean.
+    """
+    upper = data_type.strip().upper()
+    if _is_temporal_type(upper):
+        return "temporal"
+    if _BOOLEAN_TYPE.search(re.sub(r"\s*\(\s*1\s*\)$", "", upper)):
+        return "boolean"
+    if _TEXT_TYPE.search(upper):
+        return "text"
+    if _BINARY_TYPE.search(upper):
+        return "binary"
+    if _NUMERIC_TYPE.search(upper):
+        return "numeric"
+    return "other"
+
+
+def is_integer_type(data_type: str) -> bool:
+    """A numeric type that holds whole numbers only: an integer type, or a
+    NUMBER/NUMERIC/DECIMAL with scale 0 (Oracle's ``NUMBER(6,0)``)."""
+    upper = data_type.strip().upper()
+    return type_family(upper) == "numeric" and bool(_INTEGER_TYPE.search(upper) or _ZERO_SCALE.search(upper))
+
+
 class IdentitySchema(BaseModel):
     """How an imported column's values are generated (Sprint 9 Step 1a, migration 0028).
 
@@ -1459,4 +1498,6 @@ __all__ = [
     "ValidationIssue",
     "ValidationReport",
     "WorkspaceInfo",
+    "is_integer_type",
+    "type_family",
 ]

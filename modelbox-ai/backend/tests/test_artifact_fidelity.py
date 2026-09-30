@@ -1210,6 +1210,79 @@ def test_metricflow_with_composite_keys_parses_in_dbt(tmp_path_factory: pytest.T
     assert result.success, f"{result.error} {detail}"
 
 
+#: The certified fixtures (PL-018), as (file, dialect).
+_CERTIFIED_IMPORTS = {
+    "oracle-hr": ("oracle/hr.sql", "oracle"),
+    "oracle-co": ("oracle/co.sql", "oracle"),
+    "pagila": ("postgres/pagila.sql", "postgres"),
+    "adventureworks": ("tsql/adventureworks.sql", "tsql"),
+}
+
+
+def _parse_import_with_time_columns(name: str, tmp_path_factory: pytest.TempPathFactory) -> DbtResult:
+    """A certified fixture, imported, with a time column confirmed on every
+    table that has a candidate (the top of Step 4's ranking, as a person
+    accepting the first suggestion would), exported as the API does for an
+    import, and `dbt parse`d with its MetricFlow semantic model."""
+    from app.services import suggestion_rules
+    from app.services.ddl_import.importer import import_ddl
+
+    _need(HAVE_DBT, "dbt-core")
+    relative, dialect = _CERTIFIED_IMPORTS[name]
+    path = Path(__file__).resolve().parent / "fixtures" / "ddl" / relative
+    model = import_ddl(path.read_bytes(), dialect, path.name).model
+    chosen = {c.entity: c.column for c in suggestion_rules.time_candidates(model) if c.signals["rank"] == 1}
+    for entity in model.entities:
+        entity.agg_time_column = chosen.get(entity.entity_name)
+    assert chosen, "fixture sanity: some table has a time column to confirm"
+    # The exporter as the API builds it for an imported model: the source's
+    # dialect, and the project exported for the warehouse it runs on.
+    imported = ExporterService(source_dialect=dialect)
+    semantic = imported.export_semantic_layer(model, "metricflow")
+    measures = [m for sm in yaml.safe_load(semantic["semantic_models.yml"])["semantic_models"]
+                for m in sm.get("measures", [])]
+    assert measures, "fixture sanity: the manifest has measures, so dbt checks it in full"
+
+    root = tmp_path_factory.mktemp(f"dbt-{name}-sem")
+    project = imported.generate_dbt_project(model, dialect="postgres")
+    for relative, content in project.items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    if "packages.yml" in project:
+        _need(HAVE_DBT_PACKAGES, _DBT_PACKAGES_HINT)
+        shutil.copytree(_DBT_PACKAGE_CACHE, root / "dbt_packages")
+    for relative, content in semantic.items():
+        (root / "models" / relative).write_text(content, encoding="utf-8")
+    (root / "models" / "metricflow_time_spine.sql").write_text(_TIME_SPINE_SQL, encoding="utf-8")
+    (root / "models" / "_time_spine.yml").write_text(_TIME_SPINE_YML, encoding="utf-8")
+    (root / "dbt_project.yml").write_text(
+        f"name: 'fidelity_{name.replace('-', '_')}'\nversion: '1.0'\nprofile: 'modelbox'\nmodel-paths: ['models']\n",
+        encoding="utf-8")
+    (root / "profiles.yml").write_text(_DBT_PROFILE, encoding="utf-8")
+    return _run_dbt_parse(root)
+
+
+@pytest.mark.parametrize("name", sorted(_CERTIFIED_IMPORTS))
+def test_metricflow_for_an_imported_schema_with_time_columns_parses_in_dbt(
+        name: str, tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Sprint 9 Step 5a.1 (owner): each certified fixture, with its time
+    columns confirmed, exports a semantic manifest dbt accepts."""
+    result = _parse_import_with_time_columns(name, tmp_path_factory)
+    detail = "; ".join(result.messages("SemanticValidationFailure"))[:600]
+    assert result.success, f"{result.error} {detail}"
+
+
+def test_negative_control_without_the_rename_dbt_refuses_adventureworks(
+        tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dimension named as an entity elsewhere (ProductID, a column of a
+    composite foreign key) is what dbt refuses once there are measures."""
+    monkeypatch.setattr(ExporterService, "_rename_dimensions_named_as_entities", staticmethod(lambda models: []))
+    result = _parse_import_with_time_columns("adventureworks", tmp_path_factory)
+    assert not result.success
+    assert "product_id" in " ".join(m for _, m in result.events)
+
+
 @pytest.mark.parametrize("gid", GOLD_IDS)
 def test_metricflow_metrics_have_label(gid: str) -> None:
     doc = _metricflow_doc(GOLD[gid])
@@ -1327,7 +1400,12 @@ def test_metricflow_measures_require_an_aggregation_time_axis(gid: str) -> None:
 
 
 def test_metricflow_foreign_entity_names_parent_primary() -> None:
-    """Foreign entity names must match the parent's primary entity name."""
+    """A table's first reference to a parent is named after the parent's
+    primary entity, so it joins. A second reference to the same parent (a
+    role-playing dimension) cannot also take that name: MetricFlow allows an
+    entity name once per semantic model, and `dbt parse` refuses the
+    repetition once the model has a time column (Sprint 9 Step 5a.1). It is
+    named after its own column, and the join it cannot state is a named gap."""
     fixture = SYNTHETIC["role-playing-dimension"]
     doc = _metricflow_doc(fixture)
     by_name = {m["name"]: m for m in doc["semantic_models"]}
@@ -1336,18 +1414,34 @@ def test_metricflow_foreign_entity_names_parent_primary() -> None:
         for m in doc["semantic_models"]
         if any(e["type"] == "primary" for e in m["entities"])
     }
+    gaps = exporter().metricflow_export_gaps(fixture.model)
+    referred: set[tuple[str, str]] = set()
+    roles = 0
     for rel in fixture.model.relationships:
         child_entity, child_column = rel.from_ref, rel.from_columns[0]
         parent_entity = rel.to_ref
-        expected = primary_names[parent_entity]
         foreign = [
             e["name"] for e in by_name[child_entity]["entities"]
             if e["type"] == "foreign" and e.get("expr") == child_column
         ]
-        assert foreign == [expected], (
-            f"{child_entity}.{child_column} -> {parent_entity}: foreign entity "
-            f"named {foreign} but must be '{expected}' to join"
-        )
+        if (child_entity, parent_entity) not in referred:
+            expected = primary_names[parent_entity]
+            assert foreign == [expected], (
+                f"{child_entity}.{child_column} -> {parent_entity}: foreign entity "
+                f"named {foreign} but must be '{expected}' to join"
+            )
+        else:
+            roles += 1
+            assert foreign == [child_column], f"{child_entity}.{child_column}: a second role is named {foreign}"
+            assert any(g.startswith(f"{child_entity}.{child_column} -> {parent_entity}:") for g in gaps), \
+                f"{child_entity}.{child_column}: the join it cannot state is not a named gap"
+        referred.add((child_entity, parent_entity))
+    assert roles, "fixture sanity: the fixture has a second role to the same parent"
+    names = [e["name"] for sm in doc["semantic_models"] for e in sm["entities"]]
+    for sm in doc["semantic_models"]:
+        own = [e["name"] for e in sm["entities"]]
+        assert len(own) == len(set(own)), f"{sm['name']} repeats an entity name: {own}"
+    assert names, "fixture sanity: entities were emitted"
 
 
 # ===========================================================================
@@ -1427,20 +1521,11 @@ def test_cube_boolean_dimensions_are_boolean(gid: str, tmp_path: Path) -> None:
 # assertions are excluded from the Sprint 3 burn-down.
 # ===========================================================================
 @pytest.mark.preview
-@pytest.mark.parametrize("gid", gold_params({
-    gid: "M3: LookML excludes the primary key from measures but not foreign "
-         "keys, so SUM() over an FK is emitted. Preview — not scheduled."
-    # Every graph whose foreign keys are numeric. `banking-datavault` uses
-    # CHAR hash keys and `marketing-attribution` is a single-table OBT, so
-    # neither exhibits it. `aml-financial-crime` is a Kimball star with
-    # INTEGER surrogate keys and exhibits it exactly as the other stars do.
-    for gid in (
-        "saas-subscription",
-        "ecommerce-orders",
-        "healthcare-ehr",
-        "aml-financial-crime",
-    )
-}))
+# M3 (LookML summed foreign keys) was a strict xfail on the four graphs with
+# numeric foreign keys until Sprint 9 Step 5a.1, where one rule decides what
+# every semantic exporter sums (ExporterService.dimension_reason) and keys and
+# foreign keys are never summed. LookML itself stays Preview.
+@pytest.mark.parametrize("gid", GOLD_IDS)
 def test_lookml_no_measure_over_foreign_key(gid: str) -> None:
     fks = _fk_columns(GOLD[gid].model)
     offending = []
