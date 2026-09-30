@@ -672,6 +672,62 @@ decision about it with its evidence.
 
 ---
 
+## Suggestions
+
+ModelBox's guesses about a model: which columns hold PII (`kind` `pii`), and
+which column each table's measures should be aggregated over (`kind`
+`agg_time_column`). A suggestion is stored beside the model, never in it, with
+`provenance` `heuristic`; its `status` is `pending`, `accepted`, `rejected` or
+`superseded`, and never `verified`. Each gives its `rule_name` and
+`rule_source` (`builtin` or `client`), its `category` and `category_label`,
+the `anchor` the category rests on, the `signals` the rule read, and what
+accepting would write (`suggested`). A PII suggestion has no `confidence`; a
+time-column candidate has one, a ranking from written rules (see the user
+guide), with `signals.rank`, `signals.of` and, for a row-audit name,
+`signals.flag` = `likely an audit column`. `stale` says why a suggestion can
+no longer be accepted (its column is gone, or no longer temporal), and
+`resolved_elsewhere` that its field already holds a value.
+
+Reading is VIEWER. Running the rules and deciding is MEMBER. **A decision needs
+a person**: accept and reject take the decider from the signed-in caller, an
+API key is refused with `403`, and a body naming a decider or a status is
+refused with `422`. Verifying a value that an accepted suggestion wrote is a
+separate request, `POST /api/v1/model/{model_id}/attestations/verify`, which
+needs an APPROVER.
+
+### `GET /api/v1/model/{model_id}/suggestions`
+
+Every suggestion on the model, with `counts` (`pending`, `accepted`,
+`rejected`, `superseded`, and the `statement` "N suggestions pending review")
+and the `ruleset_digest` of the rules in force (VIEWER+).
+
+### `POST /api/v1/model/{model_id}/suggestions`
+
+Run the rules (MEMBER+). New guesses are stored `pending`; the model is not
+changed. A column already marked PII, and a table with its time column chosen,
+get none. A pending suggestion whose field has since been given a value is
+marked `superseded`. A rejected suggestion is not made again for the same
+column, category and rule. **Responses:** `200`, with `created` and
+`superseded_now` beside the list.
+
+### `POST /api/v1/model/{model_id}/suggestions/{suggestion_id}/accept`
+
+Accept a pending suggestion (MEMBER+, a person). Its value is written into the
+model as the caller's, through the same path as a canvas save: the model's
+version goes up, and a PII value's dictionary field is `pending`, with
+provenance `person`. Accepting a time column supersedes the table's other
+candidates; accepting a PII type supersedes the column's other PII
+suggestions. **Responses:** `200`, `401`, `403` (a VIEWER, or an API key),
+`404`, `409` (not pending, stale, or the field already holds a value), `422`
+(a body).
+
+### `POST /api/v1/model/{model_id}/suggestions/{suggestion_id}/reject`
+
+Reject a pending suggestion (MEMBER+, a person). **Responses:** as for accept;
+the model is not changed.
+
+---
+
 ## ModelBox Trainer
 
 ### `GET /api/v1/trainer/assignments`

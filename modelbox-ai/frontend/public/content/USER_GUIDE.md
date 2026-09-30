@@ -119,7 +119,8 @@ exist) still invalidate a model.
 
 Fix findings by adding descriptions, declaring FACT grains, renaming to
 conventions (`dim_`/`fact_`/… prefixes, `_id`/`_sk` key suffixes), and tagging
-PII columns. Re-validate to confirm.
+PII columns. Re-validate to confirm. **Suggestions** (below) can propose which
+columns hold PII, for a person to accept or reject.
 
 **API:** `POST /api/v1/model/{id}/validate`.
 
@@ -459,6 +460,78 @@ the dictionary.
 
 **API:** `/api/v1/model/{id}/mappings` and `/api/v1/mappings/{document_id}/…`
 (the API reference lists every route).
+
+## Suggestions: PII and the aggregation time column
+
+Open **Suggestions** on the canvas. A MEMBER or above chooses **Run the rules**.
+ModelBox reads the model's structure (column names, types, the source's
+comments and CHECK constraints) and suggests two things:
+
+- **Which columns hold PII**, and of what kind. Each suggestion names the rule
+  that made it, the category, the text the category rests on, and what the
+  rule read: the column name, the comment or the CHECK, and the type.
+- **Which column each table's measures should be aggregated over.** Every date
+  or time column of a table with none chosen is a candidate, ranked.
+
+A suggestion is a guess, and the panel shows it as one: "suggested, not
+confirmed". It is not part of the model, and no export shows it. Nothing is
+ever set by the rules themselves.
+
+**Deciding.** A MEMBER or above accepts or rejects each suggestion. Accepting
+writes the value into the saved model as yours, exactly as if you had set it
+in the editor, so a PII value accepted this way is **pending review** in the
+dictionary. Only an APPROVER can verify it, when the three dictionary
+conditions hold. A rejected suggestion is not made again for the same column
+and rule. A suggestion whose column is gone is shown as stale, and one whose
+field you filled in another way is superseded; neither can be accepted.
+Decisions need a person signed in, so an API key cannot make one. Save the
+canvas before deciding: a decision changes the saved model, and the canvas
+reloads it.
+
+**PII categories** follow the examples of PII in NIST SP 800-122 §2.2 (name;
+personal identification numbers such as a social security, passport, driver's
+license, taxpayer, patient, financial account or credit card number; address
+information, including e-mail; asset information such as IP and MAC
+addresses; telephone numbers; personal characteristics such as biometric data;
+information identifying personally owned property; and information linked to
+an individual, such as date and place of birth), and GLBA's definition of
+nonpublic personal information, 15 U.S.C. § 6809(4)(A), for personally
+identifiable financial information. The rules carry no accuracy figure: none
+is measured, and a suggestion is always a person's to decide.
+
+**The time column.** Each candidate shows a rank and a confidence. The
+confidence is a ranking computed from written rules, not a measured
+probability: 0.5, plus 0.2 if the column is never NULL, plus 0.2 if its name
+reads as a business event (an order, a transaction, a payment). A column
+whose name reads as a row-audit timestamp (`ModifiedDate`, `created_at`,
+`updated_at`, a row version) stays in the list, flagged **likely an audit
+column**, at 0.1. Until a person accepts one, the table declares no measures
+in a semantic-layer export; once accepted, it does.
+
+**Adding your own PII rules (operators).** Set `PII_RULES_PATH` on the backend
+to a YAML file of client rules, mounted read-only into the container. Each rule
+has a `name` starting `client.`, a `category` (a built-in one, or your own with
+a `label`), an `anchor` naming the policy or text it rests on, a `signal`
+(`name` or `comment`), the `phrases` it looks for and the column `types` it
+applies to (`text`, `numeric`, `temporal`, `binary`). A file that does not
+validate stops the backend at start-up, with the reason, rather than being
+ignored.
+
+```yaml
+version: 1
+rules:
+  - name: client.member_number.name
+    category: MEMBER_NUMBER
+    label: Credit union member number
+    anchor: Data policy DP-7, section 3
+    pii_type: FINANCIAL_ACCOUNT
+    signal: name
+    phrases: ["member number", "member no"]
+    types: [text, numeric]
+```
+
+**API:** `GET`/`POST /api/v1/model/{id}/suggestions`,
+`POST /api/v1/model/{id}/suggestions/{suggestion_id}/accept` and `/reject`.
 
 ## Workflow 7 — CI/CD integration via API keys
 
