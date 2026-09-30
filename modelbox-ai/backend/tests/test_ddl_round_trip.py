@@ -107,8 +107,8 @@ def _expected_shortfall(model: SynthesizedModel, gaps: list[ddl_export.ExportGap
             shortfall[(gap.entity or "", "primary_keys")] += 1
         elif gap.kind == "description":
             raise AssertionError(f"PostgreSQL has COMMENT ON; no description gap is expected: {gap}")
-        # data_type, unique_constraint, default, identity and sequence gaps
-        # change no compared count.
+        # data_type, unique_constraint, default, identity, sequence and
+        # generated_column entries change no compared count.
     return shortfall
 
 
@@ -164,16 +164,24 @@ async def test_the_genuine_oracle_and_postgres_fixtures_round_trip_with_no_diffe
         assert got == catalog, stem
 
 
-async def test_adventureworks_differs_only_by_its_ten_computed_columns(session: AsyncSession) -> None:
-    """The one kind of loss in the four fixtures, stated by name: a computed
-    column's expression is held in the import report, not the model, so the
-    export has no definition to give it. Its description goes with it."""
+async def test_adventureworks_differs_only_by_the_computed_columns_it_cannot_express(
+    session: AsyncSession,
+) -> None:
+    """The one kind of loss in the four fixtures, stated by name. Since Sprint 9
+    Step 1b a computed column is a PostgreSQL generated column where its
+    expression can be translated; the ones that call a method or a function the
+    model does not hold are gaps, and their descriptions go with them. Both
+    counts are derived from the file's own text."""
+    from tests.test_generated_columns import ADVENTUREWORKS, _declared, _refused
+
+    declared = _declared(ADVENTUREWORKS)
+    refused = _refused(declared)
     catalog, got, gaps, _ = await _round_trip(session, "tsql", "adventureworks")
     kinds = Counter(g.kind for g in gaps)
-    assert kinds["computed_column"] == 10
-    assert set(kinds) <= {"computed_column", "data_type"}
+    assert (kinds["computed_column"], kinds["generated_column"]) == (len(refused), len(declared) - len(refused))
+    assert set(kinds) <= {"computed_column", "generated_column", "data_type"}
     differences = _differences(catalog, got)
-    assert sum(v for (_, kind), v in differences.items() if kind == "columns") == 10
+    assert sum(v for (_, kind), v in differences.items() if kind == "columns") == len(refused)
     assert {kind for _, kind in differences} <= {"columns", "column_descriptions"}
 
 

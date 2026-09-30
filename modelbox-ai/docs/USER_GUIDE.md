@@ -91,8 +91,8 @@ fills a column from a sequence on insert, the column records which trigger
 and which sequence. A
 partition is kept as metadata of its parent table. Composite primary and
 foreign keys, and UNIQUE and CHECK constraints over several columns, are in
-the model; a computed column is kept in the report because the model holds no
-expression for it.
+the model. A computed column keeps its expression exactly as the file declared
+it, and whether SQL Server stores its value (`PERSISTED`).
 
 Each column keeps its type and its DEFAULT exactly as the file declared them,
 beside their normalized forms, which exports and comparisons use. From SQL
@@ -251,6 +251,19 @@ Open **Export artifacts** on the canvas. Tabs:
     its `nextval` defaults keep working. A default that calls a sequence the
     model does not hold is left out, and a sequence from any other source
     dialect is not created. Each is listed as an export gap.
+  - A SQL Server computed column is written as a generated column,
+    `GENERATED ALWAYS AS (...) STORED`, where every part of its expression
+    translates. The parts that translate are column references, numeric and
+    string literals, arithmetic, `ISNULL` (written `COALESCE`) and `CONVERT`
+    (written `CAST`). A `+` with a string on either side is written `||`.
+    Any other call, such as a user function or a `hierarchyid` method, makes
+    the column an export gap that quotes the expression as the file declared
+    it. PostgreSQL 16 stores every generated column, so each one is listed
+    with a label: `virtual in source, stored in target`, or
+    `stored in source, stored in target` for a `PERSISTED` one. The label
+    also gives the column's type and how it was chosen. An integer or money
+    result keeps its type where the operands make it exact, a string is
+    `TEXT`, and any other number is an unbounded `NUMERIC`.
   - A schema-qualified user-defined type the model does not define is
     written as `TEXT`, without the default's cast to it, and listed as an
     export gap.

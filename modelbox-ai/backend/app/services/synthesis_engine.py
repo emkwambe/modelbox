@@ -124,7 +124,7 @@ PERSON_SUPPLIED_ENTITY_FIELDS = ("business_name", "business_owner", "it_steward"
 # What only an imported file declares (Sprint 9 Step 1a): how a column's values
 # are generated, and the sequences the file creates. A model that returned a
 # seed or a sequence would be inventing a physical fact the DDL export emits.
-IMPORT_ONLY_COLUMN_FIELDS = ("identity",)
+IMPORT_ONLY_COLUMN_FIELDS = ("identity", "computed_expression", "computed_persisted")
 
 
 def clear_person_supplied(model: SynthesizedModel) -> SynthesizedModel:
@@ -793,6 +793,8 @@ class SynthesisEngine:
             source_data_type=col.source_data_type,
             source_default_value=col.source_default_value,
             identity=IdentitySchema.model_validate(col.identity) if col.identity is not None else None,
+            computed_expression=col.computed_expression,
+            computed_persisted=col.computed_persisted,
             business_name=col.business_name,
             permissible_values=col.permissible_values,
             unit=col.unit,

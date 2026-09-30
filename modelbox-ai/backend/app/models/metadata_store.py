@@ -403,6 +403,11 @@ class EntityColumn(Base):
     # 0028). NULL for any other column: none_as_null, so Python None is SQL
     # NULL rather than a JSON null.
     identity: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    # ColumnSchema.computed_expression and computed_persisted: a computed
+    # column's expression as the imported file declared it, and whether the
+    # source stores it (migration 0029). NULL for any other column.
+    computed_expression: Mapped[str | None] = mapped_column(Text, nullable=True)
+    computed_persisted: Mapped[bool | None] = mapped_column(nullable=True)
     # Dictionary fields a person supplies (migration 0026). NULL until someone
     # does. permissible_values is a JSON list of values; critical_data_element
     # NULL means not assessed, which is not the same as False.

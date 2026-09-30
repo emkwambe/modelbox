@@ -313,7 +313,8 @@ class _InventingIdentity:
             "paradigm": "3NF",
             "entities": [{"entity_name": "account", "columns": [
                 {"name": "account_id", "data_type": "INTEGER", "is_primary_key": True,
-                 "identity": {"kind": "identity", "generation": "ALWAYS", "start": 7, "increment": 3}}]}],
+                 "identity": {"kind": "identity", "generation": "ALWAYS", "start": 7, "increment": 3},
+                 "computed_expression": "([a]+[b])", "computed_persisted": True}]}],
             "sequences": [{"name": "account_seq", "start": 1, "increment": 1}],
         })
 
@@ -322,13 +323,14 @@ async def test_synthesis_keeps_no_identity_or_sequence_a_model_invented() -> Non
     engine = SynthesisEngine(session=None, gateway=_InventingIdentity())  # type: ignore[arg-type]
     model, _ = await engine.build_graph(SynthesizeRequest(content="accounts"))
     column = model.entities[0].columns[0]
-    assert [getattr(column, f) for f in IMPORT_ONLY_COLUMN_FIELDS] == [None]
+    assert [getattr(column, f) for f in IMPORT_ONLY_COLUMN_FIELDS] == [None] * len(IMPORT_ONLY_COLUMN_FIELDS)
     assert model.sequences == []
 
 
 async def test_negative_control_the_provider_does_declare_them() -> None:
     invented = await _InventingIdentity().structured_completion()
-    assert invented.entities[0].columns[0].identity is not None and invented.sequences
+    column = invented.entities[0].columns[0]
+    assert all(getattr(column, f) is not None for f in IMPORT_ONLY_COLUMN_FIELDS) and invented.sequences
 
 
 # ---------------------------------------------------------------------------

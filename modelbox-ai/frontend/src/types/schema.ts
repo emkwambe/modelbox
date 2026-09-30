@@ -114,6 +114,10 @@ export interface Column {
    * fill it. Set by the importer only; the canvas echoes it back unchanged.
    */
   identity?: ColumnIdentity | null;
+  /** A computed column's expression exactly as the imported file declared it. */
+  computed_expression?: string | null;
+  /** Whether the source stores the computed value (SQL Server PERSISTED). */
+  computed_persisted?: boolean | null;
   // Dictionary fields a person supplies (Sprint 8 Step 4b).
   business_name?: string | null;
   /** The values the column may hold: a JSON list. */
