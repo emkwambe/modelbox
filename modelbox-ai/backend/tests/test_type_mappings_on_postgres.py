@@ -176,8 +176,11 @@ async def test_sql_server_types_and_identity_on_postgresql(target: AsyncEngine) 
     # The CHECKs, as translated, still mean what they said: void implies inactive, amount not negative.
     assert "CK_Ledger_VoidIsInactive" in await _refused(
         target, 'INSERT INTO "Ledger" ("Amount", "IsActive", "IsVoid") VALUES (1, TRUE, TRUE)')
+    # 100015, not 100010: the refused insert above took 100010, and a
+    # PostgreSQL sequence does not give a value back when its insert fails
+    # (observed in CI run 36676487513).
     assert await _one(target, 'INSERT INTO "Ledger" ("Amount", "IsActive", "IsVoid") VALUES (1, FALSE, TRUE) '
-                              'RETURNING "LedgerID"') == 100010
+                              'RETURNING "LedgerID"') == 100015
     assert "CK_Ledger_Amount" in await _refused(target, 'INSERT INTO "Ledger" ("Amount") VALUES (-0.01)')
 
     # Without the options, hierarchyid and geography are the named gaps' types.
