@@ -329,14 +329,28 @@ export async function transformParadigm(
   return data;
 }
 
+/**
+ * What the target PostgreSQL has, stated by the person exporting; never
+ * assumed. Each one set maps its type (hierarchyid to ltree, geography to
+ * PostGIS) and makes the file create the extension first.
+ */
+export interface TargetExtensions {
+  targetHasLtree?: boolean;
+  targetHasPostgis?: boolean;
+}
+
 export async function exportArtifact(
   modelId: string,
   format: ExportFormat,
   dialect = 'snowflake',
+  extensions: TargetExtensions = {},
 ): Promise<ExportResponse> {
+  const params: Record<string, string | boolean> = { format, dialect };
+  if (extensions.targetHasLtree) params.target_has_ltree = true;
+  if (extensions.targetHasPostgis) params.target_has_postgis = true;
   const { data } = await apiClient.get<ExportResponse>(
     `/model/${modelId}/export`,
-    { params: { format, dialect } },
+    { params },
   );
   return data;
 }

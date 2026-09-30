@@ -66,8 +66,10 @@ async def _save_and_reopen(session: AsyncSession, model: SynthesizedModel, diale
     workspace = Workspace(name="round trip")
     session.add(workspace)
     await session.flush()
+    # The sequences are stored as the import endpoint stores them (migration 0028).
     row = DataModel(workspace_id=workspace.workspace_id, title="round trip", target_dialect=dialect,
-                    current_paradigm=str(model.paradigm))
+                    current_paradigm=str(model.paradigm),
+                    sequences=[s.model_dump() for s in model.sequences] or None)
     session.add(row)
     await session.flush()
     await GraphRepository(session).replace_graph(row.model_id, model.entities, model.relationships)
@@ -75,7 +77,7 @@ async def _save_and_reopen(session: AsyncSession, model: SynthesizedModel, diale
     reopened = await SynthesisEngine(session, None).get_model(row.model_id)  # type: ignore[arg-type]
     assert reopened is not None
     return SynthesizedModel(paradigm=reopened.paradigm, entities=reopened.entities,
-                            relationships=reopened.relationships)
+                            relationships=reopened.relationships, sequences=reopened.sequences)
 
 
 def _manifest_tables(dialect: str, stem: str) -> dict[str, dict[str, int]]:
@@ -105,7 +107,8 @@ def _expected_shortfall(model: SynthesizedModel, gaps: list[ddl_export.ExportGap
             shortfall[(gap.entity or "", "primary_keys")] += 1
         elif gap.kind == "description":
             raise AssertionError(f"PostgreSQL has COMMENT ON; no description gap is expected: {gap}")
-        # data_type and unique_constraint gaps change no compared count.
+        # data_type, unique_constraint, default, identity and sequence gaps
+        # change no compared count.
     return shortfall
 
 
@@ -142,17 +145,20 @@ async def test_the_round_trip_matches_the_catalog_or_names_each_difference(
 
 
 async def test_the_genuine_oracle_and_postgres_fixtures_round_trip_with_no_difference(session: AsyncSession) -> None:
-    """HR and CO export with no gap at all. Pagila's catalog counts match
-    exactly too, but its export names two kinds of gap that PostgreSQL itself
-    found (Step 4a, test_ddl_on_postgres): serial defaults calling sequences
-    the model does not hold, and user-defined types it does not define."""
+    """HR exports with no gap at all. CO's catalog counts match exactly too;
+    its six identity columns are NUMBER(*,0), which PostgreSQL cannot make
+    identity columns, so each is a sequence default named as a gap (Sprint 9
+    Step 1a). Pagila's serial defaults keep their sequences, which the export
+    now creates; it names the user-defined types the model does not define."""
     for dialect, stem in CERTIFIED[:3]:
         catalog, got, gaps, _ = await _round_trip(session, dialect, stem)
+        kinds = Counter(g.kind for g in gaps)
         if stem == "pagila":
-            kinds = Counter(g.kind for g in gaps)
-            assert kinds == Counter({"default": 13, "data_type": 2}), kinds
-            assert all("sequence" in g.detail for g in gaps if g.kind == "default")
+            assert kinds == Counter({"data_type": 2}), kinds
             assert all("user-defined type" in g.detail for g in gaps if g.kind == "data_type")
+        elif stem == "co":
+            assert kinds == Counter({"identity": 6}), kinds
+            assert all("nextval" in g.detail for g in gaps), gaps[:2]
         else:
             assert gaps == [], (stem, gaps[:3])
         assert got == catalog, stem

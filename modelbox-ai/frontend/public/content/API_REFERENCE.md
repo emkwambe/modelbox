@@ -239,6 +239,15 @@ Export a model as SQL DDL, dbt, or Cube.js artifacts
 | `model_id` | path | string | yes |
 | `format` | query | ExportFormat | no |
 | `dialect` | query | string | no |
+| `target_has_ltree` | query | boolean | no |
+| `target_has_postgis` | query | boolean | no |
+
+`target_has_ltree` and `target_has_postgis` (default `false`, DDL to
+PostgreSQL only) state that the target has, or may create, that extension.
+With one set, `hierarchyid` or `geography` is written as `LTREE` or PostGIS
+`GEOGRAPHY`, and the file starts with `CREATE EXTENSION IF NOT EXISTS`. Unset,
+the column is an export gap: no extension is assumed. Set for another format
+or dialect, the request is refused with `400`.
 
 DDL states each table's columns, primary key, UNIQUE and CHECK constraints,
 foreign keys (composite ones included) and, where the dialect has

@@ -43,8 +43,10 @@ from app.schemas.data_model import (
     ColumnSchema,
     EntitySchema,
     EntityType,
+    IdentitySchema,
     Paradigm,
     RelationshipSchema,
+    SequenceSchema,
     SynthesizedModel,
     UniqueConstraintSchema,
     columns_read_by,
@@ -68,7 +70,11 @@ _SQLGLOT_DIALECT = {"oracle": "oracle", "postgres": "postgres", "snowflake": "sn
 _BUILTIN_SPECIAL_TYPES = {"sysname": "NVARCHAR(128)", "hierarchyid": "HIERARCHYID"}
 
 # Statement kinds whose Command result must never be accepted.
-GUARDED_KINDS = ("create_table", "alter_table", "comment", "create_type")
+GUARDED_KINDS = ("create_table", "alter_table", "comment", "create_type", "create_sequence")
+
+# CREATE SEQUENCE is read into the model (Sprint 9 Step 1a, migration 0028);
+# ALTER SEQUENCE (ownership, OWNED BY) is still skipped by a named rule.
+_CREATE_SEQUENCE = re.compile(r"^CREATE\s+SEQUENCE\b", re.IGNORECASE)
 
 # Table modifiers any importable dialect writes before TABLE (Snowflake's
 # HYBRID and TRANSIENT among them). The counter reads the same words.
@@ -100,7 +106,7 @@ SKIP_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
         rf"^ALTER\s+TABLE\s+{_NAME}\s+(?:WITH\s+(?:NO)?CHECK\s+)?(?:NO)?CHECK\s+CONSTRAINT\s+(?:ALL|{_NAME})\s*;?\s*$",
         re.IGNORECASE)),
     ("database selection", re.compile(r"^USE\s", re.IGNORECASE)),
-    ("sequence", re.compile(r"^(?:CREATE|ALTER)\s+SEQUENCE\b", re.IGNORECASE)),
+    ("sequence", re.compile(r"^ALTER\s+SEQUENCE\b", re.IGNORECASE)),
     ("view", re.compile(r"^(?:CREATE\s+(?:OR\s+REPLACE\s+)?(?:FORCE\s+)?(?:MATERIALIZED\s+)?VIEW|ALTER\s+(?:MATERIALIZED\s+)?VIEW)\b", re.IGNORECASE)),
     ("domain", re.compile(r"^(?:CREATE|ALTER)\s+DOMAIN\b", re.IGNORECASE)),
     ("extension", re.compile(r"^(?:CREATE|ALTER|COMMENT\s+ON)\s+EXTENSION\b", re.IGNORECASE)),
@@ -163,6 +169,7 @@ class _Column:
     source_default: str | None = None  # the DEFAULT exactly as the file wrote it
     user_type: str | None = None  # a user-defined type name, resolved in _to_model
     computed: str | None = None  # a computed column's expression
+    identity: dict[str, Any] | None = None  # IdentitySchema's fields, as the file declared them
 
 
 @dataclass
@@ -319,6 +326,54 @@ def declared_defaults(statement: str) -> dict[str, str | None]:
     return {name: _default_text(rest) for name, rest in _column_items(statement)}
 
 
+_IDENTITY_CLAUSE = re.compile(r"\bIDENTITY\b", re.IGNORECASE)
+_TSQL_IDENTITY = re.compile(r"\bIDENTITY\s*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)", re.IGNORECASE)
+_START_WITH = re.compile(r"\bSTART\s+WITH\s+(-?\d+)", re.IGNORECASE)
+_INCREMENT_BY = re.compile(r"\bINCREMENT\s+BY\s+(-?\d+)", re.IGNORECASE)
+
+
+def declared_identities(statement: str) -> dict[str, tuple[int | None, int | None]]:
+    """(seed, increment) of each identity column, read from the statement's own text.
+
+    Read before normalizing: the Oracle normalizer removes the sequence
+    options after ``AS IDENTITY`` (``START WITH 393 … INCREMENT BY 1``) so the
+    parser accepts the table, and the parser alone would lose them.
+    """
+    found: dict[str, tuple[int | None, int | None]] = {}
+    for name, rest in _column_items(statement):
+        if not _IDENTITY_CLAUSE.search(rest):
+            continue
+        if tsql := _TSQL_IDENTITY.search(rest):
+            found[name] = (int(tsql.group(1)), int(tsql.group(2)))
+            continue
+        start, increment = _START_WITH.search(rest), _INCREMENT_BY.search(rest)
+        found[name] = (int(start.group(1)) if start else None, int(increment.group(1)) if increment else None)
+    return found
+
+
+# An Oracle trigger that fills a column from a sequence on insert: either
+# ``SELECT seq.NEXTVAL INTO :NEW.col FROM dual`` or ``:NEW.col := seq.NEXTVAL``.
+_TRIGGER_HEAD = re.compile(
+    rf"^CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:NON)?EDITIONABLE\s+)?TRIGGER\s+(?P<trigger>{_NAME})\s+"
+    rf"BEFORE\s+INSERT\b.*?\bON\s+(?P<table>{_NAME})", re.IGNORECASE | re.DOTALL)
+_TRIGGER_FILLS = (
+    re.compile(rf"(?P<sequence>{_NAME})\s*\.\s*NEXTVAL\s+INTO\s+:NEW\s*\.\s*(?P<column>{_PART})", re.IGNORECASE),
+    re.compile(rf":NEW\s*\.\s*(?P<column>{_PART})\s*:=\s*(?P<sequence>{_NAME})\s*\.\s*NEXTVAL\b", re.IGNORECASE),
+)
+
+
+def trigger_fills(statement: str) -> list[dict[str, str]]:
+    """{trigger, table, column, sequence} for each column an Oracle BEFORE INSERT
+    trigger fills from a sequence; empty for any other statement."""
+    head = _TRIGGER_HEAD.match(statement.strip())
+    if head is None:
+        return []
+    body = statement[head.end():]
+    return [{"trigger": _bare_text(head.group("trigger")), "table": _bare_text(head.group("table")),
+             "column": _bare_text(fill.group("column")), "sequence": _bare_text(fill.group("sequence"))}
+            for pattern in _TRIGGER_FILLS for fill in pattern.finditer(body)]
+
+
 def _extended_property(text: str) -> dict[str, str]:
     """sp_addextendedproperty's arguments, named or positional."""
     named = {key.lower(): value.replace("''", "'") for key, value in _PARAM.findall(text)}
@@ -348,6 +403,8 @@ def classify(statement: splitter.Statement) -> tuple[str, str | None]:
         return "type_alias", None
     if _ADD_DEFAULT.match(text):
         return "add_default", None
+    if _CREATE_SEQUENCE.match(text):
+        return "create_sequence", None
     for kind, pattern in _GUARDED:
         if pattern.match(text):
             return kind, None
@@ -383,6 +440,17 @@ def _column_names(nodes: list[exp.Expression]) -> list[str]:
     return [node.name for node in nodes]
 
 
+def _integer(node: object) -> int | None:
+    """A whole number the parser holds (a literal, or a negated one), or None where there is none."""
+    if node is None:
+        return None
+    text = node.sql() if isinstance(node, exp.Expression) else str(node)
+    try:
+        return int("".join(text.split()))
+    except ValueError as exc:
+        raise ImportFailure(f"expected a whole number, found {text!r}") from exc
+
+
 class _Builder:
     def __init__(self, dialect: str) -> None:
         self.dialect = dialect
@@ -392,6 +460,8 @@ class _Builder:
         # T-SQL CREATE TYPE … FROM: alias (lower-cased bare name) -> base type.
         self.aliases: dict[str, dict[str, Any]] = {}
         self.nocheck: list[dict[str, Any]] = []  # constraints added WITH NOCHECK
+        self.sequences: list[dict[str, Any]] = []  # SequenceSchema's fields, in file order
+        self.trigger_fills: list[dict[str, str]] = []  # columns an Oracle trigger fills from a sequence
 
     def _table(self, name: str, statement: splitter.Statement) -> _Table:
         table = self.tables.get(name)
@@ -448,12 +518,21 @@ class _Builder:
         table.partitioning = partitioning
         declared = declared_types(statement.text)
         defaults = declared_defaults(statement.text)
+        identities = declared_identities(statement.text)
         for item in schema.expressions:
             if isinstance(item, exp.ColumnDef):
                 self._column(table, item, statement)
-                table.columns[item.name].source_type = declared.get(item.name)
-                if table.columns[item.name].default is not None:
-                    table.columns[item.name].source_default = defaults.get(item.name)
+                column = table.columns[item.name]
+                column.source_type = declared.get(item.name)
+                if column.default is not None:
+                    column.source_default = defaults.get(item.name)
+                if column.identity is not None and item.name in identities:
+                    # The file's own seed and increment where the parser lost
+                    # them (the Oracle normalizer removes them to parse).
+                    start, increment = identities[item.name]
+                    column.identity["start"] = column.identity["start"] if start is None else start
+                    column.identity["increment"] = (column.identity["increment"] if increment is None
+                                                    else increment)
             else:
                 self._constraint(table, item, statement)
         if not table.columns:
@@ -497,9 +576,41 @@ class _Builder:
                     "ref_columns": _column_names(target.expressions) if isinstance(target, exp.Schema) else [],
                     "statement": statement.index,
                 })
-            # Identity, generated, collation and similar column properties do
+            elif isinstance(ckind, exp.GeneratedAsIdentityColumnConstraint):
+                # Kept with its seed and increment (Sprint 9 Step 1a): an export
+                # to another dialect states it rather than naming a loss.
+                column.identity = {
+                    "kind": "identity",
+                    "generation": "ALWAYS" if ckind.this else "BY DEFAULT",
+                    "on_null": bool(ckind.args.get("on_null")),
+                    "start": _integer(ckind.args.get("start")),
+                    "increment": _integer(ckind.args.get("increment")),
+                }
+            # Generated (computed), collation and similar column properties do
             # not change the logical model and carry no constraint count.
         table.columns[column.name] = column
+
+    def sequence(self, tree: exp.Expr) -> None:
+        """``CREATE SEQUENCE``: its name, start, increment, bounds, cache and cycle."""
+        if not isinstance(tree, exp.Create) or str(tree.args.get("kind", "")).upper() != "SEQUENCE":
+            raise ImportFailure(f"expected CREATE SEQUENCE, parsed as {type(tree).__name__}")
+        target = tree.this
+        parts = [part.name for part in target.parts] if isinstance(target, exp.Table) else []
+        if not parts or not all(parts):
+            raise ImportFailure("CREATE SEQUENCE without a name the importer can read")
+        properties = tree.args.get("properties")
+        found = properties.find(exp.SequenceProperties) if properties is not None else None
+        args = found.args if found is not None else {}
+        options = {str(option.name).upper() for option in args.get("options") or []}
+        self.sequences.append({
+            "name": ".".join(parts),
+            "start": _integer(args.get("start")),
+            "increment": _integer(args.get("increment")),
+            "min_value": _integer(args.get("minvalue")),
+            "max_value": _integer(args.get("maxvalue")),
+            "cache": _integer(args.get("cache")),
+            "cycle": "CYCLE" in options,
+        })
 
     def type_alias(self, statement: splitter.Statement) -> None:
         """T-SQL ``CREATE TYPE name FROM base [NULL | NOT NULL]``: an alias for a base type."""
@@ -633,6 +744,17 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
     held: dict[str, Any] = {}
     failures: list[dict[str, Any]] = []
     entity_names = {name for name in builder.tables if name not in builder.partitions}
+    # (table, column) -> the trigger and sequence that fill it. Oracle folds an
+    # unquoted name to upper case, so a trigger's unquoted names match that way.
+    filled: dict[tuple[str, str], dict[str, str]] = {}
+    for fill in builder.trigger_fills:
+        table_name = fill["table"] if fill["table"] in builder.tables else fill["table"].upper()
+        owner = builder.tables.get(table_name)
+        if owner is None:
+            continue
+        column_name = fill["column"] if fill["column"] in owner.columns else fill["column"].upper()
+        if column_name in owner.columns:
+            filled[(table_name, column_name)] = {"trigger": fill["trigger"], "sequence": fill["sequence"]}
 
     for name, table in builder.tables.items():
         if name in builder.partitions:
@@ -656,6 +778,9 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
                 table_held.setdefault("computed_columns", []).append({
                     "column": column.name, "expression": column.computed,
                     "reason": "computed column: the model holds no expression"})
+            identity = column.identity
+            if identity is None and (name, column.name) in filled:
+                identity = {"kind": "trigger", **filled[(name, column.name)]}
             try:
                 columns.append(ColumnSchema(
                     name=column.name,
@@ -665,6 +790,7 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
                     is_nullable=column.nullable,
                     default_value=column.default,
                     source_default_value=column.source_default,
+                    identity=IdentitySchema.model_validate(identity) if identity is not None else None,
                     description=column.description,
                 ))
             except ValueError as exc:
@@ -720,7 +846,15 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
         if child not in builder.tables:
             failures.append({"statement": info["statement"], "table": child,
                              "reason": "is attached as a partition but no CREATE TABLE defines it"})
-    model = (SynthesizedModel(paradigm=Paradigm.THREE_NF, entities=entities, relationships=relationships)
+    sequences: list[SequenceSchema] = []
+    for sequence in builder.sequences:
+        try:
+            sequences.append(SequenceSchema.model_validate(sequence))
+        except ValueError as exc:
+            failures.append({"statement": None, "table": None,
+                             "reason": f"sequence {sequence['name']} does not fit the model: {exc}"})
+    model = (SynthesizedModel(paradigm=Paradigm.THREE_NF, entities=entities, relationships=relationships,
+                              sequences=sequences)
              if entities else None)
     return model, held, failures
 
@@ -798,6 +932,10 @@ def import_ddl(raw: bytes, dialect: str, file_name: str = "upload.sql") -> Impor
                                            "reason": reason or ("client command" if kind == "client"
                                                                 else "procedural object"),
                                            "statement": statement.head})
+            if kind == "procedural" and dialect == "oracle":
+                # Listed, not imported; but a trigger that fills a column from
+                # a sequence is recorded on that column, so an export names it.
+                builder.trigger_fills.extend(trigger_fills(statement.text))
             continue
         try:
             if kind == "unrecognized_table":
@@ -816,6 +954,10 @@ def import_ddl(raw: bytes, dialect: str, file_name: str = "upload.sql") -> Impor
                 if not_imported is not None:
                     report["not_imported"].append({"index": statement.index, "line": statement.line,
                                                    "reason": not_imported, "statement": statement.head})
+                continue
+            if kind == "create_sequence":
+                # Parsed as the file wrote it: no normalizer rule touches a sequence.
+                builder.sequence(parse_statement(statement.text, dialect, kind))
                 continue
             partitioning = None
             text_to_parse = statement.text

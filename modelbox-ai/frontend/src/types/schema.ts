@@ -108,6 +108,12 @@ export interface Column {
   source_data_type?: string | null;
   /** The DEFAULT exactly as an imported DDL file declared it; null if not imported. */
   source_default_value?: string | null;
+  /**
+   * How an imported column's values are generated: an identity column's
+   * generation, seed and increment, or the Oracle trigger and sequence that
+   * fill it. Set by the importer only; the canvas echoes it back unchanged.
+   */
+  identity?: ColumnIdentity | null;
   // Dictionary fields a person supplies (Sprint 8 Step 4b).
   business_name?: string | null;
   /** The values the column may hold: a JSON list. */
@@ -118,6 +124,16 @@ export interface Column {
   authoritative_source?: string | null;
   /** A level of the workspace's classification scale, by id. */
   classification_level_id?: string | null;
+}
+
+export interface ColumnIdentity {
+  kind: 'identity' | 'trigger';
+  generation?: 'ALWAYS' | 'BY DEFAULT' | null;
+  on_null?: boolean;
+  start?: number | null;
+  increment?: number | null;
+  sequence?: string | null;
+  trigger?: string | null;
 }
 
 export interface UniqueConstraint {
@@ -369,6 +385,8 @@ export interface ArtifactStatusInfo {
   family: string;
   status: 'CERTIFIED' | 'PREVIEW' | 'UNVERIFIED';
   reason: string;
+  /** Export options the variant accepts, e.g. `target_has_ltree` for PostgreSQL DDL. */
+  options?: string[];
 }
 
 /**

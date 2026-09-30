@@ -128,6 +128,8 @@ async def import_ddl_file(
         target_dialect=dialect,
         reconciliation_status=result.status,
         import_report=result.report,
+        # The sequences the file creates (migration 0028); NULL when it creates none.
+        sequences=[s.model_dump() for s in result.model.sequences] or None,
     )
     session.add(model)
     await session.flush()

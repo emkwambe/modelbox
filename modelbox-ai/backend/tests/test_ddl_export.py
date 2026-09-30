@@ -156,22 +156,42 @@ def _column(sql: str, table: str, name: str) -> exp.ColumnDef:
     return next(c for c in _tables(sql)[table].expressions if isinstance(c, exp.ColumnDef) and c.name == name)
 
 
-def test_sql_server_types_postgresql_refused_are_named_substitutes() -> None:
-    """Step 4a, found by PostgreSQL: money has no operator against numeric (so
-    AdventureWorks' CHECKs were refused) and bit refuses an integer default."""
+def test_sql_server_money_smallmoney_and_bit_are_exact_mappings() -> None:
+    """SYNTHESIS P1-A. money and smallmoney are exact in NUMERIC(19, 4) and
+    NUMERIC(10, 4); bit is BOOLEAN with its 0 and 1 written FALSE and TRUE.
+    Each is an exact equivalent, so none is a gap. PostgreSQL's acceptance is
+    test_type_mappings_on_postgres."""
     graph = {"entities": [{"entity_name": "t", "columns": [
         {"name": "id", "data_type": "INT"},
         {"name": "rate", "data_type": "MONEY"},
+        {"name": "fee", "data_type": "SMALLMONEY"},
         {"name": "flag", "data_type": "BIT", "default_value": "((1))"},
-        {"name": "off", "data_type": "BIT", "default_value": "((0))"}], "primary_key": ["id"]}],
+        {"name": "off", "data_type": "BIT", "default_value": "((0))"}], "primary_key": ["id"],
+        "check_constraints": [{"expression": "([flag]=(1) OR [off]<>(0))", "columns": ["flag", "off"]}]}],
         "relationships": []}
     export = ExporterService(source_dialect="tsql").generate_ddl_export(_model(graph), "postgres")
     assert _column(export.sql, "t", "rate").args["kind"].sql("postgres") == "DECIMAL(19, 4)"
+    assert _column(export.sql, "t", "fee").args["kind"].sql("postgres") == "DECIMAL(10, 4)"
     flag, off = _column(export.sql, "t", "flag"), _column(export.sql, "t", "off")
     assert flag.args["kind"].sql("postgres") == "BOOLEAN"
     assert flag.find(exp.DefaultColumnConstraint).this.sql("postgres") == "TRUE"
     assert off.find(exp.DefaultColumnConstraint).this.sql("postgres") == "FALSE"
-    assert sorted(g.detail.split(":")[0] for g in export.gaps) == ["flag BIT", "off BIT", "rate MONEY"]
+    check = _tables(export.sql)["t"].find(exp.CheckColumnConstraint)
+    assert check is not None and check.this.sql("postgres") == "(flag = TRUE OR off <> FALSE)"
+    assert export.gaps == []
+
+
+def test_a_bit_check_keeps_its_integers_on_a_column_that_is_not_bit() -> None:
+    """Only a column now BOOLEAN has its 0 and 1 rewritten; the negative
+    control is an INT column compared with the same literal."""
+    graph = {"entities": [{"entity_name": "t", "columns": [
+        {"name": "id", "data_type": "INT"}, {"name": "flag", "data_type": "BIT"},
+        {"name": "n", "data_type": "INT"}], "primary_key": ["id"],
+        "check_constraints": [{"expression": "([flag]=(1) AND [n]=(1))", "columns": ["flag", "n"]}]}],
+        "relationships": []}
+    export = ExporterService(source_dialect="tsql").generate_ddl_export(_model(graph), "postgres")
+    check = _tables(export.sql)["t"].find(exp.CheckColumnConstraint)
+    assert check is not None and check.this.sql("postgres") == "(flag = TRUE AND n = (1))"
 
 
 def test_a_sequence_default_and_an_undefined_type_are_named_gaps() -> None:

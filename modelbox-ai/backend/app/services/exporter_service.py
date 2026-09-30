@@ -151,13 +151,18 @@ class ExporterService:
         """
         return self.generate_ddl_export(model, dialect).sql
 
-    def generate_ddl_export(self, model: SynthesizedModel, dialect: str) -> DdlExport:
-        """The DDL and its export gaps (``app.services.ddl_export``)."""
+    def generate_ddl_export(self, model: SynthesizedModel, dialect: str,
+                            extensions: frozenset[str] = frozenset()) -> DdlExport:
+        """The DDL and its export gaps (``app.services.ddl_export``).
+
+        ``extensions`` are the target extensions the caller says the target
+        has (``ltree``, ``postgis``); none is ever assumed.
+        """
         target = _SQLGLOT_DIALECTS.get(dialect.lower())
         if target is None:
             raise ExporterError(f"Unsupported target dialect: {dialect}")
         try:
-            return build_ddl(model, target, self._source_dialect)
+            return build_ddl(model, target, self._source_dialect, extensions)
         except DdlExportError as exc:
             raise ExporterError(str(exc)) from exc
 

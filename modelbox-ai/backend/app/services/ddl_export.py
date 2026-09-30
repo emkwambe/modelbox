@@ -26,7 +26,13 @@ from dataclasses import asdict, dataclass, field
 import sqlglot
 from sqlglot import exp
 
-from app.schemas.data_model import EntitySchema, RelationshipSchema, SynthesizedModel
+from app.schemas.data_model import (
+    ColumnSchema,
+    EntitySchema,
+    RelationshipSchema,
+    SequenceSchema,
+    SynthesizedModel,
+)
 
 # Which table-level features each target accepts in CREATE TABLE and as
 # statements. PRIMARY KEY and FOREIGN KEY are emitted for every target, as
@@ -80,8 +86,9 @@ class ExportGap:
 class DdlExport:
     sql: str
     gaps: list[ExportGap]
-    # Each CREATE TABLE and COMMENT ON, in order, without a terminator: what
-    # the file holds, one statement at a time, for a caller that applies it.
+    # Each statement, in order, without a terminator (CREATE EXTENSION, CREATE
+    # SEQUENCE, CREATE TABLE, ALTER TABLE, COMMENT ON): what the file holds,
+    # one statement at a time, for a caller that applies it.
     statements: list[str] = field(default_factory=list)
 
 
@@ -126,7 +133,8 @@ def _single_condition(sql: str, dialect: str) -> exp.Expression | None:
 
 
 def translate_check(
-    expression: str, source: str, target: str, columns: list[str] | None = None
+    expression: str, source: str, target: str, columns: list[str] | None = None,
+    boolean_columns: set[str] | None = None,
 ) -> tuple[str | None, str | None]:
     """(the CHECK condition written for ``target``, None) or (None, why it cannot be).
 
@@ -155,6 +163,10 @@ def translate_check(
                 None if identifier.args.get("quoted") else folded.get(identifier.name.lower()))
             if name is not None:
                 node.set("this", exp.to_identifier(name, quoted=quote(name) != name))
+    if boolean_columns:
+        # A SQL Server bit column is BOOLEAN in the target, where 0 and 1 are
+        # not its values: (Flag = 1) is written (Flag = TRUE).
+        condition = _as_boolean_literals(condition, boolean_columns)
     try:
         written = condition.sql(dialect=target)
     except sqlglot.errors.SqlglotError:
@@ -174,22 +186,63 @@ def translate_check(
 _TYPE_GAPS: dict[str, dict[str, tuple[str | None, str]]] = {  # keyed by sqlglot type name
     "postgres": {
         "UTINYINT": ("SMALLINT", "PostgreSQL has no one-byte integer; emitted as SMALLINT"),
-        # SQL Server's money is exact to four places; PostgreSQL's money is
-        # locale-formatted and has no operators against numeric, so a CHECK
-        # such as (Rate >= 0.00) is refused. NUMERIC keeps the exact value.
-        "MONEY": ("DECIMAL(19, 4)", "SQL Server money is exact to four places; emitted as NUMERIC(19, 4)"),
-        "SMALLMONEY": ("DECIMAL(10, 4)", "SQL Server smallmoney is exact to four places; emitted as NUMERIC(10, 4)"),
-        "GEOGRAPHY": ("TEXT", "GEOGRAPHY needs the PostGIS extension; emitted as TEXT, which holds its WKT form"),
     },
 }
-# SQL Server's bit is a 0/1 flag; PostgreSQL's BIT is a bit string, which
-# refuses an integer default. Read from T-SQL only, where the meaning is known.
-_SOURCE_TYPE_GAPS: dict[tuple[str, str], dict[str, tuple[str, str]]] = {
-    ("tsql", "postgres"): {"BIT": ("BOOLEAN", "SQL Server bit is a 0/1 flag; emitted as BOOLEAN")},
-}
-_USER_TYPE_GAPS: dict[str, dict[str, tuple[str, str]]] = {
-    "postgres": {"HIERARCHYID": ("VARCHAR", ("PostgreSQL has no HIERARCHYID; emitted as VARCHAR, "
-                                             "which holds its string form ('/1/3/')"))},
+
+
+@dataclass(frozen=True)
+class TypeMapping:
+    """A source type written as an exact equivalent in the target (SYNTHESIS P1-A).
+
+    ``source`` None applies to every source dialect. ``extension`` names the
+    target extension the replacement needs; such a mapping applies only when
+    the export states that the target has it, and the export then starts with
+    ``CREATE EXTENSION IF NOT EXISTS``. A mapped column is not a gap.
+    """
+
+    source: str | None
+    target: str
+    type: str  # sqlglot's type name, or a user-defined type's name, upper case
+    replacement: str
+    extension: str | None = None
+
+
+TYPE_MAPPINGS: tuple[TypeMapping, ...] = (
+    # SQL Server's money is exact to four places over about ±922 trillion,
+    # which NUMERIC(19, 4) holds exactly; PostgreSQL's own money is
+    # locale-formatted and has no operators against numeric. smallmoney
+    # (±214,748.3648) fits NUMERIC(10, 4) exactly (owner, 2026-09-30).
+    TypeMapping("tsql", "postgres", "MONEY", "DECIMAL(19, 4)"),
+    TypeMapping("tsql", "postgres", "SMALLMONEY", "DECIMAL(10, 4)"),
+    # SQL Server's bit is a 0/1 flag; PostgreSQL's BIT is a bit string. Its
+    # 0 and 1 in defaults and CHECKs are written FALSE and TRUE.
+    TypeMapping("tsql", "postgres", "BIT", "BOOLEAN"),
+    # AWS documents ltree as the target for hierarchyid; ltree ships with
+    # PostgreSQL as a contrib extension, and PostGIS is not part of it at all.
+    TypeMapping(None, "postgres", "HIERARCHYID", "LTREE", extension="ltree"),
+    TypeMapping(None, "postgres", "GEOGRAPHY", "GEOGRAPHY", extension="postgis"),
+)
+
+# Each extension a mapping can rely on, and the export option that says the
+# target has it.
+EXTENSION_OPTIONS: dict[str, str] = {"ltree": "target_has_ltree", "postgis": "target_has_postgis"}
+
+# Source types the target would refuse or misread as written. Without a
+# mapping that applies (none defined, or its extension not declared), each is
+# written as the fallback and named as a gap: never a silent TEXT, and never
+# the source's name for a different target type.
+_UNMAPPED: dict[tuple[str | None, str], dict[str, tuple[str, str]]] = {
+    ("tsql", "postgres"): {
+        "MONEY": ("TEXT", "SQL Server money has no mapping to PostgreSQL in this export; emitted as TEXT"),
+        "SMALLMONEY": ("TEXT", "SQL Server smallmoney has no mapping to PostgreSQL in this export; emitted as TEXT"),
+        "BIT": ("TEXT", "SQL Server bit has no mapping to PostgreSQL in this export; emitted as TEXT"),
+    },
+    (None, "postgres"): {
+        "HIERARCHYID": ("VARCHAR", ("PostgreSQL has no HIERARCHYID; emitted as VARCHAR, which holds its string "
+                                    "form ('/1/3/'). Export with target_has_ltree to write it as LTREE")),
+        "GEOGRAPHY": ("TEXT", ("GEOGRAPHY needs the PostGIS extension; emitted as TEXT, which holds its WKT "
+                               "form. Export with target_has_postgis to write it as PostGIS GEOGRAPHY")),
+    },
 }
 # A schema-qualified user-defined type the model does not define (a domain or
 # enum the import listed but did not bring in) cannot be created by this file.
@@ -231,19 +284,43 @@ def _uncast_default(column: exp.ColumnDef, written: exp.DataType) -> bool:
     return removed
 
 
+def _type_name(kind: exp.DataType) -> str:
+    """The name mappings are keyed by: sqlglot's type, or a user-defined type's own name."""
+    return kind.sql().upper() if kind.this == exp.DataType.Type.USERDEFINED else kind.this.name
+
+
+def mapping_for(type_name: str, source: str, target: str, extensions: frozenset[str]) -> TypeMapping | None:
+    """The mapping that applies to ``type_name`` from ``source`` to ``target``, if any."""
+    for mapping in TYPE_MAPPINGS:
+        if (mapping.type == type_name and mapping.target == target and mapping.source in (None, source)
+                and (mapping.extension is None or mapping.extension in extensions)):
+            return mapping
+    return None
+
+
 def _fit_type(column: exp.ColumnDef, entity: str, target: str, gaps: list[ExportGap],
-              source: str = "") -> None:
-    """Replace or annotate a translated type the target cannot hold as written."""
+              source: str = "", extensions: frozenset[str] = frozenset()) -> str | None:
+    """Replace or annotate a translated type the target cannot hold as written.
+
+    Returns the replacement type where a mapping applied (an exact equivalent,
+    so not a gap), else None.
+    """
     kind = column.args.get("kind")
     if not isinstance(kind, exp.DataType):
-        return
-    by_source = _SOURCE_TYPE_GAPS.get((source, target), {}).get(kind.this.name)
-    if by_source is not None:
+        return None
+    name = _type_name(kind)
+    mapping = mapping_for(name, source, target, extensions)
+    if mapping is not None:
+        column.set("kind", exp.DataType.build(mapping.replacement, dialect=target, udt=True))
+        if mapping.replacement == "BOOLEAN":
+            _as_boolean_default(column)
+        return mapping.replacement
+    unmapped = _UNMAPPED.get((source, target), {}).get(name) or _UNMAPPED.get((None, target), {}).get(name)
+    if unmapped is not None:
         written = kind.sql(dialect=target)
-        column.set("kind", exp.DataType.build(by_source[0], dialect=target))
-        _as_boolean_default(column)
-        gaps.append(ExportGap("data_type", entity, f"{column.name} {written}: {by_source[1]}"))
-        return
+        column.set("kind", exp.DataType.build(unmapped[0], dialect=target))
+        gaps.append(ExportGap("data_type", entity, f"{column.name} {written}: {unmapped[1]}"))
+        return None
     written = kind.sql(dialect=target)
     params = kind.expressions
     if params and all(isinstance(p, exp.DataTypeParam) and p.name.upper() == "MAX" for p in params) \
@@ -259,11 +336,7 @@ def _fit_type(column: exp.ColumnDef, entity: str, target: str, gaps: list[Export
             column.set("kind", exp.DataType.build(replacement, dialect=target))
         gaps.append(ExportGap("data_type", entity, f"{column.name} {written}: {why}"))
     elif kind.this == exp.DataType.Type.USERDEFINED:
-        user = _USER_TYPE_GAPS.get(target, {}).get(kind.sql().upper())
-        if user is not None:
-            column.set("kind", exp.DataType.build(user[0], dialect=target))
-            gaps.append(ExportGap("data_type", entity, f"{column.name} {written}: {user[1]}"))
-        elif "." in kind.sql() and (undefined := _UNDEFINED_USER_TYPE.get(target)) is not None:
+        if "." in kind.sql() and (undefined := _UNDEFINED_USER_TYPE.get(target)) is not None:
             # Schema-qualified, as pg_dump writes a type it created. An
             # unqualified name (Pagila's tsvector) is a type sqlglot does not
             # know but the target may: written as is, and applying the export
@@ -278,6 +351,132 @@ def _fit_type(column: exp.ColumnDef, entity: str, target: str, gaps: list[Export
         kind.set("expressions", [exp.DataTypeParam(this=exp.Literal.number(limit))])
         gaps.append(ExportGap("data_type", entity,
                               f"{column.name} {written}: {target} keeps at most {limit} fractional digits"))
+    return None
+
+
+# PostgreSQL accepts an identity column only on these types.
+_IDENTITY_TYPES = frozenset({exp.DataType.Type.SMALLINT, exp.DataType.Type.INT, exp.DataType.Type.BIGINT})
+_NEXTVAL_ARGUMENT = re.compile(r"\bNEXTVAL\s*\(\s*(?:CAST\s*\(\s*)?'([^']+)'", re.IGNORECASE)
+
+
+def _name_parts(name: str) -> tuple[str, ...]:
+    """A dotted name as PostgreSQL reads it: quoted parts exact, unquoted folded to lower case."""
+    parts = re.findall(r'"((?:[^"]|"")*)"|([^.\s]+)', name)
+    return tuple(quoted.replace('""', '"') if quoted else plain.lower() for quoted, plain in parts)
+
+
+def sequence_named_by(default: str) -> tuple[str, ...] | None:
+    """The sequence a ``nextval('…')`` default names, as name parts; None if it names none."""
+    match = _NEXTVAL_ARGUMENT.search(default)
+    return _name_parts(match.group(1)) if match else None
+
+
+def _sequence_statement(sequence: SequenceSchema) -> str:
+    """CREATE SEQUENCE for PostgreSQL, with what the source declared; an unset option keeps its default."""
+    clauses = [f"CREATE SEQUENCE {'.'.join(quote(part) for part in sequence.name.split('.'))}"]
+    if sequence.start is not None:
+        clauses.append(f"START WITH {sequence.start}")
+    if sequence.increment is not None:
+        clauses.append(f"INCREMENT BY {sequence.increment}")
+    if sequence.min_value is not None:
+        clauses.append(f"MINVALUE {sequence.min_value}")
+    if sequence.max_value is not None:
+        clauses.append(f"MAXVALUE {sequence.max_value}")
+    if sequence.cache is not None:
+        clauses.append(f"CACHE {sequence.cache}")
+    if sequence.cycle:
+        clauses.append("CYCLE")
+    return " ".join(clauses)
+
+
+def _plain_name(*parts: str) -> str:
+    """A lower-case snake-case identifier built from ``parts``, as a generated sequence's name."""
+    return re.sub(r"[^a-z0-9_]+", "_", "_".join(parts).lower()).strip("_")[:63]
+
+
+def _state_identity(column_def: exp.ColumnDef, column: ColumnSchema, entity: str, target: str,
+                    gaps: list[ExportGap], generated: list[SequenceSchema], taken: set[str]) -> None:
+    """Write a column's identity for ``target``, or name why it cannot be (SYNTHESIS P1-A).
+
+    PostgreSQL: ``GENERATED BY DEFAULT AS IDENTITY`` with the source's seed
+    and increment, BY DEFAULT so a data migration can load existing values. A
+    column whose type is not an integer (Oracle's ``NUMBER(*,0)``) cannot be
+    an identity column there, so it takes a sequence default with the same
+    start and increment instead, named as a gap (owner, 2026-09-30). An Oracle
+    column a trigger fills from a sequence is a gap: the trigger is not in the
+    model.
+    """
+    identity = column.identity
+    if identity is None:
+        return
+    if identity.kind == "trigger":
+        gaps.append(ExportGap("identity", entity, (
+            f"{column.name} is filled on insert by trigger {identity.trigger} from sequence "
+            f"{identity.sequence}; the trigger is not in the model, so no value is generated")))
+        return
+    seed = f"START WITH {identity.start}" if identity.start is not None else ""
+    step = f"INCREMENT BY {identity.increment}" if identity.increment is not None else ""
+    declared = " ".join(p for p in (f"GENERATED {identity.generation} AS IDENTITY", seed, step) if p)
+    if target != "postgres":
+        gaps.append(ExportGap("identity", entity, f"{column.name} {declared}: not emitted for {target}"))
+        return
+    notes: list[str] = []
+    if identity.generation == "ALWAYS":
+        notes.append("GENERATED ALWAYS in the source, emitted BY DEFAULT so a data migration can load "
+                     "existing values")
+    if identity.on_null:
+        notes.append("ON NULL has no PostgreSQL equivalent, so an explicit NULL is refused rather than numbered")
+    kind = column_def.args.get("kind")
+    if isinstance(kind, exp.DataType) and kind.this in _IDENTITY_TYPES:
+        column_def.append("constraints", exp.ColumnConstraint(kind=exp.GeneratedAsIdentityColumnConstraint(
+            this=False,
+            start=exp.Literal.number(identity.start) if identity.start is not None else None,
+            increment=exp.Literal.number(identity.increment) if identity.increment is not None else None)))
+        if notes:
+            gaps.append(ExportGap("identity", entity, f"{column.name}: " + "; ".join(notes)))
+        return
+    if column_def.find(exp.DefaultColumnConstraint) is not None:
+        gaps.append(ExportGap("identity", entity, f"{column.name} {declared}: the column also has a DEFAULT, "
+                                                  "so neither an identity nor a sequence default is emitted"))
+        return
+    name = base = _plain_name(entity, column.name, "seq")
+    suffix = 1
+    while name in taken:
+        suffix += 1
+        name = f"{base[:60]}_{suffix}"
+    taken.add(name)
+    generated.append(SequenceSchema(name=name, start=identity.start, increment=identity.increment))
+    default = sqlglot.parse_one(f"SELECT nextval('{name}')", read="postgres").expressions[0]
+    column_def.append("constraints", exp.ColumnConstraint(kind=exp.DefaultColumnConstraint(this=default)))
+    written = kind.sql(dialect=target) if isinstance(kind, exp.DataType) else "its type"
+    gaps.append(ExportGap("identity", entity, "; ".join([
+        (f"{column.name} {declared} on {written}: PostgreSQL allows an identity column only on smallint, integer "
+         f"or bigint, so it is emitted as DEFAULT nextval('{name}') with the same start and increment"),
+        *notes])))
+
+
+def _as_boolean_literals(condition: exp.Expression, flags: set[str]) -> exp.Expression:
+    """In a CHECK over columns now BOOLEAN, a comparison with 0 or 1 compares with FALSE or TRUE."""
+    def literal(node: exp.Expression) -> exp.Expression | None:
+        while isinstance(node, exp.Paren):
+            node = node.this
+        if isinstance(node, exp.Literal) and not node.is_string and node.name in ("0", "1"):
+            return exp.true() if node.name == "1" else exp.false()
+        return None
+
+    def is_flag(node: exp.Expression) -> bool:
+        while isinstance(node, exp.Paren):
+            node = node.this
+        return isinstance(node, exp.Column) and node.name in flags
+
+    for node in list(condition.walk()):
+        if isinstance(node, (exp.EQ, exp.NEQ)):
+            for side, other in (("this", "expression"), ("expression", "this")):
+                if is_flag(node.args[other]) and (value := literal(node.args[side])) is not None:
+                    node.set(side, value)
+        elif isinstance(node, exp.In) and is_flag(node.this):
+            node.set("expressions", [literal(e) or e for e in node.expressions])
+    return condition
 
 
 # Targets that add a foreign key to an existing table with ALTER TABLE.
@@ -319,10 +518,23 @@ def _order(model: SynthesizedModel) -> list[EntitySchema]:
     return out + [e for e in model.entities if e not in out]
 
 
-def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
-    """CREATE TABLE and COMMENT ON statements for ``model`` in ``target``."""
+def build_ddl(model: SynthesizedModel, target: str, source: str,
+              extensions: frozenset[str] = frozenset()) -> DdlExport:
+    """CREATE TABLE and COMMENT ON statements for ``model`` in ``target``.
+
+    ``extensions`` are the target extensions the export may rely on
+    (``ltree``, ``postgis``): the caller's explicit statement that the target
+    has them, never assumed. Each is created first with ``CREATE EXTENSION IF
+    NOT EXISTS``, and the mappings that need it apply.
+    """
     from app.services.sql_fragments import column_problems
 
+    unknown = sorted(extensions - set(EXTENSION_OPTIONS))
+    if unknown:
+        raise DdlExportError(f"unknown target extension(s): {', '.join(unknown)}")
+    if extensions and target != "postgres":
+        raise DdlExportError(f"{', '.join(EXTENSION_OPTIONS[e] for e in sorted(extensions))} applies "
+                             f"to a PostgreSQL export only, not {target}")
     can = _CAPABILITIES.get(target, frozenset())
     gaps: list[ExportGap] = []
     tables: list[str] = []
@@ -330,10 +542,18 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
     created: set[str] = set()
     comments: list[str] = []
     entity_columns = {e.entity_name: {c.name for c in e.columns if c.data_type != COMPUTED} for e in model.entities}
+    # A PostgreSQL model's sequences are created by the export, so its
+    # nextval defaults keep working (SYNTHESIS P1-A); from any other source a
+    # sequence is not emitted, and a default that names one is a gap.
+    keeps_sequences = source == target == "postgres"
+    held = {_name_parts(s.name): s for s in model.sequences}
+    generated: list[SequenceSchema] = []  # sequence defaults standing in for identity columns
+    taken = {parts[-1] for parts in held}
 
     for entity in _order(model):
         name = entity.entity_name
         emitted = entity_columns[name]
+        by_column = {c.name: c for c in entity.columns}
         lines: list[str] = []
         for column in entity.columns:
             if column.data_type == COMPUTED:
@@ -349,12 +569,13 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
             # DEFAULT verbatim (M13): the IR stores it already quoted where
             # quoting is needed, a literal the model authored.
             default = column.default_value
-            if default and _NEXTVAL.search(default):
-                # The sequence is not part of the model (the import lists
-                # sequences, it does not bring them in), so this file cannot
-                # create it and PostgreSQL refuses a default that names it.
+            if default and _NEXTVAL.search(default) and not (keeps_sequences and sequence_named_by(default) in held):
+                # A sequence this file does not create: PostgreSQL refuses a
+                # default that names it.
+                why = ("the model does not hold" if keeps_sequences
+                       else f"this export does not create from a {source} model")
                 gaps.append(ExportGap("default", name, f"{column.name} DEFAULT {default} names a sequence "
-                                                       "the model does not hold; the default is not emitted"))
+                                                       f"{why}; the default is not emitted"))
                 default = None
             lines.append(f"    {quote(column.name)} {column.data_type}"
                          + (f" DEFAULT {default}" if default else "")
@@ -369,8 +590,12 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
             raise DdlExportError(f"table '{name}' does not parse as {source}: {exc}") from exc
         if not isinstance(tree, exp.Create) or not isinstance(tree.this, exp.Schema):
             raise DdlExportError(f"table '{name}' did not parse as one CREATE TABLE")
+        flags: set[str] = set()  # columns now BOOLEAN, whose 0 and 1 are FALSE and TRUE
         for column_def in tree.this.expressions:
-            _fit_type(column_def, name, target, gaps, source)
+            if _fit_type(column_def, name, target, gaps, source, extensions) == "BOOLEAN":
+                flags.add(column_def.name)
+            if column_def.name in by_column:
+                _state_identity(column_def, by_column[column_def.name], name, target, gaps, generated, taken)
 
         clauses: list[str] = []
         if entity.primary_key:
@@ -394,7 +619,7 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
                 gaps.append(ExportGap("check_constraint", name, f"{label}: columns {missing} are not emitted"))
             else:
                 condition, problem = translate_check(check.expression, source, target,
-                                                     [c.name for c in entity.columns])
+                                                     [c.name for c in entity.columns], flags)
                 if problem is not None:
                     gaps.append(ExportGap("check_constraint", name, f"{label} {problem}"))
                 else:
@@ -428,12 +653,21 @@ def build_ddl(model: SynthesizedModel, target: str, source: str) -> DdlExport:
             comments += [f"COMMENT ON {kind} {target_name} IS '{text.replace(chr(39), chr(39) * 2)}'"
                          for kind, target_name, text in descriptions]
 
-    body = ";\n\n".join(tables + deferred + comments) + ";\n"
+    if not keeps_sequences:
+        gaps += [ExportGap("sequence", None, f"{s.name}: not emitted; sequences are created only for a "
+                                             f"PostgreSQL model exported to PostgreSQL ({source} to {target})")
+                 for s in model.sequences]
+    # Extensions first, then sequences, which the tables' defaults name.
+    prelude = [f"CREATE EXTENSION IF NOT EXISTS {extension}" for extension in sorted(extensions)]
+    prelude += [_sequence_statement(s) for s in (model.sequences if keeps_sequences else [])]
+    prelude += [_sequence_statement(s) for s in generated]
+    statements = prelude + tables + deferred + comments
+    body = ";\n\n".join(statements) + ";\n"
     if gaps:
         header = [f"-- Export gaps ({len(gaps)}): what the model holds that this file does not state."]
         header += ["-- " + " ".join(f"{g.kind} [{g.entity}]: {g.detail}".split()) for g in gaps]
         body = "\n".join(header) + "\n\n" + body
-    return DdlExport(sql=body, gaps=gaps, statements=tables + deferred + comments)
+    return DdlExport(sql=body, gaps=gaps, statements=statements)
 
 
 def _descriptions(entity: EntitySchema, emitted: set[str]) -> list[tuple[str, str, str]]:

@@ -89,6 +89,7 @@ def _to_synthesized(model: SynthesizeResponse) -> SynthesizedModel:
         entities=model.entities,
         relationships=model.relationships,
         suggested_metrics=model.suggested_metrics,
+        sequences=model.sequences,
     )
 
 
@@ -416,15 +417,26 @@ async def export_model(
     user: CurrentUserDep,
     export_format: ExportFormat = Query(ExportFormat.DDL, alias="format"),
     dialect: str = "snowflake",
+    target_has_ltree: bool = Query(False, description=(
+        "The target PostgreSQL has, or may create, the ltree extension: HIERARCHYID is written as LTREE "
+        "and the file starts with CREATE EXTENSION IF NOT EXISTS ltree. Off: it is a named gap.")),
+    target_has_postgis: bool = Query(False, description=(
+        "The target PostgreSQL has, or may create, PostGIS: GEOGRAPHY is written as PostGIS geography and "
+        "the file starts with CREATE EXTENSION IF NOT EXISTS postgis. Off: it is a named gap.")),
 ) -> ExportResponse:
     """Generate downloadable artifacts from a persisted model (FR-4)."""
     result = await engine.get_model(model.model_id)
     assert result is not None  # guaranteed by AuthorizedModelDep
     exporter = _exporter_for(model, exporter)
+    extensions = frozenset(name for name, stated in (("ltree", target_has_ltree), ("postgis", target_has_postgis))
+                           if stated)
+    if extensions and export_format != ExportFormat.DDL:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="target_has_ltree and target_has_postgis apply to a DDL export only")
     gaps: list[ExportGapSchema] = []
     try:
         if export_format == ExportFormat.DDL:
-            ddl = exporter.generate_ddl_export(_to_synthesized(result), dialect)
+            ddl = exporter.generate_ddl_export(_to_synthesized(result), dialect, extensions)
             files = {f"model_{dialect}.sql": ddl.sql}
             gaps = [ExportGapSchema(kind=gap.kind, entity=gap.entity, detail=gap.detail) for gap in ddl.gaps]
         else:

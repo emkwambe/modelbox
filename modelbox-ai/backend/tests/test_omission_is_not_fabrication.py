@@ -64,6 +64,7 @@ from app.schemas.data_model import (
 from app.services.exporter_service import ExporterService
 from app.services.synthesis_engine import (
     _SYSTEM_PROMPT,
+    IMPORT_ONLY_COLUMN_FIELDS,
     PERSON_SUPPLIED_COLUMN_FIELDS,
     PERSON_SUPPLIED_ENTITY_FIELDS,
     SynthesisEngine,
@@ -219,6 +220,10 @@ def test_every_invented_constraint_field_is_covered() -> None:
         "is_nullable",  # has a safe default and is compared across artifacts
         "source_data_type",  # an imported column's provenance; no emitter reads it
         "source_default_value",  # likewise, for its DEFAULT
+        # Sprint 9 Step 1a: what only an imported file declares. Synthesis
+        # clears it whatever the model returns (`clear_person_supplied`);
+        # proven by test_synthesis_keeps_no_identity_or_sequence_a_model_invented.
+        *IMPORT_ONLY_COLUMN_FIELDS,
         # Sprint 8 Step 4b: dictionary fields a person supplies. Synthesis clears
         # them whatever the model returns (`clear_person_supplied`), so nothing a
         # model invents reaches the model or a contract; proven below.
@@ -298,6 +303,32 @@ async def test_negative_control_the_provider_does_invent_them() -> None:
     """Without this the test above could pass on a provider that sets nothing."""
     invented = await _Inventing().structured_completion()
     assert all(v is not None for v in _person_supplied(invented).values())
+
+
+class _InventingIdentity:
+    """A provider that declares an identity column and a sequence, as only an import may."""
+
+    async def structured_completion(self, *args: object, **kwargs: object) -> SynthesizedModel:
+        return SynthesizedModel.model_validate({
+            "paradigm": "3NF",
+            "entities": [{"entity_name": "account", "columns": [
+                {"name": "account_id", "data_type": "INTEGER", "is_primary_key": True,
+                 "identity": {"kind": "identity", "generation": "ALWAYS", "start": 7, "increment": 3}}]}],
+            "sequences": [{"name": "account_seq", "start": 1, "increment": 1}],
+        })
+
+
+async def test_synthesis_keeps_no_identity_or_sequence_a_model_invented() -> None:
+    engine = SynthesisEngine(session=None, gateway=_InventingIdentity())  # type: ignore[arg-type]
+    model, _ = await engine.build_graph(SynthesizeRequest(content="accounts"))
+    column = model.entities[0].columns[0]
+    assert [getattr(column, f) for f in IMPORT_ONLY_COLUMN_FIELDS] == [None]
+    assert model.sequences == []
+
+
+async def test_negative_control_the_provider_does_declare_them() -> None:
+    invented = await _InventingIdentity().structured_completion()
+    assert invented.entities[0].columns[0].identity is not None and invented.sequences
 
 
 # ---------------------------------------------------------------------------

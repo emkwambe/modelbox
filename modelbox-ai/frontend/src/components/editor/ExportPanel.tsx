@@ -22,7 +22,7 @@ import {
 } from '@/lib/api';
 import { errMessage } from '@/lib/errors';
 import { useCanvasStore } from '@/store/canvasStore';
-import { color, semantic, surface } from '@/styles/tokens';
+import { color, semantic, surface, type } from '@/styles/tokens';
 import type {
   ArtifactStatusInfo,
   ContractFormat,
@@ -117,6 +117,10 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
   const [semanticEngine, setSemanticEngine] = useState<SemanticEngine>('cube');
   const [dictionaryFormat, setDictionaryFormat] =
     useState<DictionaryFormat>('markdown');
+  // What the target PostgreSQL has, as the person exporting states it. Off
+  // unless they say so: an extension is never assumed.
+  const [targetHasLtree, setTargetHasLtree] = useState(false);
+  const [targetHasPostgis, setTargetHasPostgis] = useState(false);
 
   const [files, setFiles] = useState<Record<string, string>>({});
   const [activeFile, setActiveFile] = useState<string | null>(null);
@@ -176,7 +180,17 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
       } else if (kind === 'dictionary') {
         result = await exportDictionary(modelId, dictionaryFormat);
       } else {
-        result = await exportArtifact(modelId, format, dialect);
+        result = await exportArtifact(
+          modelId,
+          format,
+          dialect,
+          extensionsRelevant
+            ? {
+                targetHasLtree: offersLtree && targetHasLtree,
+                targetHasPostgis: offersPostgis && targetHasPostgis,
+              }
+            : {},
+        );
       }
       setFiles(result.files);
       setActiveFile(Object.keys(result.files)[0] ?? null);
@@ -220,6 +234,13 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
   const zipEligible = kind === 'artifact' && (format === 'dbt' || format === 'cube');
   const dialectRelevant =
     (kind === 'artifact' && format === 'ddl') || kind === 'seed';
+  // Which of the target's extensions the chosen dialect can be told about,
+  // as the manifest says: the panel names no dialect of its own.
+  const dialectOptions =
+    kind === 'artifact' && format === 'ddl' ? (statusFor(dialect)?.options ?? []) : [];
+  const offersLtree = dialectOptions.includes('target_has_ltree');
+  const offersPostgis = dialectOptions.includes('target_has_postgis');
+  const extensionsRelevant = offersLtree || offersPostgis;
 
   // What the user has actually selected, whatever kind they are on. The status
   // badge previously reached only DDL and seed, because it was gated on
@@ -369,6 +390,26 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
               ))}
             </optgroup>
           </select>
+        )}
+        {offersLtree && (
+          <label style={checkLabel}>
+            <input
+              type="checkbox"
+              checked={targetHasLtree}
+              onChange={(e) => setTargetHasLtree(e.target.checked)}
+            />
+            Target has ltree
+          </label>
+        )}
+        {offersPostgis && (
+          <label style={checkLabel}>
+            <input
+              type="checkbox"
+              checked={targetHasPostgis}
+              onChange={(e) => setTargetHasPostgis(e.target.checked)}
+            />
+            Target has PostGIS
+          </label>
         )}
         <button
           type="button"
@@ -540,6 +581,14 @@ const selectStyle: React.CSSProperties = {
   borderRadius: 6,
   border: `1px solid ${color.neutral[300]}`,
   fontSize: 12,
+};
+
+const checkLabel: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  fontSize: type.caption.size,
+  color: color.neutral[400],
 };
 
 const actionBtn: React.CSSProperties = {

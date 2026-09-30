@@ -118,6 +118,53 @@ jobs:
           sys.exit(1)
           PY
 
+      - name: Start PostGIS for the geography mapping
+        # PostGIS is not part of PostgreSQL, so the appliance's image cannot run
+        # the geography case. Pinned by digest (tests/test_type_mappings_on_postgres.py
+        # asserts it); 16-3.5 is PostgreSQL 16 with PostGIS 3.5.
+        run: |
+          image="postgis/postgis:16-3.5@sha256:94146ac37bc61e2322f88016056c5920729cb8c64c8542ed590af8fc2abdac07"
+          docker run -d --name modelbox-test-postgis \
+            -e POSTGRES_USER=mbtest -e POSTGRES_PASSWORD=mbtest -e POSTGRES_DB=mbtest \
+            -p 127.0.0.1::5432 "$image"
+          port=""
+          for _ in $(seq 1 30); do
+            port="$(docker port modelbox-test-postgis 5432 | head -n 1 | awk -F: '{print $NF}')"
+            [ -n "$port" ] && break
+            sleep 1
+          done
+          if [ -z "$port" ]; then
+            echo "::error::docker published no host port for the PostGIS test database"
+            exit 1
+          fi
+          docker inspect --format '{{index .RepoDigests 0}}' "$image"
+          echo "MODELBOX_TEST_POSTGIS_URL=postgresql+asyncpg://mbtest:mbtest@127.0.0.1:${port}/mbtest" >> "$GITHUB_ENV"
+          echo "MODELBOX_TEST_POSTGIS_EXPECT=1" >> "$GITHUB_ENV"
+          echo "POSTGIS_PORT_FOR_READINESS=${port}" >> "$GITHUB_ENV"
+
+      - name: Wait until a PostGIS query completes over the host port
+        run: |
+          python - <<'PY'
+          import os, sys, time
+          import psycopg2
+          port = int(os.environ["POSTGIS_PORT_FOR_READINESS"])
+          last = None
+          for _ in range(90):
+              try:
+                  conn = psycopg2.connect(host="127.0.0.1", port=port, user="mbtest",
+                                          password="mbtest", dbname="mbtest", connect_timeout=3)
+                  with conn.cursor() as cur:
+                      cur.execute("SELECT version()")
+                      print(cur.fetchone()[0])
+                  conn.close()
+                  sys.exit(0)
+              except psycopg2.OperationalError as exc:
+                  last = exc
+                  time.sleep(1)
+          print(f"::error::PostGIS never answered a query on 127.0.0.1:{port}: {last}")
+          sys.exit(1)
+          PY
+
       - name: Run Pytest Suite on PostgreSQL
         run: |
           cd modelbox-ai/backend

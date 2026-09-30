@@ -272,6 +272,7 @@ class GraphRepository:
             row.default_value = col.default_value
             row.source_data_type = col.source_data_type
             row.source_default_value = col.source_default_value
+            row.identity = col.identity.model_dump() if col.identity is not None else None
             row.business_name = col.business_name
             row.permissible_values = col.permissible_values
             row.unit = col.unit
