@@ -2,7 +2,7 @@
   "id": "composite-keys",
   "title": "Composite Keys (defect fixture)",
   "paradigm": "3NF",
-  "defect": "P2-F item 2",
+  "defect": "Sprint 8 Step 6",
   "rationale": "A MetricFlow entity is one expression and has one type. A composite foreign key (order_line -> promotion_product) cannot be a join, a composite primary key (order_line, promotion_product) cannot be a primary entity, and a one-column key that is also a foreign key (product_detail.product_id) cannot be both primary and foreign. A correct emitter declares primary_entity for a composite key, emits the key's one-column foreign keys as foreign entities, and names every key it cannot state as an export gap instead of leaving it out silently.",
   "entities": [
     {

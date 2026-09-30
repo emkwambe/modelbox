@@ -157,7 +157,7 @@ def _column(sql: str, table: str, name: str) -> exp.ColumnDef:
 
 
 def test_sql_server_money_smallmoney_and_bit_are_exact_mappings() -> None:
-    """SYNTHESIS P1-A. money and smallmoney are exact in NUMERIC(19, 4) and
+    """Sprint 9 Step 1a. money and smallmoney are exact in NUMERIC(19, 4) and
     NUMERIC(10, 4); bit is BOOLEAN with its 0 and 1 written FALSE and TRUE.
     Each is an exact equivalent, so none is a gap. PostgreSQL's acceptance is
     test_type_mappings_on_postgres."""

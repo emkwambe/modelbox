@@ -7,7 +7,7 @@ A field that holds a value has one of three statuses:
 * **pending**: its provenance is recorded (from DDL, from a source comment,
   supplied by a named person on a date, or an AI draft) and it awaits review;
 * **verified**: set by the application, and only by :func:`verify`, when all
-  three conditions hold (owner decision, R2-1):
+  three conditions hold (owner decision, Sprint 8 Step 4b):
 
   1. the model is a reconciled import (``reconciliation_status`` is
      ``reconciled``);

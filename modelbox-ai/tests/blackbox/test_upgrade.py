@@ -67,7 +67,7 @@ def test_designate_on_an_upgraded_database_reaches_the_owners_export() -> None:
     whole = compose("up", "-d")
     assert whole.returncode == 0, f"setup: the appliance did not start: {whole.stderr[-600:]}"
     wait_for_health()
-    assert sql_ok("SELECT version_num FROM alembic_version;") == "0028_identity_and_sequences", (
+    assert sql_ok("SELECT version_num FROM alembic_version;") == "0029_computed_columns", (
         "fixture sanity: the migrate service took the database to head"
     )
 

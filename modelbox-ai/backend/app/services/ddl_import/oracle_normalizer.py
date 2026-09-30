@@ -1,7 +1,8 @@
 """Strip the physical clauses of Oracle export DDL before it is parsed.
 
 ``DBMS_METADATA.GET_DDL`` writes storage, segment and constraint-state clauses
-that sqlglot cannot parse (research R1): ``NOT NULL ENABLE`` fails,
+that sqlglot cannot parse (probed clause by clause before Sprint 8):
+``NOT NULL ENABLE`` fails,
 ``STORAGE(...)`` fails, and an ``ALTER TABLE … USING INDEX`` comes back as an
 opaque ``Command``. None of these clauses is part of a logical model, so they
 are removed; each removal is a named rule, applied in order, and reported with
@@ -11,7 +12,7 @@ Rules match only outside string literals and quoted identifiers: both are
 masked before any rule runs and restored after, so a CHECK constraint's
 ``'CANCELLED'`` or a column called ``"TABLESPACE"`` can never be touched.
 
-Partitioning is the exception R1 names. A ``PARTITION BY`` clause carries
+Partitioning is the exception. A ``PARTITION BY`` clause carries
 design intent, so it is removed from the statement but **returned** as the
 table's partitioning metadata, never discarded.
 """

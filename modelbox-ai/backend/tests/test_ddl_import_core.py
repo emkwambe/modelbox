@@ -110,7 +110,7 @@ def test_procedural_objects_are_listed_in_the_report_not_dropped() -> None:
 
 # --- The Oracle normalizer: every rule has a case and a negative control ------
 
-# Research R1's probe for a partitioned table: sqlglot returns an opaque
+# A partitioned table, as probed before Sprint 8: sqlglot returns an opaque
 # Command for it, so without the rule the table disappears.
 PARTITIONED = (
     'CREATE TABLE "S"."T" ("D" DATE, "V" NUMBER) PARTITION BY RANGE ("D") '

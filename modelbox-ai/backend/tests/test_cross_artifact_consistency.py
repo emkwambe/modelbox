@@ -267,6 +267,11 @@ EXEMPT: dict[str, str] = {
     # (test_type_mappings, test_type_mappings_on_postgres). No contract format
     # carries value generation, so there is no second projection to compare.
     "identity": "DDL only: an imported identity's seed and increment, stated or named as a gap",
+    # Sprint 9 Step 1b: likewise, a computed column's expression and storage,
+    # emitted by the DDL export as a generated column or named as a gap
+    # (test_generated_columns).
+    "computed_expression": "DDL only: written as a PostgreSQL generated column, or named as a gap",
+    "computed_persisted": "DDL only: states whether the source stores the value, in the generated column's label",
     # Sprint 8 Step 4b: dictionary fields a person supplies. Only the data
     # dictionary shows them, with each field's status (test_data_dictionary,
     # test_dictionary_verification); no contract format or DDL carries them yet,

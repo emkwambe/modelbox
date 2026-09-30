@@ -403,6 +403,11 @@ class EntityColumn(Base):
     # 0028). NULL for any other column: none_as_null, so Python None is SQL
     # NULL rather than a JSON null.
     identity: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    # ColumnSchema.computed_expression and computed_persisted: a computed
+    # column's expression as the imported file declared it, and whether the
+    # source stores it (migration 0029). NULL for any other column.
+    computed_expression: Mapped[str | None] = mapped_column(Text, nullable=True)
+    computed_persisted: Mapped[bool | None] = mapped_column(nullable=True)
     # Dictionary fields a person supplies (migration 0026). NULL until someone
     # does. permissible_values is a JSON list of values; critical_data_element
     # NULL means not assessed, which is not the same as False.
@@ -490,7 +495,7 @@ def _default_classification_scale(_mapper: object, connection: Connection, works
 ATTESTATION_STATUSES = ("recorded", "pending", "verified")
 #: Where a field's value came from. ``ai_draft`` is recorded provenance of a
 #: kind that can never support "verified": an AI draft is a first draft a
-#: modeller reviews (R2-1.3).
+#: modeller reviews, and "verified" must never describe an unreviewed draft.
 PROVENANCE_KINDS = ("ddl", "source_comment", "person", "ai_draft")
 VERIFIABLE_PROVENANCE = ("ddl", "source_comment", "person")
 

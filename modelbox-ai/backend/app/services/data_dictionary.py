@@ -1,8 +1,8 @@
 """The data dictionary: what the model holds, field by field, in four formats.
 
-Sprint 8 Step 4a built it from the fields the model stored, in the order the
-R2 field study lists them (tier S, read from DDL, then tier H, supplied by a
-person). Step 4b adds the fields a person supplies (business name, permissible
+Sprint 8 Step 4a built it from the fields the model stored, structural fields
+first (read from DDL and reconciled), then the fields a person supplies, so a
+reader meets what the source proves before what someone asserted. Step 4b adds the fields a person supplies (business name, permissible
 values, unit, classification, critical data element, authoritative source; at
 table level business name, owners and authoritative source) and each field's
 status: **verified** only where its attestation says so, otherwise **pending
@@ -122,11 +122,11 @@ class Field:
         return (self.raw or self.value)(c)
 
 
-# R2_DICTIONARY_STTM_FIELDS.md, R2-2: name and ordinal; type; nullable;
+# The field order, structural fields first: name and ordinal; type; nullable;
 # default; primary key (and position), unique; foreign key target; checks;
-# source comment / definition; business name; permissible values; unit;
-# classification and PII type; critical data element; authoritative source;
-# validation rules.
+# source comment / definition; then what a person supplies: business name;
+# permissible values; unit; classification and PII type; critical data
+# element; authoritative source; validation rules.
 COLUMN_FIELDS: tuple[Field, ...] = (
     Field("name", "Column", lambda c: c.column.name),
     Field("position", "Position", lambda c: c.position),

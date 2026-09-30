@@ -1,4 +1,4 @@
-"""The claims guard: wording no public surface may use (Sprint 8, R2-4).
+"""The claims guard: wording no public surface may use (Sprint 8, owner decision).
 
 This repository is public, so everything in it is a public surface. Barred:
 

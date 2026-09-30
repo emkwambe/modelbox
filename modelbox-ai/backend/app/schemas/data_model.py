@@ -722,6 +722,18 @@ class ColumnSchema(BaseModel):
         default=None,
         description="An identity column's generation, seed and increment, as the imported file declared them.",
     )
+    # A computed column's expression exactly as the imported file declared it,
+    # in its source dialect, and whether the source stores it (SQL Server
+    # PERSISTED). Sprint 9 Step 1b, migration 0029. None otherwise.
+    computed_expression: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="A computed column's expression exactly as the imported file declared it.",
+    )
+    computed_persisted: bool | None = Field(
+        default=None,
+        description="Whether the source stores the computed value (SQL Server PERSISTED).",
+    )
     # Dictionary fields a person supplies (Sprint 8 Step 4b, migration 0026).
     business_name: str | None = Field(default=None, max_length=255)
     permissible_values: list[str | int | float | bool] | None = Field(

@@ -170,6 +170,8 @@ class _Column:
     user_type: str | None = None  # a user-defined type name, resolved in _to_model
     computed: str | None = None  # a computed column's expression
     identity: dict[str, Any] | None = None  # IdentitySchema's fields, as the file declared them
+    computed_source: str | None = None  # a computed column's expression exactly as the file wrote it
+    computed_persisted: bool | None = None  # SQL Server PERSISTED
 
 
 @dataclass
@@ -324,6 +326,48 @@ def declared_types(statement: str) -> dict[str, str | None]:
 def declared_defaults(statement: str) -> dict[str, str | None]:
     """Each column's DEFAULT exactly as a CREATE TABLE statement declares it, by column name."""
     return {name: _default_text(rest) for name, rest in _column_items(statement)}
+
+
+_COMPUTED_AS = re.compile(r"^\s*AS\s*\(", re.IGNORECASE)
+
+
+def _balanced(text: str, start: int) -> int:
+    """The index just past the parenthesis that closes the one at ``start``,
+    outside quotes and brackets; -1 if it never closes."""
+    depth, i, n = 0, start, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in "'\"[":
+            close = {"'": "'", '"': '"', "[": "]"}[ch]
+            j = text.find(close, i + 1)
+            while ch == "'" and j != -1 and j + 1 < n and text[j + 1] == "'":
+                j = text.find("'", j + 2)
+            if j == -1:
+                return -1
+            i = j + 1
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return -1
+
+
+def declared_computed(statement: str) -> dict[str, str]:
+    """Each computed column's expression exactly as a CREATE TABLE statement
+    declares it (T-SQL ``[c] AS (…)``), by column name, with its parentheses."""
+    found: dict[str, str] = {}
+    for name, rest in _column_items(statement):
+        match = _COMPUTED_AS.match(rest)
+        if match is None:
+            continue
+        end = _balanced(rest, match.end() - 1)
+        if end != -1:
+            found[name] = rest[match.end() - 1:end]
+    return found
 
 
 _IDENTITY_CLAUSE = re.compile(r"\bIDENTITY\b", re.IGNORECASE)
@@ -519,11 +563,16 @@ class _Builder:
         declared = declared_types(statement.text)
         defaults = declared_defaults(statement.text)
         identities = declared_identities(statement.text)
+        expressions = declared_computed(statement.text)
         for item in schema.expressions:
             if isinstance(item, exp.ColumnDef):
                 self._column(table, item, statement)
                 column = table.columns[item.name]
                 column.source_type = declared.get(item.name)
+                if column.computed is not None:
+                    # The file's own text where it can be read whole; the
+                    # parser's rendering, in the same dialect, where not.
+                    column.computed_source = expressions.get(item.name) or column.computed
                 if column.default is not None:
                     column.source_default = defaults.get(item.name)
                 if column.identity is not None and item.name in identities:
@@ -545,8 +594,10 @@ class _Builder:
         computed = next((c.args["kind"] for c in constraints
                          if isinstance(c.args.get("kind"), exp.ComputedColumnConstraint)), None)
         if kind is None and computed is not None:
-            # A computed column declares no type; its expression is kept in the report.
-            column = _Column(name=item.name, data_type="COMPUTED", computed=self._sql(computed.this))
+            # A computed column declares no type. Its expression is kept in the
+            # report, and in the model as the file wrote it (Sprint 9 Step 1b).
+            column = _Column(name=item.name, data_type="COMPUTED", computed=self._sql(computed.this),
+                             computed_persisted=bool(computed.args.get("persisted")))
         else:
             column = _Column(name=item.name, data_type=self._sql(kind) if kind is not None else "")
         if not column.data_type:
@@ -791,6 +842,8 @@ def _to_model(builder: _Builder) -> tuple[SynthesizedModel | None, dict[str, Any
                     default_value=column.default,
                     source_default_value=column.source_default,
                     identity=IdentitySchema.model_validate(identity) if identity is not None else None,
+                    computed_expression=column.computed_source,
+                    computed_persisted=column.computed_persisted,
                     description=column.description,
                 ))
             except ValueError as exc:

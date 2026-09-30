@@ -1198,7 +1198,7 @@ def test_metricflow_parses_in_dbt(
 
 
 def test_metricflow_with_composite_keys_parses_in_dbt(tmp_path_factory: pytest.TempPathFactory) -> None:
-    """Sprint 8 Step 6 (P2-F item 2): composite keys, stated as MetricFlow can.
+    """Sprint 8 Step 6: composite keys, stated as MetricFlow can.
 
     A composite primary key is a ``primary_entity``, not one primary entity
     per column; its one-column foreign key is a foreign entity; dbt accepts

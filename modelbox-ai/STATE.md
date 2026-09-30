@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-30 on `sprint-9/step-1a-type-mappings`, branched from
-`main` at `3e5dd02`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-30 on `sprint-9/step-1b-computed-columns`, branched from
+`main` at `bb8929b`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,14 +9,34 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `3e5dd02` | STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `bb8929b` | type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.12.0` | `d38d6ec` | tagged 2026-09-29 22:28 -04:00; published by the gated release workflow (run 36659993511: gate, backend and frontend images all green); verified on the published images (run 36660321337, below) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC), published by run 36516574170; superseded by v1.12.0, tag and images kept |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-9/step-1a-type-mappings` | this branch | type, identity and sequence mappings to PostgreSQL (below) |
-| `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-9/step-1b-computed-columns` | this branch | computed columns as PostgreSQL generated columns (below) |
+| `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
-## In progress on this branch: type, identity and sequence mappings
+## In progress on this branch: computed columns as generated columns
+
+A SQL Server computed column is exported to PostgreSQL as
+`GENERATED ALWAYS AS (...) STORED` where every part of its expression is on
+the export's allowlist: column references, numeric and string literals,
+arithmetic, `ISNULL` written as `COALESCE`, and `CONVERT` written as `CAST`. A
+`+` with a string on either side is written `||`. Any other call is a named
+export gap quoting the expression as the file declared it. Each generated
+column is labelled "virtual in source, stored in target", or "stored in
+source" for a `PERSISTED` one, with its type and how it was chosen.
+AdventureWorks exports 7 generated columns and names 3 gaps, both counts
+derived in the tests from the file's own text. Migration 0029 (additive,
+nullable) stores each expression and its `PERSISTED` flag. The Backend
+Pytest (Postgres) job applies the export and checks the computed values
+against values computed from the same inputs
+(`test_generated_columns_on_postgres`).
+
+Also on this branch: comments and docs that cited documents kept outside
+this repository now state their reasons themselves.
+
+## Type, identity and sequence mappings (on `main`, #28)
 
 What changes in a PostgreSQL export of a SQL Server or Oracle model:
 - **Plain mappings.** SQL Server `money`, `smallmoney` and `bit` are written
@@ -220,8 +240,8 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0027_member_audit_actions` on `main`;
-`0028_identity_and_sequences` on this branch (`alembic heads`).
+Migration head: `0028_identity_and_sequences` on `main`;
+`0029_computed_columns` on this branch (`alembic heads`).
 
 ## Versions
 
