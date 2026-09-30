@@ -167,6 +167,10 @@ def translate_check(
         # A SQL Server bit column is BOOLEAN in the target, where 0 and 1 are
         # not its values: (Flag = 1) is written (Flag = TRUE).
         condition = _as_boolean_literals(condition, boolean_columns)
+    if source == "tsql" and target != "tsql":
+        condition, problem = _translate_tsql_like(condition, target)
+        if problem is not None:
+            return None, problem
     try:
         written = condition.sql(dialect=target)
     except sqlglot.errors.SqlglotError:
@@ -174,6 +178,68 @@ def translate_check(
     if _single_condition(f"SELECT 1 WHERE ({written})", target) is None:
         return None, f"does not parse as {target} once translated"
     return written, None
+
+
+# T-SQL's LIKE has character classes: '[A-Za-z]' is one letter, '[0-9]' one
+# digit, '[ABC]' one of a set. PostgreSQL's LIKE has none, so the same text
+# there matches only the literal characters, and a CHECK copied across refuses
+# values the source accepts. PostgreSQL's SIMILAR TO has bracket expressions
+# with the same meaning, and the same % and _. A pattern is translated only
+# when every part of it is in this subset:
+_LIKE_CLASS = re.compile(r"\[((?:[A-Za-z0-9](?:-[A-Za-z0-9])?)+)\]")
+# Literal characters that mean themselves in SIMILAR TO. Its metacharacters
+# (| * + ? { } ( ) and the backslash) are not, so a pattern holding one is not
+# translated.
+_LIKE_LITERAL = re.compile(r"[A-Za-z0-9 .,:;/@#&'=-]")
+_RANGE = re.compile(r"([A-Za-z0-9])-([A-Za-z0-9])")
+
+
+def _like_as_similar_to(pattern: str) -> str | None:
+    """A T-SQL LIKE pattern as SIMILAR TO with the same meaning, or None if
+    any part of it is outside the translated subset."""
+    position = 0
+    while position < len(pattern):
+        char = pattern[position]
+        if char == "[":
+            match = _LIKE_CLASS.match(pattern, position)
+            # A range must run upward within one kind: A-Z, a-z or 0-9.
+            if match is None or not all(
+                    lo <= hi and (lo.isdigit(), lo.isupper()) == (hi.isdigit(), hi.isupper())
+                    for lo, hi in _RANGE.findall(match.group(1))):
+                return None
+            position = match.end()
+        elif char in "%_" or _LIKE_LITERAL.fullmatch(char):
+            position += 1
+        else:
+            return None
+    # Every part means the same in both, so the text itself is the translation.
+    return pattern
+
+
+def _translate_tsql_like(condition: exp.Expression, target: str) -> tuple[exp.Expression, str | None]:
+    """The condition with each T-SQL LIKE whose pattern has a character class
+    rewritten, or why a CHECK holding one cannot be written for ``target``."""
+    for like in list(condition.find_all(exp.Like)):
+        pattern = like.expression
+        if not isinstance(pattern, exp.Literal) or not pattern.is_string:
+            return condition, ("uses a LIKE pattern that is not a string literal, "
+                               "so its T-SQL character classes cannot be checked")
+        if "[" not in pattern.this and "]" not in pattern.this:
+            continue  # % and _ mean the same in both
+        similar = _like_as_similar_to(pattern.this)
+        if isinstance(like.parent, exp.Escape) or similar is None:
+            return condition, (f"uses LIKE '{pattern.this}', a T-SQL character class outside the "
+                               f"patterns this export translates")
+        if target != "postgres":
+            return condition, f"uses LIKE '{pattern.this}', a T-SQL character class {target} does not express"
+        rewritten: exp.Expression = exp.SimilarTo(this=like.this.copy(), expression=exp.Literal.string(similar))
+        if like.args.get("negate"):  # NOT LIKE
+            rewritten = exp.Not(this=rewritten)
+        if like is condition:  # replace() needs a parent
+            condition = rewritten
+        else:
+            like.replace(rewritten)
+    return condition, None
 
 
 # Types a target has no exact equivalent for, after sqlglot's translation:

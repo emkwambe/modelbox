@@ -402,6 +402,85 @@ def test_dbt_tests_fail_on_an_orphan_foreign_key(case: Case) -> None:
     assert all(manifest["nodes"][k]["attached_node"] in changed for k in failed), sorted(failed)
 
 
+# ---------------------------------------------------------------------------
+# A T-SQL LIKE character class keeps its meaning (Sprint 9 Step 2c)
+# ---------------------------------------------------------------------------
+_SHELF = "CK_ProductInventory_Shelf"
+
+
+def _outcomes(database: str, statements: list[str]) -> list[tuple[str, str]]:
+    """(SQLSTATE or "", constraint or "") per statement, in one transaction
+    that is rolled back at the end, so the database is left as it was. A refused
+    statement is undone to its savepoint; an accepted one stands for the next."""
+    import psycopg2
+
+    connection = _connect(database)
+    connection.autocommit = False
+    out = []
+    try:
+        with connection.cursor() as cursor:
+            for statement in statements:
+                cursor.execute("SAVEPOINT s")
+                try:
+                    cursor.execute(statement)
+                    out.append(("", ""))
+                    cursor.execute("RELEASE SAVEPOINT s")
+                except psycopg2.Error as exc:
+                    out.append((exc.pgcode or "", (exc.diag.constraint_name or "") if exc.diag else ""))
+                    cursor.execute("ROLLBACK TO SAVEPOINT s")
+    finally:
+        connection.rollback()
+        connection.close()
+    return out
+
+
+def _set_shelf(values: list[str]) -> list[str]:
+    return [f'UPDATE public."ProductInventory" SET "Shelf" = \'{v}\' WHERE ctid = '
+            f'(SELECT ctid FROM public."ProductInventory" LIMIT 1)' for v in values]
+
+
+def test_the_shelf_check_means_what_sql_server_means(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """SQL Server's [A-Za-z] is exactly one letter: one letter or 'N/A' passes,
+    two letters or a digit does not."""
+    case = _case("adventureworks", tmp_path_factory)
+    accepted, refused = ["B", "z", "N/A"], ["AB", "1", "[A-Za-z]"]
+    outcomes = _outcomes(case.database, _set_shelf(accepted + refused))
+    assert outcomes[:len(accepted)] == [("", "")] * len(accepted)
+    assert outcomes[len(accepted):] == [("23514", _SHELF)] * len(refused)
+
+
+def test_the_seed_draws_from_the_one_letter_branch(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """The seed needs no workaround: its one-letter shelves load under the CHECK."""
+    case = _case("adventureworks", tmp_path_factory)
+    assert not case.seed_refused
+    shelves = [s for (s,) in _query(case.database, 'SELECT "Shelf" FROM public."ProductInventory"')]
+    assert len(shelves) == ROWS
+    assert any(re.fullmatch("[A-Za-z]", s) for s in shelves), shelves
+
+
+def test_control_without_the_translation_a_valid_letter_is_refused(
+        tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same CHECK, written as the export wrote it before, refuses 'B'."""
+    from app.services import ddl_export
+
+    case = _case("adventureworks", tmp_path_factory)
+    entity = next(e for e in case.model.entities if e.entity_name == "ProductInventory")
+    check = next(c for c in entity.check_constraints if c.name == _SHELF)
+    columns = [c.name for c in entity.columns]
+    translated, problem = ddl_export.translate_check(check.expression, "tsql", "postgres", columns)
+    assert problem is None and translated is not None and "SIMILAR TO" in translated
+    monkeypatch.setattr(ddl_export, "_translate_tsql_like", lambda condition, target: (condition, None))
+    verbatim, problem = ddl_export.translate_check(check.expression, "tsql", "postgres", columns)
+    assert problem is None and verbatim is not None and "LIKE '[A-Za-z]'" in verbatim
+
+    def table(condition: str) -> str:
+        return f'CREATE TEMP TABLE shelf_check ("Shelf" VARCHAR(10) CONSTRAINT c CHECK ({condition}))'
+
+    insert = "INSERT INTO shelf_check VALUES ('B')"
+    assert _outcomes(case.database, [table(translated), insert]) == [("", ""), ("", "")]
+    assert _outcomes(case.database, [table(verbatim), insert]) == [("", ""), ("23514", "c")]
+
+
 def test_control_the_project_with_source_types_does_not_build(
         tmp_path_factory: pytest.TempPathFactory) -> None:
     """Oracle HR's declared types (NUMBER(6), VARCHAR2) are not PostgreSQL's."""

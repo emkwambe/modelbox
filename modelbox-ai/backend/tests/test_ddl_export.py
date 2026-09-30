@@ -230,3 +230,65 @@ def test_oracle_star_precision_is_written_as_38() -> None:
     sql = ExporterService(source_dialect="oracle").generate_ddl(_model(graph), "postgres")
     column = next(c for c in _tables(sql)["T"].expressions if isinstance(c, exp.ColumnDef))
     assert column.args["kind"].sql("postgres") == "DECIMAL(38, 0)"
+
+
+# ---------------------------------------------------------------------------
+# T-SQL LIKE character classes (Sprint 9 Step 2c)
+# ---------------------------------------------------------------------------
+def _similar_to(condition: str) -> list[tuple[str, bool]]:
+    """(pattern, negated) for each SIMILAR TO in a PostgreSQL condition, read on its tree."""
+    tree = sqlglot.parse_one(f"SELECT 1 WHERE {condition}", read="postgres")
+    return [(node.expression.this, isinstance(node.parent, exp.Not)) for node in tree.find_all(exp.SimilarTo)]
+
+
+def test_a_tsql_character_class_is_written_as_similar_to_for_postgres() -> None:
+    for pattern in ("[A-Za-z]", "[0-9][0-9]%", "AB_[A-C]", "[XYZ]-%"):
+        written, problem = ddl_export.translate_check(f"[Code] LIKE '{pattern}'", "tsql", "postgres", ["Code"])
+        assert problem is None
+        assert written is not None and _similar_to(written) == [(pattern, False)]
+        assert "LIKE" not in written.upper()
+
+
+def test_not_like_keeps_its_negation() -> None:
+    written, _ = ddl_export.translate_check("[Code] NOT LIKE '[0-9]%'", "tsql", "postgres", ["Code"])
+    assert written is not None and _similar_to(written) == [("[0-9]%", True)]
+
+
+def test_a_like_without_a_character_class_stays_like() -> None:
+    # % and _ mean the same in both, so nothing changes.
+    written, _ = ddl_export.translate_check("[Code] LIKE 'A_%'", "tsql", "postgres", ["Code"])
+    assert written is not None and _similar_to(written) == [] and "LIKE 'A_%'" in written
+
+
+def test_a_pattern_outside_the_translated_subset_is_a_named_gap() -> None:
+    for pattern in ("[^0-9]", "[a-Z]", "A*[0-9]", "[0-9]+", "(A|B)[0-9]"):
+        written, problem = ddl_export.translate_check(f"[Code] LIKE '{pattern}'", "tsql", "postgres", ["Code"])
+        assert written is None and problem is not None and f"'{pattern}'" in problem
+    written, problem = ddl_export.translate_check("[Code] LIKE '[0-9]!%' ESCAPE '!'", "tsql", "postgres", ["Code"])
+    assert written is None and problem is not None
+
+
+def test_a_character_class_is_a_gap_for_targets_without_similar_to() -> None:
+    written, problem = ddl_export.translate_check("[Code] LIKE '[0-9]'", "tsql", "duckdb", ["Code"])
+    assert written is None and problem is not None and "duckdb" in problem
+    # Control: the same pattern from a dialect whose LIKE has no classes is not touched.
+    written, problem = ddl_export.translate_check("code LIKE '[0-9]'", "postgres", "duckdb", ["code"])
+    assert problem is None and written is not None and _similar_to(written) == []
+
+
+def test_adventureworks_shelf_check_is_translated_and_no_other_is_affected() -> None:
+    from app.services.ddl_import.importer import import_ddl
+    from tests.test_ddl_round_trip import DDL
+
+    text = (DDL / "tsql" / "adventureworks.sql").read_bytes()
+    model = import_ddl(text, "tsql", "adventureworks.sql").model
+    assert model is not None
+    export = ExporterService(source_dialect="tsql").generate_ddl_export(model, "postgres")
+    inventory = _tables(export.sql)["ProductInventory"]
+    patterns = [(n.this.name, n.expression.this) for n in inventory.find_all(exp.SimilarTo)]
+    assert patterns == [("Shelf", "[A-Za-z]")]
+    assert not [n for n in sqlglot.parse(export.sql, read="postgres") for like in n.find_all(exp.Like)
+                if "[" in like.expression.this]
+    # The fixture's only bracket pattern: no CHECK became a gap because of LIKE.
+    assert text.decode("utf-8", "ignore").lower().count("like '[") == 1
+    assert not [g for g in export.gaps if g.kind == "check_constraint" and "LIKE" in g.detail]

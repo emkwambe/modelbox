@@ -267,6 +267,13 @@ Open **Export artifacts** on the canvas. Tabs:
   - A schema-qualified user-defined type the model does not define is
     written as `TEXT`, without the default's cast to it, and listed as an
     export gap.
+  - A SQL Server CHECK whose `LIKE` pattern has a character class, such as
+    `[A-Za-z]` (one letter), `[0-9]` or a set like `[ABC]`, is written with
+    `SIMILAR TO`, which reads those brackets the same way. PostgreSQL's own
+    `LIKE` would read them as literal text. A pattern outside those forms
+    (a negated class `[^…]`, an `ESCAPE` clause, or a character `SIMILAR TO`
+    treats as special) makes the CHECK an export gap that quotes it. Other
+    targets name every such CHECK as a gap.
 
   For **dbt**, choose the warehouse the project will run on. Each staging
   model casts its columns to the types the DDL export writes for that dialect,

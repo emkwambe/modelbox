@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-30 on `sprint-9/step-2b-dbt-export`, branched from
-`main` at `243a473`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-30 on `sprint-9/step-2c-like-patterns`, branched from
+`main` at `3f6ec41`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,14 +9,30 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `243a473` | computed columns as PostgreSQL generated columns (#29), on type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `3f6ec41` | the dbt export on imported schemas and seed data under every constraint (#30), on computed columns as PostgreSQL generated columns (#29), on type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.12.0` | `d38d6ec` | tagged 2026-09-29 22:28 -04:00; published by the gated release workflow (run 36659993511: gate, backend and frontend images all green); verified on the published images (run 36660321337, below) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC), published by run 36516574170; superseded by v1.12.0, tag and images kept |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-9/step-2b-dbt-export` | this branch | the dbt export on imported schemas, and seed data under every constraint (below) |
-| `sprint-9/step-1b-computed-columns`, `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-9/step-2c-like-patterns` | this branch | a T-SQL `LIKE` character class keeps its meaning in PostgreSQL (below) |
+| `sprint-9/step-2b-dbt-export`, `sprint-9/step-1b-computed-columns`, `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
-## In progress on this branch: dbt on imported schemas, and seed data
+## In progress on this branch: T-SQL LIKE character classes
+
+A SQL Server CHECK whose `LIKE` pattern has a character class (`[A-Za-z]`,
+`[0-9]`, ranges and sets, with `%` and `_`) is written for PostgreSQL as
+`SIMILAR TO`, which reads the brackets the same way. PostgreSQL's `LIKE`
+reads them as literal text, so the CHECK copied verbatim was stricter than
+the source's. A pattern outside that subset is a named export gap quoting
+it, and other targets name such a CHECK as a gap. The seed generator draws
+from the `LIKE` branch again.
+
+On PostgreSQL 16.15, in the Artifact Fidelity Harness job
+(`test_dbt_on_postgres`), AdventureWorks' `CK_ProductInventory_Shelf`
+accepts one letter and `'N/A'` and refuses two letters. The seed's one-letter
+shelves load, and the same CHECK without the translation refuses `'B'` (the
+negative control). On `73c5680`, run 36715872452: 32 passed, 1 skipped.
+
+## dbt on imported schemas, and seed data (on `main`, #30)
 
 A dbt project exported from an imported schema did not build on
 PostgreSQL. Its staging models cast to the source's own types (Oracle's
@@ -40,10 +56,6 @@ duplicate refused by the database, the seed unquoted refused, and the project
 cast to the source's types failing to build. On `a3dad48`, run 36711138855:
 29 passed, 1 skipped (Pagila's unquoted control: every name there is lower
 case). PL-007 and PL-014 state the new evidence and its limit.
-
-A pre-existing export defect found on the way: a T-SQL `LIKE` character class
-is exported to PostgreSQL unchanged, where it matches only literal text
-(OUTSTANDING_ISSUES).
 
 ## Computed columns as generated columns (on `main`, #29)
 
