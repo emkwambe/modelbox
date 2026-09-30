@@ -20,7 +20,7 @@ services:
     build:
       context: ../frontend
       dockerfile: ../docker/Dockerfile.frontend
-    image: modelbox/web-ui:v1.11.1
+    image: modelbox/web-ui:v1.12.0
     # The only published port. The UI forwards /api/* to modelbox-backend over
     # the compose network (a same-origin rewrite in next.config.js), so the
     # backend, Postgres, Redis and Ollama publish nothing to the host.
@@ -36,7 +36,7 @@ services:
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
-    image: modelbox/core-engine:v1.11.1
+    image: modelbox/core-engine:v1.12.0
     environment:
       # The appliance is a production deployment. Settings refuse the shipped
       # secrets outside development, and the dev account is never seeded.
@@ -119,7 +119,7 @@ services:
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
-    image: modelbox/core-engine:v1.11.1
+    image: modelbox/core-engine:v1.12.0
     command: ["celery", "-A", "app.worker", "worker", "--loglevel=info"]
     environment:
       # As the backend: production, no default for any secret, the
@@ -171,7 +171,7 @@ services:
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
-    image: modelbox/core-engine:v1.11.1
+    image: modelbox/core-engine:v1.12.0
     command: ["python", "-m", "app.db_bootstrap"]
     environment:
       - ENVIRONMENT=production

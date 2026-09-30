@@ -1,11 +1,8 @@
-# ModelBox AI — v1.12.0 Release Notes (draft)
+# ModelBox AI — v1.12.0 Release Notes
 
-> **Draft.** Written before the release; the version stamps still read 1.11.1.
-> The release-preparation change renames this file to `RELEASE_NOTES_v1.12.0.md`,
-> fills in the tag and the release run, and bumps every stamp.
-
-**Tag:** `v1.12.0` (not yet tagged)  ·  **Carries:** Sprint 8, merged to `main`
-in pull requests #14 to #24 and the release-preparation change  ·
+**Tag:** `v1.12.0`, on `main`, published by the gated release workflow  ·
+**Carries:** Sprint 8, merged to `main` in pull requests #14 to #25 and the
+release-preparation change that set every version stamp to 1.12.0  ·
 **Supersedes:** v1.11.1.
 
 **This is the release for the consultant's engagement.** A client's exported
