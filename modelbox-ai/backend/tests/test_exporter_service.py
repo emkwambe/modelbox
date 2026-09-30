@@ -149,6 +149,55 @@ def test_generate_dbt_project() -> None:
     assert args["field"] == "customer_hk"
 
 
+def _oracle_model() -> SynthesizedModel:
+    return SynthesizedModel(
+        paradigm="3NF",  # type: ignore[arg-type]
+        entities=[
+            EntitySchema(entity_name="DEPARTMENTS", columns=[
+                _col("DEPARTMENT_ID", "NUMBER(4,0)", pk=True), _col("DEPARTMENT_NAME", "VARCHAR2(30)")]),
+            EntitySchema(entity_name="EMPLOYEES", columns=[
+                _col("EMPLOYEE_ID", "NUMBER(6,0)", pk=True), _col("DEPARTMENT_ID", "NUMBER(4,0)", fk=True),
+                ColumnSchema(name="ANNUAL", data_type="COMPUTED", computed_expression="SALARY * 12 * 1.5 / 0")]),
+        ],
+        relationships=[_rel("EMPLOYEES.DEPARTMENT_ID", "DEPARTMENTS.DEPARTMENT_ID", "N:1")],
+    )
+
+
+def test_dbt_staging_casts_to_the_target_types() -> None:
+    files = ExporterService(source_dialect="oracle").generate_dbt_project(_oracle_model(), dialect="postgres")
+    stg = files["models/staging/stg_EMPLOYEES.sql"]
+    # The type the PostgreSQL DDL export writes, never Oracle's NUMBER.
+    assert 'cast("EMPLOYEE_ID" as DECIMAL(6, 0)) as "EMPLOYEE_ID"' in stg
+    assert "NUMBER" not in "".join(v for k, v in files.items() if k.endswith(".sql"))
+    # Control: with no dialect the declared types are kept as they are.
+    declared = ExporterService(source_dialect="oracle").generate_dbt_project(_oracle_model())
+    assert "as NUMBER(6,0)) as" in declared["models/staging/stg_EMPLOYEES.sql"]
+
+
+def test_dbt_quotes_mixed_case_identifiers_in_sql_and_tests() -> None:
+    files = ExporterService(source_dialect="oracle").generate_dbt_project(_oracle_model(), dialect="postgres")
+    schema = yaml.safe_load(files["models/staging/schema.yml"])
+    employees = next(m for m in schema["models"] if m["name"] == "stg_EMPLOYEES")
+    column = next(c for c in employees["columns"] if c["name"] == "DEPARTMENT_ID")
+    assert column["quote"] is True
+    relationship = next(t for t in column["data_tests"] if isinstance(t, dict))["relationships"]["arguments"]
+    assert relationship["field"] == '"DEPARTMENT_ID"'
+    # Control: a lower snake case name needs no quoting and gets none.
+    plain = yaml.safe_load(ExporterService().generate_dbt_project(sample_model())["models/staging/schema.yml"])
+    assert all("quote" not in c for m in plain["models"] for c in m["columns"])
+
+
+def test_dbt_leaves_out_a_computed_column_the_target_cannot_create() -> None:
+    files = ExporterService(source_dialect="oracle").generate_dbt_project(_oracle_model(), dialect="postgres")
+    assert "ANNUAL" not in files["models/staging/stg_EMPLOYEES.sql"]
+    # Control: one PostgreSQL can generate is staged, with the type it infers.
+    model = _oracle_model()
+    model.entities[1].columns[2] = ColumnSchema(name="DOUBLED", data_type="COMPUTED",
+                                                computed_expression="DEPARTMENT_ID * 2")
+    staged = ExporterService(source_dialect="oracle").generate_dbt_project(model, dialect="postgres")
+    assert 'cast("DOUBLED" as ' in staged["models/staging/stg_EMPLOYEES.sql"]
+
+
 def test_dbt_accepted_values_for_categorical_columns() -> None:
     model = SynthesizedModel(
         paradigm="3NF",  # type: ignore[arg-type]

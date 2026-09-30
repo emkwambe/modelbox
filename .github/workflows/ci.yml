@@ -224,6 +224,52 @@ jobs:
           python scripts/refresh_dbt_packages.py
           git diff --exit-code tests/fixtures/dbt/package-lock.yml
 
+      - name: Start the appliance's PostgreSQL for dbt
+        # tests/test_dbt_on_postgres.py builds the exported dbt projects here.
+        # The image is read from the appliance compose file, as in the
+        # Postgres job, so the two cannot drift apart.
+        run: |
+          image="$(python -c 'import yaml; print(yaml.safe_load(open("modelbox-ai/docker/docker-compose.appliance.yml"))["services"]["postgres-db"]["image"])')"
+          echo "image: $image"
+          docker run -d --name modelbox-dbt-postgres \
+            -e POSTGRES_USER=mbtest -e POSTGRES_PASSWORD=mbtest -e POSTGRES_DB=mbtest \
+            -p 127.0.0.1::5432 "$image"
+          port=""
+          for _ in $(seq 1 30); do
+            port="$(docker port modelbox-dbt-postgres 5432 | head -n 1 | awk -F: '{print $NF}')"
+            [ -n "$port" ] && break
+            sleep 1
+          done
+          if [ -z "$port" ]; then
+            echo "::error::docker published no host port for the dbt database"
+            exit 1
+          fi
+          echo "MODELBOX_DBT_POSTGRES_URL=postgresql://mbtest:mbtest@127.0.0.1:${port}/mbtest" >> "$GITHUB_ENV"
+          echo "PGPORT_FOR_READINESS=${port}" >> "$GITHUB_ENV"
+
+      - name: Wait until a dbt database query completes over the host port
+        run: |
+          python - <<'PY'
+          import os, sys, time
+          import psycopg2
+          port = int(os.environ["PGPORT_FOR_READINESS"])
+          last = None
+          for _ in range(60):
+              try:
+                  conn = psycopg2.connect(host="127.0.0.1", port=port, user="mbtest",
+                                          password="mbtest", dbname="mbtest", connect_timeout=3)
+                  with conn.cursor() as cur:
+                      cur.execute("SELECT version()")
+                      print(cur.fetchone()[0])
+                  conn.close()
+                  sys.exit(0)
+              except psycopg2.OperationalError as exc:
+                  last = exc
+                  time.sleep(1)
+          print(f"::error::postgres never answered a query on 127.0.0.1:{port}: {last}")
+          sys.exit(1)
+          PY
+
       - name: Run Fidelity Harness
         # MODELBOX_FIDELITY_STRICT turns a missing toolchain into a hard failure.
         # Without it a failed install would make every gate skip and this job
@@ -233,6 +279,16 @@ jobs:
         run: |
           cd modelbox-ai/backend
           pytest tests/test_artifact_fidelity.py -v --no-header
+
+      - name: Build the exported dbt projects on PostgreSQL
+        # The four imported certified fixtures, seeded by the product's own
+        # generator and built with dbt, with broken-data and negative controls.
+        # The EXPECT flag makes a missing server or toolchain a failure.
+        env:
+          MODELBOX_DBT_POSTGRES_EXPECT: "1"
+        run: |
+          cd modelbox-ai/backend
+          pytest tests/test_dbt_on_postgres.py -v --no-header
 
       - name: Report xfail burn-down
         if: always()

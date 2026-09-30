@@ -92,7 +92,8 @@ ARTIFACT_STATUS: tuple[ArtifactEntry, ...] = (
         "dbt",
         "dbt",
         ArtifactStatus.CERTIFIED,
-        "The emitted project builds end to end: seeded, run and tested in DuckDB.",
+        "The emitted project builds end to end on the product's own seed data: the reference "
+        "models in DuckDB, and the four imported certified schemas, for PostgreSQL, in PostgreSQL 16.15.",
     ),
     ArtifactEntry(
         "cube",

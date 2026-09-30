@@ -59,7 +59,13 @@ from app.schemas.data_model import (
     SynthesizedModel,
     _is_temporal_type,
 )
-from app.services.ddl_export import DdlExport, DdlExportError, build_ddl
+from app.services.ddl_export import (
+    DdlExport,
+    DdlExportError,
+    build_ddl,
+    column_type,
+    quote,
+)
 
 if TYPE_CHECKING:
     from app.services.seed_generator import SeedResult
@@ -135,7 +141,7 @@ class ExporterService:
         if fmt == "ddl":
             return {f"model_{dialect}.sql": self.generate_ddl(model, dialect)}
         if fmt == "dbt":
-            return self.generate_dbt_project(model)
+            return self.generate_dbt_project(model, dialect=dialect)
         if fmt == "cube":
             return self.generate_cube_schema(model)
         raise ExporterError(f"Unsupported export format: {export_format}")
@@ -187,7 +193,7 @@ class ExporterService:
     # 2. dbt staging models + schema.yml
     # ---------------------------------------------------------------------
     def generate_dbt_project(
-        self, model: SynthesizedModel, source_name: str = "raw"
+        self, model: SynthesizedModel, source_name: str = "raw", dialect: str | None = None
     ) -> dict[str, str]:
         """Return a map of dbt file paths -> file contents.
 
@@ -196,17 +202,43 @@ class ExporterService:
         sources, so ``dbt parse`` failed on the first model with "depends on a
         source named 'raw.x' which was not found" — every consumer had to
         hand-write the sources file before the artifact was usable.
+
+        ``dialect`` is the warehouse the project runs on. Each staging column is
+        cast to its type there, written as the DDL export writes it for that
+        dialect, mappings included (Sprint 9 Step 2b): a model imported from
+        Oracle cast to ``NUMBER(4, 0)``, which PostgreSQL does not have. Without
+        a dialect, types are written in the model's own. Either way a column the
+        DDL export does not create (a computed column that is a gap) has no
+        staging column and no test.
         """
+        # Every fragment is checked before any is translated, so a malformed
+        # type is refused with its lint code, never as a translation failure.
+        for entity in model.entities:
+            self._require_valid_fragments(entity)
+        types: dict[tuple[str, str], str | None]
+        if dialect is None:
+            # The declared text exactly; a computed column has no type to cast to.
+            types = {(e.entity_name, c.name): (None if c.data_type == "COMPUTED" else c.data_type)
+                     for e in model.entities for c in e.columns}
+        else:
+            target = _SQLGLOT_DIALECTS.get(dialect.lower())
+            if target is None:
+                raise ExporterError(f"Unsupported target dialect: {dialect}")
+            try:
+                types = {(e.entity_name, c.name): column_type(c, e, self._source_dialect, target)
+                         for e in model.entities for c in e.columns}
+            except DdlExportError as exc:
+                raise ExporterError(str(exc)) from exc
         files: dict[str, str] = {}
 
         for entity in model.entities:
             path = f"models/staging/stg_{entity.entity_name}.sql"
-            files[path] = self._dbt_staging_sql(entity, source_name)
+            files[path] = self._dbt_staging_sql(entity, source_name, types)
 
         files["models/staging/_sources.yml"] = self._dbt_sources_yml(
             model, source_name
         )
-        files["models/staging/schema.yml"] = self._dbt_schema_yml(model)
+        files["models/staging/schema.yml"] = self._dbt_schema_yml(model, types)
 
         # Only emitted when something actually depends on it — a packages.yml
         # naming an unused package is its own kind of noise.
@@ -288,11 +320,15 @@ class ExporterService:
             default_flow_style=False,
         )
 
-    def _dbt_staging_sql(self, entity: EntitySchema, source_name: str) -> str:
+    def _dbt_staging_sql(self, entity: EntitySchema, source_name: str,
+                         types: dict[tuple[str, str], str | None]) -> str:
         self._require_valid_fragments(entity)
+        # Named as the DDL export names them: a mixed-case name is quoted, or
+        # PostgreSQL folds WorkOrderID to workorderid and finds no column.
         casts = ",\n".join(
-            f"    cast({col.name} as {col.data_type}) as {col.name}"
+            f"    cast({quote(col.name)} as {written}) as {quote(col.name)}"
             for col in entity.columns
+            if (written := types[(entity.entity_name, col.name)]) is not None
         )
         return (
             "with source as (\n"
@@ -325,7 +361,8 @@ class ExporterService:
                 gaps.append(f"{label}: composite foreign key; dbt's relationships test takes one column")
         return gaps
 
-    def _dbt_schema_yml(self, model: SynthesizedModel) -> str:
+    def _dbt_schema_yml(self, model: SynthesizedModel,
+                        types: dict[tuple[str, str], str | None] | None = None) -> str:
         # Map (entity, column) -> referenced "stg_<parent>" for FK relationship
         # tests: one-column relationships only (see dbt_export_gaps).
         fk_refs: dict[tuple[str, str], tuple[str, str]] = {}
@@ -339,7 +376,13 @@ class ExporterService:
             single_unique = {u.columns[0] for u in entity.unique_constraints if len(u.columns) == 1}
             columns: list[dict[str, object]] = []
             for col in entity.columns:
+                if types is not None and types.get((entity.entity_name, col.name)) is None:
+                    continue  # not a column of the staging model (see generate_dbt_project)
                 col_doc: dict[str, object] = {"name": col.name}
+                if quote(col.name) != col.name:
+                    # A generic test's column_name is written as given; quote it
+                    # as the staging model's column is quoted.
+                    col_doc["quote"] = True
                 if col.description:
                     col_doc["description"] = col.description
 
@@ -363,7 +406,8 @@ class ExporterService:
                             "relationships": {
                                 "arguments": {
                                     "to": f"ref('stg_{parent_entity}')",
-                                    "field": parent_col,
+                                    # The macro writes `field` as given.
+                                    "field": quote(parent_col),
                                 }
                             }
                         }
@@ -386,7 +430,7 @@ class ExporterService:
             if compound:
                 model_doc["data_tests"] = [
                     {"dbt_expectations.expect_compound_columns_to_be_unique": {
-                        "arguments": {"column_list": columns_set}}}
+                        "arguments": {"column_list": [quote(c) for c in columns_set]}}}
                     for columns_set in compound]
             if entity.description:
                 model_doc["description"] = entity.description
@@ -413,10 +457,13 @@ class ExporterService:
 
         Delegates to :class:`SyntheticSeedGenerator`; returns the file-map plus
         the topological generation order used (parents before children).
+        Each column is generated for its type in ``dialect``, as the DDL export
+        writes it from the model's source dialect.
         """
         from app.services.seed_generator import SyntheticSeedGenerator
 
-        return SyntheticSeedGenerator(dialect=dialect).generate(
+        target = _SQLGLOT_DIALECTS.get(dialect.lower(), dialect)
+        return SyntheticSeedGenerator(dialect=target, source_dialect=self._source_dialect).generate(
             model, row_count, seed_format
         )
 

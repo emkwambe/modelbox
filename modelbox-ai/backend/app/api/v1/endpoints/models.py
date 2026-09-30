@@ -450,7 +450,8 @@ async def export_model(
     return ExportResponse(
         model_id=model.model_id,
         format=export_format,
-        dialect=dialect if export_format == ExportFormat.DDL else None,
+        # dbt's staging models cast to the dialect's types, so it applies there too.
+        dialect=dialect if export_format in (ExportFormat.DDL, ExportFormat.DBT) else None,
         files=files,
         gaps=gaps,
     )
@@ -479,7 +480,8 @@ async def export_synthetic_data(
     result = await engine.get_model(model.model_id)
     assert result is not None  # guaranteed by AuthorizedModelDep
 
-    seed = exporter.generate_synthetic_seed(
+    # Read in the dialect the model was imported from, as the DDL export is.
+    seed = _exporter_for(model, exporter).generate_synthetic_seed(
         _to_synthesized(result),
         row_count=payload.row_count_per_entity,
         seed_format=payload.format,
@@ -493,6 +495,7 @@ async def export_synthetic_data(
         row_count_per_entity=payload.row_count_per_entity,
         generation_order=seed.generation_order,
         files=seed.files,
+        rows_skipped=seed.rows_skipped,
     )
 
 

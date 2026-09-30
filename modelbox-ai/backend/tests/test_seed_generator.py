@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import csv
 import io
+import json
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -157,6 +159,163 @@ def test_string_literals_are_escaped() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Unit: declared constraints (Sprint 9 Step 2b)
+#
+# Each case is one where the generator before Step 2b produced rows the
+# database refuses, so each assertion distinguishes the two. The rows are
+# checked by the CHECK itself, evaluated here in Python from the rows read back.
+# ---------------------------------------------------------------------------
+def _checked(name: str, cols: list[ColumnSchema], *checks: str, pk: list[str] | None = None,
+             unique: list[list[str]] | None = None) -> EntitySchema:
+    return EntitySchema.model_validate({
+        "entity_name": name,
+        # The flags derived from the lists below are left for the IR to derive.
+        "columns": [c.model_dump(exclude={"is_primary_key", "is_unique", "check_expression"}) for c in cols],
+        "primary_key": pk if pk is not None else [c.name for c in cols if c.is_primary_key],
+        "unique_constraints": [{"columns": u} for u in (unique or [])],
+        "check_constraints": [{"expression": c} for c in checks]})
+
+
+def _model(*entities: EntitySchema, relationships: list[RelationshipSchema] | None = None) -> SynthesizedModel:
+    return SynthesizedModel(paradigm="3NF", entities=list(entities),  # type: ignore[arg-type]
+                            relationships=relationships or [])
+
+
+def _csv(model: SynthesizedModel, rows: int, **kwargs: Any) -> dict[str, list[dict[str, str]]]:
+    result = SyntheticSeedGenerator(**kwargs).generate(model, rows, "csv")
+    return {name.removesuffix(".csv"): _rows(body) for name, body in result.files.items()}
+
+
+def test_check_bounds_are_honoured() -> None:
+    low, high = 6.5, 200.0
+    model = _model(_checked("pay", [_col("id", "INTEGER", pk=True), _col("rate", "NUMERIC(8,2)"),
+                                    _col("salary", "NUMERIC(8,2)")],
+                            f"rate >= {low} AND rate <= {high}", "salary > 0"))
+    rows = _csv(model, 30)["pay"]
+    assert len(rows) == 30
+    assert all(low <= float(r["rate"]) <= high and float(r["salary"]) > 0 for r in rows)
+
+
+def test_check_ordering_between_two_columns_is_honoured() -> None:
+    model = _model(_checked("job_history", [_col("id", "INTEGER", pk=True), _col("start_date", "DATE"),
+                                            _col("end_date", "DATE")], "end_date > start_date"))
+    rows = _csv(model, 30)["job_history"]
+    assert len(rows) == 30 and all(r["end_date"] > r["start_date"] for r in rows)
+
+
+def test_check_value_lists_under_upper_are_honoured() -> None:
+    allowed = ["M", "F"]
+    model = _model(_checked("person", [_col("id", "INTEGER", pk=True), _col("gender", "CHAR(1)")],
+                            " OR ".join(f"UPPER(gender) = '{v}'" for v in allowed)))
+    rows = _csv(model, 20)["person"]
+    assert {r["gender"].upper() for r in rows} <= set(allowed)
+
+
+def test_equality_is_preferred_to_a_dialect_specific_like_pattern() -> None:
+    # T-SQL's [A-Za-z] is a character class; in PostgreSQL it is literal text.
+    model = _model(_checked("bin", [_col("id", "INTEGER", pk=True), _col("shelf", "VARCHAR(10)")],
+                            "shelf LIKE '[A-Za-z]' OR shelf = 'N/A'"))
+    rows = _csv(model, 5, source_dialect="tsql")["bin"]
+    assert {r["shelf"] for r in rows} == {"N/A"}
+
+
+def test_is_json_check_is_honoured() -> None:
+    model = _model(_checked("product", [_col("id", "NUMBER", pk=True), _col("details", "BLOB")],
+                            "details IS JSON"))
+    for row in _csv(model, 5, source_dialect="oracle")["product"]:
+        json.loads(row["details"])
+
+
+def test_an_unsatisfiable_check_leaves_rows_out_and_says_so() -> None:
+    # NOT NULL: a NULL would make the CHECK unknown, which SQL accepts.
+    model = _model(_checked("t", [_col("id", "INTEGER", pk=True),
+                                  ColumnSchema(name="x", data_type="INTEGER", is_nullable=False)],
+                            "x > 10 AND x < 5"))
+    result = SyntheticSeedGenerator().generate(model, 4, "csv")
+    assert _rows(result.files["t.csv"]) == []
+    assert result.rows_skipped == {"t": 4}
+
+
+def test_a_check_between_foreign_keys_is_evaluated() -> None:
+    # Read by no value list or bound: only the evaluator can enforce it.
+    parent = _entity("part", [_col("id", "INTEGER", pk=True)])
+    bom = _entity("bom", [_col("id", "INTEGER", pk=True), _col("assembly_id", "INTEGER", fk=True),
+                          _col("component_id", "INTEGER", fk=True)])
+    bom = _checked("bom", bom.columns, "assembly_id <> component_id")
+    model = _model(parent, bom, relationships=[_rel("bom.assembly_id", "part.id"),
+                                               _rel("bom.component_id", "part.id")])
+    rows = _csv(model, 30)["bom"]
+    assert len(rows) == 30 and all(r["assembly_id"] != r["component_id"] for r in rows)
+
+
+def test_composite_keys_of_foreign_keys_are_distinct() -> None:
+    actor = _entity("actor", [_col("id", "INTEGER", pk=True)])
+    film = _entity("film", [_col("id", "INTEGER", pk=True)])
+    link = _checked("film_actor", [_col("actor_id", "INTEGER", fk=True), _col("film_id", "INTEGER", fk=True)],
+                    pk=["actor_id", "film_id"])
+    model = _model(actor, film, link, relationships=[_rel("film_actor.actor_id", "actor.id"),
+                                                     _rel("film_actor.film_id", "film.id")])
+    tables = _csv(model, 15)
+    pairs = [(r["actor_id"], r["film_id"]) for r in tables["film_actor"]]
+    assert len(pairs) == 15 and len(set(pairs)) == len(pairs)
+    assert {a for a, _ in pairs} <= {r["id"] for r in tables["actor"]}
+    assert {f for _, f in pairs} <= {r["id"] for r in tables["film"]}
+
+
+def test_unique_constraints_are_distinct() -> None:
+    model = _model(_checked("country", [_col("id", "INTEGER", pk=True), _col("code", "CHAR(2)")],
+                            unique=[["code"]]))
+    codes = [r["code"] for r in _csv(model, 40)["country"]]
+    assert len(codes) == 40 and len(set(codes)) == 40
+
+
+def test_a_self_reference_repeats_an_earlier_row() -> None:
+    employees = _entity("employees", [_col("id", "INTEGER", pk=True), _col("manager_id", "INTEGER", fk=True)])
+    model = _model(employees, relationships=[_rel("employees.manager_id", "employees.id")])
+    rows = _csv(model, 10)["employees"]
+    seen: set[str] = set()
+    for row in rows:
+        assert row["manager_id"] == "" or row["manager_id"] in seen
+        seen.add(row["id"])
+    assert rows[0]["manager_id"] == ""  # the first row has nobody to reference
+
+
+def test_a_nullable_foreign_key_breaks_a_cycle() -> None:
+    departments = _entity("departments", [_col("id", "INTEGER", pk=True), _col("manager_id", "INTEGER", fk=True)])
+    employees = _entity("employees", [_col("id", "INTEGER", pk=True),
+                                      ColumnSchema(name="department_id", data_type="INTEGER", is_foreign_key=True,
+                                                   is_nullable=False)])
+    model = _model(departments, employees, relationships=[_rel("departments.manager_id", "employees.id"),
+                                                         _rel("employees.department_id", "departments.id")])
+    result = SyntheticSeedGenerator().generate(model, 5, "csv")
+    # The NOT NULL key decides the order; the nullable one waits as NULL.
+    assert result.generation_order == ["departments", "employees"]
+    assert {r["manager_id"] for r in _rows(result.files["departments.csv"])} == {""}
+    ids = {r["id"] for r in _rows(result.files["departments.csv"])}
+    assert {r["department_id"] for r in _rows(result.files["employees.csv"])} <= ids
+
+
+def test_mixed_case_names_are_quoted() -> None:
+    model = _model(_entity("Customer", [_col("CustomerID", "INTEGER", pk=True), _col("name", "VARCHAR(20)")]))
+    script = SyntheticSeedGenerator().generate(model, 2, "sql_insert").files["seed_postgres.sql"]
+    assert 'INSERT INTO "Customer" ("CustomerID", name) VALUES' in script
+
+
+def test_values_are_generated_for_the_target_type() -> None:
+    cols = [_col("id", "UNIQUEIDENTIFIER", pk=True), _col("active", "BIT"), _col("at", "TIME"),
+            ColumnSchema(name="total", data_type="COMPUTED", computed_expression="1")]
+    model = _model(_entity("t", cols))
+    script = SyntheticSeedGenerator(source_dialect="tsql").generate(model, 3, "sql_insert").files[
+        "seed_postgres.sql"]
+    assert 'INSERT INTO t (id, active, at) VALUES' in script  # the computed column is not written
+    values = re.findall(r"\('([0-9a-f-]{36})', (TRUE|FALSE), '(\d\d:\d\d:\d\d)'\)", script)
+    assert len(values) == 3
+    # Control: without a source dialect the declared T-SQL types are used as they are.
+    declared = SyntheticSeedGenerator().generate(model, 3, "sql_insert").files["seed_postgres.sql"]
+    assert "TRUE" not in declared and "FALSE" not in declared
+
+
+# ---------------------------------------------------------------------------
 # Integration: POST /api/v1/model/{id}/export/synthetic-data
 # ---------------------------------------------------------------------------
 class _StubGateway:
@@ -231,6 +390,7 @@ async def test_synthetic_data_endpoint_returns_seed(session: AsyncSession) -> No
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["generation_order"].index("customers") < body["generation_order"].index("orders")
+    assert body["rows_skipped"] == {}
     script = body["files"]["seed_postgres.sql"]
     assert "INSERT INTO customers" in script
     assert "INSERT INTO orders" in script
