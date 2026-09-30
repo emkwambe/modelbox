@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-30 on `sprint-9/step-2c-like-patterns`, branched from
-`main` at `3f6ec41`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-30 on `sprint-9/step-3-mapping`, branched from
+`main` at `4afdccb`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,14 +9,52 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `3f6ec41` | the dbt export on imported schemas and seed data under every constraint (#30), on computed columns as PostgreSQL generated columns (#29), on type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `4afdccb` | T-SQL `LIKE` character classes kept in PostgreSQL (#31), on the dbt export on imported schemas and seed data under every constraint (#30), on computed columns as PostgreSQL generated columns (#29), on type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.12.0` | `d38d6ec` | tagged 2026-09-29 22:28 -04:00; published by the gated release workflow (run 36659993511: gate, backend and frontend images all green); verified on the published images (run 36660321337, below) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC), published by run 36516574170; superseded by v1.12.0, tag and images kept |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-9/step-2c-like-patterns` | this branch | a T-SQL `LIKE` character class keeps its meaning in PostgreSQL (below) |
-| `sprint-9/step-2b-dbt-export`, `sprint-9/step-1b-computed-columns`, `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-9/step-3-mapping` | this branch | source-to-target mapping with proposals, and the collation gap (below) |
+| `sprint-9/step-2c-like-patterns`, `sprint-9/step-2b-dbt-export`, `sprint-9/step-1b-computed-columns`, `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
-## In progress on this branch: T-SQL LIKE character classes
+## In progress on this branch: source-to-target mapping, with proposals
+
+A mapping document maps a source model's columns to a target model's. Every
+target column is one of:
+
+- **mapped**, one-to-one or many-to-one, with the transformation stated;
+- **explicitly unmapped**: a constant, derived, or not yet mapped;
+- **pending**: only proposals, no decision;
+- **silent**: nothing;
+- **in drift**: its source or target column is gone. The entry is flagged and
+  kept, never dropped.
+
+The document states "N of M target columns mapped, K explicitly unmapped, S
+silent", with accepted and pending counted separately. It is complete only
+when nothing is pending, silent or in drift.
+
+**Proposals.** ModelBox proposes candidates with a name-similarity score, a
+type-compatibility score and a confidence. A proposal counts as nothing until
+a person accepts, edits or rejects it. Every decision records who made it,
+when, and the evidence shown, in an append-only record. API keys cannot
+decide. There is a canvas panel with an editor, exports (CSV, Markdown, HTML,
+JSON) and a lineage view per target column.
+
+**Migration 0030** (additive, owner-approved) adds four mapping tables and
+the `mapping_decisions` ledger. Columns are referenced by name and stable id,
+not by foreign key, so drift is computed on read. A downgrade loses every
+mapping and keeps the decisions record, which a re-upgrade adopts. Tests:
+
+- `test_mapping` and `test_mapping_api`, where the Oracle HR import is mapped
+  to a target derived from it with every column accounted for, plus the four
+  negative controls;
+- `test_ledger_roles_postgres`;
+- `test_0030_…` in `test_migration_0015_to_head_populated`.
+
+The first commit on this branch names a `collation` export gap for a SQL
+Server model exported to PostgreSQL, on each table with text keys, a UNIQUE on
+text or a pattern CHECK (16 of AdventureWorks' 71 tables).
+
+## T-SQL LIKE character classes (on `main`, #31)
 
 A SQL Server CHECK whose `LIKE` pattern has a character class (`[A-Za-z]`,
 `[0-9]`, ranges and sets, with `%` and `_`) is written for PostgreSQL as
@@ -281,8 +319,8 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0029_computed_columns` on `main` and on this branch, which
-adds no migration (`alembic heads`).
+Migration head: `0029_computed_columns` on `main`;
+`0030_source_to_target_mapping` on this branch (`alembic heads`).
 
 ## Versions
 
