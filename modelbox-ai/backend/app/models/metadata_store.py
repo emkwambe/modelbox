@@ -251,6 +251,10 @@ class DataModel(Base):
     # of the parser, and the full report. NULL means not imported.
     reconciliation_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     import_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # SynthesizedModel.sequences: the sequences an imported file creates, as a
+    # JSON list (migration 0028). NULL for a model with none: none_as_null, so
+    # Python None is SQL NULL rather than a JSON null.
+    sequences: Mapped[list | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.current_timestamp(),
@@ -394,6 +398,11 @@ class EntityColumn(Base):
     # ColumnSchema.source_default_value: the DEFAULT as an imported file
     # declared it (migration 0025). NULL for a column that was not imported.
     source_default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ColumnSchema.identity: an identity column's generation, seed and
+    # increment, or the trigger and sequence that fill it, as JSON (migration
+    # 0028). NULL for any other column: none_as_null, so Python None is SQL
+    # NULL rather than a JSON null.
+    identity: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     # Dictionary fields a person supplies (migration 0026). NULL until someone
     # does. permissible_values is a JSON list of values; critical_data_element
     # NULL means not assessed, which is not the same as False.

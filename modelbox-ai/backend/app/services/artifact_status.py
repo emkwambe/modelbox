@@ -28,6 +28,8 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass
 
+from app.services.ddl_export import EXTENSION_OPTIONS
+
 
 class ArtifactStatus(str, enum.Enum):
     """How far the appliance has verified an artifact variant.
@@ -50,6 +52,9 @@ class ArtifactEntry:
     family: str
     status: ArtifactStatus
     reason: str
+    # Export options this variant accepts (the target's extensions, for a
+    # PostgreSQL DDL export), so the export surface offers them from here.
+    options: tuple[str, ...] = ()
 
 
 _CERTIFIED_DIALECT_REASON = (
@@ -59,7 +64,8 @@ _CERTIFIED_DIALECT_REASON = (
 
 ARTIFACT_STATUS: tuple[ArtifactEntry, ...] = (
     # --- SQL dialects -------------------------------------------------------
-    ArtifactEntry("postgres", "ddl", ArtifactStatus.CERTIFIED, _CERTIFIED_DIALECT_REASON),
+    ArtifactEntry("postgres", "ddl", ArtifactStatus.CERTIFIED, _CERTIFIED_DIALECT_REASON,
+                  options=tuple(EXTENSION_OPTIONS.values())),
     ArtifactEntry("snowflake", "ddl", ArtifactStatus.CERTIFIED, _CERTIFIED_DIALECT_REASON),
     ArtifactEntry("redshift", "ddl", ArtifactStatus.CERTIFIED, _CERTIFIED_DIALECT_REASON),
     ArtifactEntry("duckdb", "ddl", ArtifactStatus.CERTIFIED, _CERTIFIED_DIALECT_REASON),

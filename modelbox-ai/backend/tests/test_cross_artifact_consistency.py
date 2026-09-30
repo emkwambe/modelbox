@@ -262,6 +262,11 @@ EXEMPT: dict[str, str] = {
     "check_expression": "DDL CHECK and the seed generator; compared by dbt build (H11)",
     "source_data_type": "provenance of an imported column; no artifact emits it, each renders data_type",
     "source_default_value": "provenance of an imported default; artifacts render default_value",
+    # Sprint 9 Step 1a: set by the DDL importer only, and emitted by one
+    # artifact, the DDL export, which states it or names it as a gap
+    # (test_type_mappings, test_type_mappings_on_postgres). No contract format
+    # carries value generation, so there is no second projection to compare.
+    "identity": "DDL only: an imported identity's seed and increment, stated or named as a gap",
     # Sprint 8 Step 4b: dictionary fields a person supplies. Only the data
     # dictionary shows them, with each field's status (test_data_dictionary,
     # test_dictionary_verification); no contract format or DDL carries them yet,

@@ -35,8 +35,10 @@ from app.schemas.data_model import (
     ColumnSchema,
     ConversionFinding,
     EntitySchema,
+    IdentitySchema,
     Paradigm,
     RelationshipSchema,
+    SequenceSchema,
     SuggestedMetric,
     SynthesizedModel,
     SynthesizeRequest,
@@ -119,16 +121,22 @@ _SYSTEM_PROMPT = (
 PERSON_SUPPLIED_COLUMN_FIELDS = ("business_name", "permissible_values", "unit", "critical_data_element",
                                  "authoritative_source", "classification_level_id")
 PERSON_SUPPLIED_ENTITY_FIELDS = ("business_name", "business_owner", "it_steward", "authoritative_source")
+# What only an imported file declares (Sprint 9 Step 1a): how a column's values
+# are generated, and the sequences the file creates. A model that returned a
+# seed or a sequence would be inventing a physical fact the DDL export emits.
+IMPORT_ONLY_COLUMN_FIELDS = ("identity",)
 
 
 def clear_person_supplied(model: SynthesizedModel) -> SynthesizedModel:
-    """``model`` with every person-supplied dictionary field emptied."""
+    """``model`` with every person-supplied dictionary field, and everything
+    only an imported file declares, emptied."""
     for entity in model.entities:
         for name in PERSON_SUPPLIED_ENTITY_FIELDS:
             setattr(entity, name, None)
         for column in entity.columns:
-            for name in PERSON_SUPPLIED_COLUMN_FIELDS:
+            for name in (*PERSON_SUPPLIED_COLUMN_FIELDS, *IMPORT_ONLY_COLUMN_FIELDS):
                 setattr(column, name, None)
+    model.sequences = []
     return model
 
 
@@ -495,6 +503,7 @@ class SynthesisEngine:
             validation=report,
             conversion_findings=[ConversionFinding.model_validate(f) for f in findings],
             workspace_id=model.workspace_id,
+            sequences=[SequenceSchema.model_validate(s) for s in (model.sequences or [])],
         )
 
     async def _constraints(
@@ -783,6 +792,7 @@ class SynthesisEngine:
             default_value=col.default_value,
             source_data_type=col.source_data_type,
             source_default_value=col.source_default_value,
+            identity=IdentitySchema.model_validate(col.identity) if col.identity is not None else None,
             business_name=col.business_name,
             permissible_values=col.permissible_values,
             unit=col.unit,

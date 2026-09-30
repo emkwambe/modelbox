@@ -367,7 +367,55 @@ async def test_0025_converts_the_seeded_gold_models_with_nothing_to_list(upgrade
 
 async def test_the_database_reached_head(upgraded) -> None:
     rows = await _fetch(upgraded["dsn"], "SELECT version_num FROM alembic_version")
-    assert rows == [{"version_num": "0027_member_audit_actions"}]
+    assert rows == [{"version_num": "0028_identity_and_sequences"}]
+
+
+async def test_0028_new_columns_are_empty_on_existing_models(upgraded) -> None:
+    """0028 adds no backfill: no existing column is an identity, and no existing
+    model created a sequence, until an import says so."""
+    columns = await _fetch(upgraded["dsn"], "SELECT count(*) AS n, count(identity) AS i FROM entity_columns")
+    models = await _fetch(upgraded["dsn"], "SELECT count(*) AS n, count(sequences) AS s FROM data_models")
+    assert columns[0]["n"] > 0 and models[0]["n"] > 0, "fixture sanity: the seed created models and columns"
+    assert (columns[0]["i"], models[0]["s"]) == (0, 0)
+
+
+def test_0028_downgrades_and_upgrades_again(server: str) -> None:
+    """Down to 0027 drops both columns and keeps every model and column row; up
+    again adds them back, empty. On a database of its own, synchronous as the
+    0026 check is."""
+    asyncio.run(_check_0028_downgrade(_database(server, "downgrade_0028")))
+
+
+async def _check_0028_downgrade(dsn: str) -> None:
+    _upgrade_to(BACKEND, dsn, "head")
+    workspace = uuid.uuid4()
+    await _execute(dsn, "INSERT INTO workspaces (workspace_id, name) VALUES (:w, 'W')", w=workspace)
+    model = await _seed_pii(dsn, workspace)
+    # What 0028 holds, written as an import would.
+    await _execute(dsn, "UPDATE entity_columns SET identity = CAST(:i AS json) WHERE column_name = 'email'",
+                   i='{"kind": "identity", "generation": "BY DEFAULT", "on_null": false, "start": 5, '
+                     '"increment": 1, "sequence": null, "trigger": null}')
+    await _execute(dsn, "UPDATE data_models SET sequences = CAST(:s AS json) WHERE model_id = :m",
+                   s='[{"name": "public.s", "start": 1, "increment": 1, "min_value": null, "max_value": null, '
+                     '"cache": 1, "cycle": false}]', m=model)
+    held = await _fetch(dsn, "SELECT count(identity) AS i FROM entity_columns")
+    assert held[0]["i"] == 1, "fixture sanity: the identity was stored"
+    before = await _fetch(dsn, "SELECT column_id, column_name FROM entity_columns ORDER BY column_id")
+
+    result = _alembic(BACKEND, dsn, "downgrade", "0027_member_audit_actions")
+    assert result.returncode == 0, result.stderr[-3000:]
+    assert await _fetch(dsn, "SELECT version_num FROM alembic_version") == [
+        {"version_num": "0027_member_audit_actions"}]
+    added = await _fetch(dsn, "SELECT table_name, column_name FROM information_schema.columns WHERE "
+                              "(table_name = 'entity_columns' AND column_name = 'identity') OR "
+                              "(table_name = 'data_models' AND column_name = 'sequences')")
+    assert added == []
+    assert await _fetch(dsn, "SELECT column_id, column_name FROM entity_columns ORDER BY column_id") == before
+    assert (await _fetch(dsn, "SELECT count(*) AS n FROM data_models WHERE model_id = :m", m=model))[0]["n"] == 1
+
+    _upgrade_to(BACKEND, dsn, "head")
+    back = await _fetch(dsn, "SELECT count(identity) AS i FROM entity_columns")
+    assert back[0]["i"] == 0, "a downgrade loses what 0028 held; the upgrade does not invent it"
 
 
 def test_0027_accepts_the_member_actions_it_restores(server: str) -> None:

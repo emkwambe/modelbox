@@ -34,6 +34,7 @@ async def list_artifact_status(_user: AuthenticatedDep) -> list[ArtifactStatusOu
             family=entry.family,
             status=entry.status.value,
             reason=entry.reason,
+            options=list(entry.options),
         )
         for entry in ARTIFACT_STATUS
     ]
