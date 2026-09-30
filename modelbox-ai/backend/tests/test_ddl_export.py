@@ -233,6 +233,53 @@ def test_oracle_star_precision_is_written_as_38() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Collation: text comparison may differ (Sprint 9 Step 3, owner's decision)
+# ---------------------------------------------------------------------------
+_COLLATION_GRAPH = {
+    "entities": [
+        {"entity_name": "Country", "columns": [{"name": "Code", "data_type": "NVARCHAR(3)"},
+                                               {"name": "Name", "data_type": "NVARCHAR(50)"}],
+         "primary_key": ["Code"], "unique_constraints": [{"columns": ["Name"]}]},
+        {"entity_name": "Bin", "columns": [{"name": "BinID", "data_type": "INT"},
+                                           {"name": "Country", "data_type": "NVARCHAR(3)"},
+                                           {"name": "Shelf", "data_type": "NVARCHAR(10)"}],
+         "primary_key": ["BinID"],
+         "check_constraints": [{"expression": "[Shelf] LIKE '[A-Z]%'"}]},
+        {"entity_name": "Counter", "columns": [{"name": "CounterID", "data_type": "INT"},
+                                               {"name": "Total", "data_type": "INT"}],
+         "primary_key": ["CounterID"], "check_constraints": [{"expression": "[Total] >= 0"}]},
+    ],
+    "relationships": [{"from": "Bin", "to": "Country", "cardinality": "N:1",
+                       "from_columns": ["Country"], "to_columns": ["Code"]}],
+}
+
+
+def _collation(source: str, target: str = "postgres") -> dict[str, str]:
+    export = ExporterService(source_dialect=source).generate_ddl_export(_model(_COLLATION_GRAPH), target)
+    return {g.entity or "": g.detail for g in export.gaps if g.kind == "collation"}
+
+
+def test_sql_server_text_comparisons_are_a_named_collation_gap_in_postgres() -> None:
+    gaps = _collation("tsql")
+    assert set(gaps) == {"Country", "Bin"}  # one per table, only where text is compared
+    assert gaps["Country"].endswith("PRIMARY KEY (Code); UNIQUE (Name)")
+    assert gaps["Bin"].endswith("CHECK ([Shelf] LIKE '[A-Z]%'); FOREIGN KEY (Country) -> Country")
+    assert "'abc' beside 'ABC'" in gaps["Country"] and "stricter" in gaps["Country"]
+    # Control: an integer key and a numeric CHECK compare no text.
+    assert "Counter" not in gaps
+
+
+def test_no_collation_gap_where_source_and_target_compare_alike() -> None:
+    # Controls: the same text keys from PostgreSQL, and SQL Server to another target.
+    graph = json.loads(json.dumps(_COLLATION_GRAPH).replace("NVARCHAR", "VARCHAR"))
+    graph["entities"][1]["check_constraints"] = [{"expression": "shelf_code LIKE 'A%'"}]
+    graph["entities"][1]["columns"].append({"name": "shelf_code", "data_type": "VARCHAR(10)"})
+    export = ExporterService(source_dialect="postgres").generate_ddl_export(_model(graph), "postgres")
+    assert not [g for g in export.gaps if g.kind == "collation"]
+    assert _collation("tsql", "duckdb") == {}
+
+
+# ---------------------------------------------------------------------------
 # T-SQL LIKE character classes (Sprint 9 Step 2c)
 # ---------------------------------------------------------------------------
 def _similar_to(condition: str) -> list[tuple[str, bool]]:

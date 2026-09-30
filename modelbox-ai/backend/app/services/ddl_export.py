@@ -242,6 +242,21 @@ def _translate_tsql_like(condition: exp.Expression, target: str) -> tuple[exp.Ex
     return condition, None
 
 
+# Text comparison that may differ between source and target (owner,
+# 2026-09-30). SQL Server compares text as the column's collation says, and its
+# default collations are case-insensitive; PostgreSQL's default comparison is
+# case-sensitive. The model does not hold the source's collation, so every key,
+# UNIQUE and pattern CHECK on text is named, once per table.
+_COLLATION_DIFFERS: dict[tuple[str, str], str] = {
+    ("tsql", "postgres"): (
+        "SQL Server compares text as the column's collation says, case-insensitively under its default "
+        "collations, and PostgreSQL compares it case-sensitively, so these may behave differently in both "
+        "directions: a UNIQUE or key that refuses 'abc' beside 'ABC' in SQL Server accepts both in PostgreSQL, "
+        "and a pattern or = comparison can be stricter. The model does not hold the source's collation: "),
+}
+_LIKE_WORD = re.compile(r"\bLIKE\b", re.IGNORECASE)
+
+
 # Types a target has no exact equivalent for, after sqlglot's translation:
 # (type -> replacement, or None to keep it) and what the gap says. Each use is
 # an export gap; nothing is widened or dropped silently.
@@ -869,6 +884,7 @@ def build_ddl(model: SynthesizedModel, target: str, source: str,
         if not isinstance(tree, exp.Create) or not isinstance(tree.this, exp.Schema):
             raise DdlExportError(f"table '{name}' did not parse as one CREATE TABLE")
         flags: set[str] = set()  # columns now BOOLEAN, whose 0 and 1 are FALSE and TRUE
+        compared: list[str] = []  # keys, UNIQUEs and pattern CHECKs on text (the collation gap)
         for column_def in tree.this.expressions:
             generated_column = plans.get((name, column_def.name))
             if isinstance(generated_column, GeneratedColumn):
@@ -882,6 +898,8 @@ def build_ddl(model: SynthesizedModel, target: str, source: str,
                 flags.add(column_def.name)
             if column_def.name in by_column:
                 _state_identity(column_def, by_column[column_def.name], name, target, gaps, generated, taken)
+        text = {d.name for d in tree.this.expressions if isinstance(d, exp.ColumnDef)
+                and isinstance(d.args.get("kind"), exp.DataType) and d.args["kind"].is_type(*exp.DataType.TEXT_TYPES)}
 
         clauses: list[str] = []
         if entity.primary_key:
@@ -889,6 +907,8 @@ def build_ddl(model: SynthesizedModel, target: str, source: str,
                 gaps.append(ExportGap("primary_key", name, f"its columns {missing} are not emitted"))
             else:
                 clauses.append(f"PRIMARY KEY ({_columns(entity.primary_key)})")
+                if text & set(entity.primary_key):
+                    compared.append(f"PRIMARY KEY ({', '.join(entity.primary_key)})")
         for unique in entity.unique_constraints:
             label = f"UNIQUE ({', '.join(unique.columns)})"
             if "unique" not in can:
@@ -897,6 +917,8 @@ def build_ddl(model: SynthesizedModel, target: str, source: str,
                 gaps.append(ExportGap("unique_constraint", name, f"{label}: columns {missing} are not emitted"))
             else:
                 clauses.append(f"{_named(unique.name)}UNIQUE ({_columns(unique.columns)})")
+                if text & set(unique.columns):
+                    compared.append(label)
         for check in entity.check_constraints:
             label = f"CHECK ({check.expression})"
             if "check" not in can:
@@ -910,9 +932,13 @@ def build_ddl(model: SynthesizedModel, target: str, source: str,
                     gaps.append(ExportGap("check_constraint", name, f"{label} {problem}"))
                 else:
                     clauses.append(f"{_named(check.name)}CHECK ({condition})")
+                    if _LIKE_WORD.search(check.expression):
+                        compared.append(label)
         for rel in model.relationships:
             if rel.from_ref != name or (clause := _foreign_key(rel, entity_columns, gaps)) is None:
                 continue
+            if text & set(rel.from_columns):
+                compared.append(f"FOREIGN KEY ({', '.join(rel.from_columns)}) -> {rel.to_ref}")
             if rel.to_ref in created or rel.to_ref == name:
                 clauses.append(f"{_named(rel.name)}{clause}")
             elif target in _ALTER_ADDS_FOREIGN_KEYS:
@@ -928,6 +954,8 @@ def build_ddl(model: SynthesizedModel, target: str, source: str,
                                                            "table exists"))
         for clause in clauses:
             tree.this.append("expressions", _constraint_node(clause, target))
+        if compared and (source, target) in _COLLATION_DIFFERS:
+            gaps.append(ExportGap("collation", name, _COLLATION_DIFFERS[(source, target)] + "; ".join(compared)))
         tables.append(tree.sql(dialect=target, pretty=True))
         created.add(name)
 

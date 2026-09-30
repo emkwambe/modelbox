@@ -274,6 +274,12 @@ Open **Export artifacts** on the canvas. Tabs:
     (a negated class `[^…]`, an `ESCAPE` clause, or a character `SIMILAR TO`
     treats as special) makes the CHECK an export gap that quotes it. Other
     targets name every such CHECK as a gap.
+  - Collation is not in the model. SQL Server's default collations compare
+    text case-insensitively and PostgreSQL compares it case-sensitively, so
+    each table with a text primary or foreign key, a UNIQUE constraint on
+    text, or a `LIKE` CHECK is listed as a `collation` export gap naming
+    them. For example, a UNIQUE that refuses `'abc'` beside `'ABC'` in SQL
+    Server accepts both in PostgreSQL.
 
   For **dbt**, choose the warehouse the project will run on. Each staging
   model casts its columns to the types the DDL export writes for that dialect,
