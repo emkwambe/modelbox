@@ -53,7 +53,7 @@ and a table's second foreign key to the same table, or one to itself, is named
 after its column and listed as an export gap instead of joining. Each `expr`
 keeps the column's own name, so the SQL it reads is unchanged, and
 `EXPORT_NOTES.md` lists the changes. **The reference models are unchanged**:
-their names were already valid. Before this release, such an export was
+their names were already valid. Before this fix, such an export was
 refused by `dbt parse` once a table had an aggregation time column.
 
 **(b) dbt exports with no dialect named are cast to Snowflake types.** A dbt
