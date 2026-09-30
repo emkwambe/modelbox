@@ -42,14 +42,15 @@ progress.
 |---|---|
 | `test_conformance_metric.py` | **A total rename scores 0.000.** A model identical to gold in every entity, type, key and relationship, differing only in vocabulary, is scored as having produced nothing. |
 | `test_metric_negative_controls.py` | **F1 is insensitive to deletion on large graphs.** Dropping 2 of 12 entities from the AML model scores entity F1 **0.909**; the same proportional loss on a three-entity graph scores 0.500. |
-| `test_suggestions_api.py` | **SQL Server `money` columns are not measures in a semantic-layer export.** The exporter's numeric test does not read `MONEY`, so once AdventureWorks' SalesOrderHeader has a time column, its `SubTotal`, `TaxAmt` and `Freight` are categorical dimensions, and its measures are the row count, `RevisionNumber` and `Status` (`test_money_amounts_are_measures_once_a_time_column_is_confirmed`, strict, on MetricFlow). The same numeric test decides the Cube and LookML measures. Found in Sprint 9 Step 4; not fixed there. |
+| ~~`test_suggestions_api.py`~~ | ~~**SQL Server `money` columns are not measures in a semantic-layer export.**~~ **Fixed in Sprint 9 Step 5a.1:** the semantic exporters read the shared type family, so money types are numeric, and keys and integer codes are not summed; the test is a regression test now, and `test_semantic_measures.py` carries the evidence. |
 
 **The fidelity harness's non-preview burn-down is empty.** On `main`'s CI run
 36519786048 the harness reported 276 passed, 5 skipped, 22 xfailed, and every
 one of the 22 is marked `preview`: 18 are the BigQuery, ClickHouse and
 Databricks grammar cases (H3/Q4, labelled Preview and not scheduled for repair)
 and 4 are LookML (M3). B6, H11, H12 and M14, open on 2026-09-03, no longer
-appear.
+appear. **Since Sprint 9 Step 5a.1 the 4 LookML cases pass** (M3 fixed: no
+semantic exporter sums a key or a foreign key), so 18 preview xfails remain.
 
 ---
 

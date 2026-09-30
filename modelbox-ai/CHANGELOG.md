@@ -20,6 +20,10 @@ to 0031, run by the migrate service on start, with no required configuration cha
 - **Source-to-target mapping:** every target column is accounted for, with proposals a
   person decides, an append-only decisions record, exports in four formats, lineage, and
   a canvas panel.
+- **Semantic exports:** money types are summed as measures, and keys and integer codes are
+  not, with each choice listed in `EXPORT_NOTES.md`. An imported schema's MetricFlow semantic
+  model is accepted by `dbt parse`: names in lower snake case, collisions renamed and noted,
+  and a join MetricFlow cannot state named as an export gap.
 - **Suggestions:** PII categories and aggregation time columns suggested by named rules,
   stored beside the model, decided by a person; client rules with `PII_RULES_PATH`.
 - **Rollback:** a tested downgrade to v1.12.0, with what it loses and keeps listed in the

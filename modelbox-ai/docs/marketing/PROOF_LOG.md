@@ -534,14 +534,32 @@ The distinction between parsing and resolving is the whole point.
 that parses while pointing at a model name the project never emits is a file
 that satisfies a parser and breaks a warehouse.
 
-**Honest limit:** **LookML is excluded and is not covered by this claim.** It
-carries `@pytest.mark.preview` and a live defect (`M3` — `SUM()` emitted over a
-foreign key), and preview dialects are labelled rather than scheduled. "Semantic
-layer" here means MetricFlow and Cube. `dbt parse` also resolves rather than
-executes: it proves the project is coherent, not that a metric returns the
-number a business expects.
+**Imported schemas, since Sprint 9:** the evidence above covered the reference
+models only. On an imported schema with a time column chosen, dbt refused the
+MetricFlow semantic model, because dbt checks it in full only once it has
+measures. `test_artifact_fidelity.py::test_metricflow_for_an_imported_schema_with_time_columns_parses_in_dbt`
+now exports each certified import (Oracle HR, Oracle CO, Pagila,
+AdventureWorks) with a time column confirmed on every table that has one, and
+requires `dbt parse` to accept it; the negative control
+`::test_negative_control_without_the_rename_dbt_refuses_adventureworks` shows
+the check can fail. To be accepted, names are written as MetricFlow requires,
+in lower snake case, and a name that would collide is given its table's name.
+Every such rename is listed in `EXPORT_NOTES.md` beside the file, and each
+`expr` keeps the column's own name. A join MetricFlow cannot state, such as a
+second foreign key to the same table, is a named export gap, never an
+invented join. Money columns are summed as measures, and keys and integer
+codes are not (`test_semantic_measures.py`).
 
-**Verified:** 2026-09-01 · **Sprint:** 3 (fix), 6 (claimed) · **Version:** 1.10.0
+**Honest limit:** **LookML is excluded and is not covered by this claim.** It
+carries `@pytest.mark.preview`, because no offline parser exists to check it,
+and preview dialects are labelled rather than scheduled. Its defect `M3`
+(`SUM()` emitted over a foreign key) was fixed in Sprint 9, by the rule that
+decides what every semantic exporter sums. "Semantic layer" here means
+MetricFlow and Cube. `dbt parse` also resolves rather than executes: it proves
+the project is coherent, not that a metric returns the number a business
+expects.
+
+**Verified:** 2026-09-01, imported schemas 2026-09-30 · **Sprint:** 3 (fix), 6 (claimed), 9 · **Version:** 1.10.0
 **Expires:** if any MetricFlow or Cube test regains an xfail, or if LookML is
 folded into the claim without leaving preview.
 **Usable in:** landing page, semantic-layer positioning, export UI.
@@ -1244,6 +1262,7 @@ real credentials and read stored rows back by SQL):
 | A suggestion never reaches "verified" without an approver; no credentials, a viewer, an API key, or a body naming a status or decider is refused | `test_suggestions_api.py::test_a_suggestion_never_reaches_verified_without_an_approver` |
 | The database refuses a verified or non-heuristic suggestion | `test_suggestions_api.py::test_negative_control_the_database_refuses_a_verified_or_non_heuristic_suggestion`; on PostgreSQL, `test_migration_0015_to_head_populated.py::test_0031_downgrade_clears_only_the_newer_pii_types_and_lists_each` |
 | AdventureWorks gets MetricFlow measures only after a person confirms its time column | `test_suggestions_api.py::test_adventureworks_gets_metricflow_measures_only_after_a_person_confirms_the_time_column` |
+| With time columns confirmed, each certified import's semantic model is accepted by `dbt parse` (PL-011) | `test_artifact_fidelity.py::test_metricflow_for_an_imported_schema_with_time_columns_parses_in_dbt` |
 | A bad client rules file stops the backend | `test_suggestion_rules.py::test_the_backend_does_not_start_on_a_bad_rules_file`; control `test_control_the_backend_starts_on_a_good_rules_file` |
 
 **Honest limits:**
@@ -1270,7 +1289,7 @@ passes.
 
 | Prospective claim | Blocked on | Sprint |
 | :-- | :-- | :-- |
-| ~~"Semantic layer exports compile in dbt"~~ **now PL-011** (2026-09-01), scoped: MetricFlow and Cube only. **LookML is still blocked** — `@preview`, defect M3 | — | 3 |
+| ~~"Semantic layer exports compile in dbt"~~ **now PL-011** (2026-09-01), scoped: MetricFlow and Cube only. **LookML is still blocked**: `@preview`, no offline parser (its defect M3 was fixed in Sprint 9) | — | 3 |
 | ~~"Data contracts are wire-stable"~~ **now PL-012** (2026-09-01), scoped to Protobuf tag stability across a column *insert*; Avro parses but its compatibility rules are not asserted | — | 3 |
 | ~~"Our contracts are valid ODCS"~~ **now PL-013** (2026-09-01), with conformance and correctness asserted separately (register B15) | — | 3 |
 | ~~"Generated test data satisfies the generated contract"~~ **now PL-014** (2026-09-01) | — | 4 |
