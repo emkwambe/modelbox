@@ -3,11 +3,14 @@
 One entry per version. Each release's full notes, breaking changes and upgrade
 steps are in `docs/RELEASE_NOTES_v<version>.md`; this file is the index.
 
-## Unreleased (for v1.13.0)
+## v1.13.0 — 2026-09-30
 
-Draft notes: [`docs/RELEASE_NOTES_v1.13.0-draft.md`](docs/RELEASE_NOTES_v1.13.0-draft.md).
-Sprint 9, pull requests #27 to #33 and the claims-and-records change; migrations 0028
+Full notes: [`docs/RELEASE_NOTES_v1.13.0.md`](docs/RELEASE_NOTES_v1.13.0.md).
+Sprint 9, pull requests #27 to #35 and the release preparation; migrations 0028
 to 0031, run by the migrate service on start, with no required configuration change.
+Supersedes v1.12.0. **Compatibility:** an imported schema's MetricFlow names may change,
+dbt exports with no dialect named are cast to Snowflake types, and semantic exports sum
+money columns and not keys or codes (the notes' "Compatibility" section).
 
 - **Exports to PostgreSQL:** SQL Server and Oracle types, identities and sequences carry
   over; computed columns become generated columns where their expression does; a T-SQL

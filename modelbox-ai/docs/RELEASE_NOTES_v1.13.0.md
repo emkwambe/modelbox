@@ -1,9 +1,9 @@
-# ModelBox AI — v1.13.0 Release Notes (draft)
+# ModelBox AI — v1.13.0 Release Notes
 
-**Draft.** Not tagged. It becomes `RELEASE_NOTES_v1.13.0.md` in the release
-preparation.  ·  **Carries:** Sprint 9, merged to `main` in pull requests #27
-to #33 and the claims-and-records change that follows them  ·  **Supersedes:**
-v1.12.0.
+**Tag:** `v1.13.0`, on `main`, published by the gated release workflow  ·
+**Carries:** Sprint 9, merged to `main` in pull requests #27 to #35 and the
+release-preparation change that set every version stamp to 1.13.0  ·
+**Supersedes:** v1.12.0.
 
 **This release finishes the engagement's deliverables and keeps SQL Server and
 Oracle models' meaning when they are exported to PostgreSQL.** A
@@ -12,7 +12,8 @@ decision in it is a person's. Types, identities, sequences, computed columns
 and pattern checks carry over to PostgreSQL where they can, and are named where
 they cannot. ModelBox suggests which columns hold PII, and which column each
 table's measures should be aggregated over, and a person decides each
-suggestion.
+suggestion. Semantic-layer exports sum money columns and not keys or codes,
+and an imported schema's MetricFlow semantic model is accepted by dbt.
 
 ---
 
@@ -36,14 +37,37 @@ suggestion.
 
 ---
 
-## A change to note: the dbt export's types follow the chosen warehouse
+## Compatibility: exports that change
 
-A dbt project's staging models now cast each column to its type in the
-warehouse the project runs on, as the DDL export writes it for that dialect.
-The export's `dialect` parameter defaults to `snowflake`, so **a dbt export
-that names no dialect is cast to Snowflake types**; in v1.12.0 it cast to the
-types the source declared. Choose the warehouse when you export, in the export
-panel or with `dialect=`. Names that are not lower snake case are now quoted.
+Three changes alter files an existing consumer may already use. Re-export, and
+check anything that reads these files by name.
+
+**(a) Semantic exports of imported schemas use valid MetricFlow names, so names
+may change.** MetricFlow accepts only lower snake case names, and an imported
+schema's names are the source's own. A MetricFlow export of an imported schema
+now writes them in lower snake case (`SalesOrderHeader` becomes
+`sales_order_header`). A name that would collide takes its table's name (the
+dimension over `SalesOrderDetail.ProductID` becomes
+`sales_order_detail_product_id`), a repeated measure takes its table's name,
+and a table's second foreign key to the same table, or one to itself, is named
+after its column and listed as an export gap instead of joining. Each `expr`
+keeps the column's own name, so the SQL it reads is unchanged, and
+`EXPORT_NOTES.md` lists the changes. **The reference models are unchanged**:
+their names were already valid. Before this fix, such an export was
+refused by `dbt parse` once a table had an aggregation time column.
+
+**(b) dbt exports with no dialect named are cast to Snowflake types.** A dbt
+project's staging models now cast each column to its type in the warehouse the
+project runs on, as the DDL export writes it for that dialect. The export's
+`dialect` parameter defaults to `snowflake`, so a dbt export that names no
+dialect is cast to Snowflake types; in v1.12.0 it cast to the types the source
+declared. Choose the warehouse when you export, in the export panel or with
+`dialect=`. Names that are not lower snake case are now quoted.
+
+**(c) Which columns are measures changes in semantic exports.** Money columns
+are now summed as measures, and keys, foreign keys and integer codes are
+dimensions (below). A MetricFlow, Cube or LookML export can therefore gain
+measures over amounts and lose measures it had over codes and keys.
 
 ---
 
@@ -217,3 +241,5 @@ read from the migrations' downgrade steps.
 - **Mapping transformations are recorded, not run**, and mapping columns are
   picked from lists, not on the canvas.
 - **OIDC sign-in in the UI is not built.** Server verification exists.
+- **LookML stays Preview.** No offline parser exists to check it; the Cube and
+  MetricFlow exports are the ones checked by their tools.

@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-30 on `sprint-9/step-5a1-money-measures`, branched
-from `main` at `ce99ef6`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-30 on `release/v1.13.0`, branched from `main` at
+`e0b7275`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,14 +9,24 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `ce99ef6` | claims, a tested rollback to v1.12.0 and the records for v1.13.0 (#34), on PII and aggregation-time suggestions (#33), on source-to-target mapping with proposals, and the collation gap (#32), on T-SQL `LIKE` character classes kept in PostgreSQL (#31), on the dbt export on imported schemas and seed data under every constraint (#30), on computed columns as PostgreSQL generated columns (#29), on type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `e0b7275` | what the semantic exports sum, and MetricFlow on imported schemas (#35), on claims, a tested rollback to v1.12.0 and the records for v1.13.0 (#34), on PII and aggregation-time suggestions (#33), on source-to-target mapping with proposals, and the collation gap (#32), on T-SQL `LIKE` character classes kept in PostgreSQL (#31), on the dbt export on imported schemas and seed data under every constraint (#30), on computed columns as PostgreSQL generated columns (#29), on type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.12.0` | `d38d6ec` | tagged 2026-09-29 22:28 -04:00; published by the gated release workflow (run 36659993511: gate, backend and frontend images all green); verified on the published images (run 36660321337, below) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC), published by run 36516574170; superseded by v1.12.0, tag and images kept |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-9/step-5a1-money-measures` | this branch | what the semantic exports sum, and MetricFlow on imported schemas (below) |
-| `sprint-9/step-5a-claims-and-records`, `sprint-9/step-4-suggestions`, `sprint-9/step-3-mapping`, `sprint-9/step-2c-like-patterns`, `sprint-9/step-2b-dbt-export`, `sprint-9/step-1b-computed-columns`, `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `release/v1.13.0` | this branch | the v1.13.0 release preparation (below) |
+| `sprint-9/step-5a1-money-measures`, `sprint-9/step-5a-claims-and-records`, `sprint-9/step-4-suggestions`, `sprint-9/step-3-mapping`, `sprint-9/step-2c-like-patterns`, `sprint-9/step-2b-dbt-export`, `sprint-9/step-1b-computed-columns`, `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
-## In progress on this branch: what the semantic exports sum, and MetricFlow on imported schemas
+## In progress on this branch: the v1.13.0 release preparation
+
+Every version stamp reads 1.13.0 (`scripts/check_versions.py`: all version
+stamps agree), `docs/RELEASE_NOTES_v1.13.0.md` is final (with a Compatibility
+section: an imported schema's MetricFlow names may change, dbt exports with no
+dialect named are cast to Snowflake types, and which columns are measures
+changes), and the CHANGELOG's v1.13.0 entry is dated 2026-09-30. After the
+merge, the owner tags `v1.13.0`; the gated release publishes the images, and
+Verify Release runs the black-box suite against them.
+
+## What the semantic exports sum, and MetricFlow on imported schemas (on `main`, #35)
 
 - **Money is numeric.** The MetricFlow, Cube and LookML exporters read the
   shared type family (`app.schemas.data_model.type_family`), so SQL Server
@@ -50,9 +60,8 @@ AdventureWorks' SalesOrderHeader, with OrderDate confirmed: `SubTotal`,
   add, downgraded to `0027_member_audit_actions`, and run by v1.12.0's
   published images, which serve `/health` and read the models. What is lost
   and kept is asserted by SQL and stated in the notes.
-- **Records:** `docs/RELEASE_NOTES_v1.13.0-draft.md`, the CHANGELOG's
-  "Unreleased (for v1.13.0)", the register's G8 row, and OUTSTANDING_ISSUES.
-  No version stamp changes here.
+- **Records:** the v1.13.0 release notes (then a draft, final on the release
+  branch), the CHANGELOG, the register's G8 row, and OUTSTANDING_ISSUES.
 
 ## PII and aggregation-time suggestions (on `main`, #33)
 
@@ -397,8 +406,9 @@ Migration head: `0031_suggestions` on `main` and this branch (`alembic heads`).
 
 ## Versions
 
-- Latest tag on the remote: **`v1.12.0`**, at `d38d6ec`.
-- Version stamp in the code: **1.12.0** on `main` and this branch
+- Latest tag on the remote: **`v1.12.0`**, at `d38d6ec`. `v1.13.0` is tagged by
+  the owner after this branch merges.
+- Version stamp in the code: **1.13.0** on this branch, **1.12.0** on `main`
   (`scripts/check_versions.py`: all version stamps agree).
 - Published images: `ghcr.io/emkwambe/modelbox-backend` and
   `ghcr.io/emkwambe/modelbox-frontend`, `1.12.0` (also `1.12` and `latest`).
@@ -413,6 +423,18 @@ v1.12.0 is the release to use.
 
 Sprint prompts, sprint plans and research documents moved out of this
 repository on 2026-09-28. Git history is unchanged.
+
+## What v1.13.0 ships
+
+The sections above for Sprint 9: exports to PostgreSQL that keep types,
+identities, sequences, computed columns and `LIKE` patterns, or name what they
+cannot, and name the collation gap; dbt projects that build on PostgreSQL for
+imported schemas, with seed data under every constraint; source-to-target
+mapping with proposals a person decides and an append-only decisions record;
+PII and aggregation-time suggestions; semantic exports that sum money and not
+keys or codes, with MetricFlow accepted by dbt for imported schemas; and a
+tested rollback to v1.12.0. Upgrading runs migrations 0028–0031 through the
+migrate service. Notes: `docs/RELEASE_NOTES_v1.13.0.md`. Index: `CHANGELOG.md`.
 
 ## What v1.12.0 ships
 
