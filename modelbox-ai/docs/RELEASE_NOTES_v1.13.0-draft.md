@@ -124,6 +124,26 @@ PL-028).
   once a person has chosen its time column. Clients can add rules with
   `PII_RULES_PATH`. A **Suggestions** panel on the canvas (PL-030).
 
+### Semantic-layer exports: what is summed, and MetricFlow on imported schemas
+
+- **Money columns are measures.** SQL Server `money` and `smallmoney` and
+  PostgreSQL `money` are read as numeric in the MetricFlow, Cube and LookML
+  exports, so an amount is summed. Earlier releases wrote such a column as a
+  dimension.
+- **Codes are not summed.** Keys, foreign keys and integer codes (an integer
+  with permissible values, a CHECK allowing few values, or a name that reads
+  as a code or an identifier, such as `Status` or `RevisionNumber`) are
+  dimensions. A column declared a metric is still a measure unless it is a
+  key. `EXPORT_NOTES.md`, beside the exported files, lists each such column
+  and why.
+- **MetricFlow accepts an imported schema's semantic model.** Names are written
+  in lower snake case, as MetricFlow requires, and a name that would collide is
+  given its table's name; each `expr` keeps the column's own name, and the
+  notes list the changes. A second foreign key to the same table, or one to the
+  table itself, is named after its column and listed as an export gap rather
+  than joined. `dbt parse` accepts the semantic model of each certified import
+  with its time columns confirmed, in CI (PL-011).
+
 ### Verified in CI
 
 - **The rollback below** runs on every change: the database is downgraded to
@@ -191,9 +211,6 @@ read from the migrations' downgrade steps.
 
 ## Known limits
 
-- **SQL Server `money` columns are not measures in a semantic-layer export.**
-  The semantic exporters do not read `MONEY` as numeric, so such an amount is a
-  dimension (OUTSTANDING_ISSUES; a strict failing test records it).
 - **Collation is not captured**, only named as a gap.
 - **Snowflake import is not certified.** Its fixture is written from
   documentation.

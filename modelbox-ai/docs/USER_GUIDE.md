@@ -305,8 +305,24 @@ Open **Export artifacts** on the canvas. Tabs:
   still join). What MetricFlow cannot state is an **export gap**, listed at the
   head of `semantic_models.yml` and in `EXPORT_GAPS.md`: a composite foreign
   key (no join), a composite primary key (nothing joins to it by that key), a
-  one-column key that is also a foreign key (its join is not stated), and a
-  relationship whose columns were never chosen.
+  one-column key that is also a foreign key (its join is not stated), a second
+  foreign key to the same table or one to the table itself (named after its
+  column, so it does not join), and a relationship whose columns were never
+  chosen.
+
+  **What is summed.** Numeric columns, money types included, are measures.
+  Keys, foreign keys and integer codes are dimensions, never summed: an integer
+  with permissible values, a CHECK allowing few values, or a name that reads as
+  a code or an identifier (`Status`, `TypeCode`, `RevisionNumber`). A column
+  you declare a metric is a measure unless it is a key. In MetricFlow a table
+  has measures only once its aggregation time column is chosen.
+
+  **Names.** MetricFlow names are lower snake case, so an imported schema's
+  names are written that way (`SalesOrderHeader` as `sales_order_header`),
+  and a name that would collide is given its table's name. Each `expr` keeps
+  the column's own name. `EXPORT_NOTES.md`, beside the files, lists every
+  column that is not summed and why, says how many names were written in
+  snake case, and lists each name changed to avoid a collision.
 
 **API:** `GET /api/v1/model/{id}/export?format=…`,
 `…/export/contract?format=…`, `…/export/semantic?engine=…`.

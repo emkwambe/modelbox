@@ -405,26 +405,25 @@ async def test_adventureworks_gets_metricflow_measures_only_after_a_person_confi
                                headers=bearer(world["member"])), 200)
         confirmed = await _metricflow(c, world, model)
 
-    before = _semantic_model(imported, "SalesOrderHeader")
+    # MetricFlow names are lower snake case (Step 5a.1); each expr is the column's own name.
+    before = _semantic_model(imported, "sales_order_header")
     assert "measures" not in before and "defaults" not in before, "an import declares no measures"
     # Control: a pending suggestion is not a confirmation.
     assert pending == imported
-    after = _semantic_model(confirmed, "SalesOrderHeader")
-    assert after["defaults"] == {"agg_time_dimension": "OrderDate"}
+    after = _semantic_model(confirmed, "sales_order_header")
+    assert after["defaults"] == {"agg_time_dimension": "order_date"}
     # The count measure is emitted exactly when the entity has a time axis.
-    assert {"name": "SalesOrderHeader_count", "agg": "count", "expr": "1"} in after["measures"]
+    assert {"name": "sales_order_header_count", "agg": "count", "expr": "1"} in after["measures"]
     # Only the entity a person confirmed.
-    assert "measures" not in _semantic_model(confirmed, "SalesOrderDetail")
+    assert "measures" not in _semantic_model(confirmed, "sales_order_detail")
     assert await _rows(session, "SELECT entity_name, agg_time_column FROM model_entities "
                                 "WHERE agg_time_column IS NOT NULL") == [
         {"entity_name": "SalesOrderHeader", "agg_time_column": "OrderDate"}]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Pre-existing, found in Sprint 9 Step 4: ExporterService._is_numeric does not read MONEY as numeric, so "
-    "SalesOrderHeader's SubTotal, TaxAmt and Freight are categorical dimensions in the MetricFlow export, "
-    "not measures. Not fixed here (the owner decides); strict, so a fix turns this red until the marker goes."))
 def test_money_amounts_are_measures_once_a_time_column_is_confirmed() -> None:
+    """Found in Step 4 as a strict xfail (MONEY was not numeric in the semantic
+    exporters); fixed in Step 5a.1, see test_semantic_measures.py."""
     from app.services.ddl_import.importer import import_ddl
     from app.services.exporter_service import ExporterService
 
@@ -432,5 +431,5 @@ def test_money_amounts_are_measures_once_a_time_column_is_confirmed() -> None:
     header = next(e for e in model.entities if e.entity_name == "SalesOrderHeader")
     header.agg_time_column = "OrderDate"
     files = ExporterService().export_semantic_layer(model, "metricflow")
-    measures = {m["expr"] for m in _semantic_model(files, "SalesOrderHeader")["measures"]}
+    measures = {m["expr"] for m in _semantic_model(files, "sales_order_header")["measures"]}
     assert {"SubTotal", "TaxAmt", "Freight"} <= measures

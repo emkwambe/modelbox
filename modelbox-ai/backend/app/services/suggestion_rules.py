@@ -48,13 +48,14 @@ from app.schemas.data_model import (
     SynthesizedModel,
     _is_temporal_type,
 )
+from app.schemas.data_model import type_family as shared_type_family
 
 #: Bumped when a built-in rule changes, so an old suggestion shows it came
 #: from an older rule set (its ``ruleset_digest`` differs too).
 RULESET_VERSION = "1"
 
 Signal = Literal["name", "comment", "check"]
-TypeFamily = Literal["text", "numeric", "temporal", "binary", "other"]
+TypeFamily = Literal["text", "numeric", "temporal", "binary", "boolean", "other"]
 
 NIST = "NIST SP 800-122 §2.2"
 GLBA = "15 U.S.C. § 6809(4)(A) (GLBA nonpublic personal information)"
@@ -157,23 +158,9 @@ def comment_match(phrase: tuple[str, ...], tokens: tuple[str, ...]) -> bool:
     return any(not tail or tail[0] not in QUALIFIERS for tail in _tails(phrase, tokens))
 
 
-_NUMERIC = re.compile(r"\b(TINYINT|SMALLINT|INT\d*|INTEGER|BIGINT|NUMBER|NUMERIC|DECIMAL|DEC|FLOAT\d*|REAL|"
-                      r"DOUBLE|MONEY|SMALLMONEY|SERIAL|BIGSERIAL)\b")
-_TEXT = re.compile(r"CHAR|TEXT|STRING|CLOB|CITEXT")
-_BINARY = re.compile(r"BINARY|BLOB|BYTEA|IMAGE|\bRAW\b")
-
-
 def type_family(data_type: str) -> TypeFamily:
-    upper = data_type.upper()
-    if _is_temporal_type(upper):
-        return "temporal"
-    if _TEXT.search(upper):
-        return "text"
-    if _BINARY.search(upper):
-        return "binary"
-    if _NUMERIC.search(upper):
-        return "numeric"
-    return "other"
+    """The shared type family (``app.schemas.data_model.type_family``)."""
+    return shared_type_family(data_type)  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------

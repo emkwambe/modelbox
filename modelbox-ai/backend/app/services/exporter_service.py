@@ -49,7 +49,7 @@ import json
 import re
 import uuid
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import yaml
 
@@ -58,6 +58,8 @@ from app.schemas.data_model import (
     EntitySchema,
     SynthesizedModel,
     _is_temporal_type,
+    is_integer_type,
+    type_family,
 )
 from app.services.ddl_export import (
     DdlExport,
@@ -143,7 +145,7 @@ class ExporterService:
         if fmt == "dbt":
             return self.generate_dbt_project(model, dialect=dialect)
         if fmt == "cube":
-            return self.generate_cube_schema(model)
+            return self._with_notes(self.generate_cube_schema(model), model, "cube")
         raise ExporterError(f"Unsupported export format: {export_format}")
 
     # ---------------------------------------------------------------------
@@ -504,8 +506,9 @@ class ExporterService:
             # identifiers — numerically valid, semantically meaningless, and
             # offered to every BI user as though they meant something (M3).
             # Both halves matter: excluding only foreign keys would still sum
-            # a surrogate primary key that nothing references.
-            if col.is_primary_key or col.is_foreign_key:
+            # a surrogate primary key that nothing references. Codes are not
+            # summed either (dimension_reason), and the notes say which.
+            if col.is_primary_key or col.is_foreign_key or self.dimension_reason(col, entity, model) is not None:
                 continue
             if col.is_metric or self._is_numeric(col):
                 agg = (col.aggregation or "sum").lower()
@@ -739,29 +742,71 @@ class ExporterService:
         """Emit a semantic-layer definition for the requested BI engine."""
         eng = engine.lower()
         if eng == "cube":
-            return self.generate_cube_schema(model)
+            return self._with_notes(self.generate_cube_schema(model), model, eng)
         if eng == "lookml":
-            return {
-                f"{entity.entity_name}.view.lkml": self._lookml_view(entity)
+            return self._with_notes({
+                f"{entity.entity_name}.view.lkml": self._lookml_view(entity, model)
                 for entity in model.entities
-            }
+            }, model, eng)
         if eng == "metricflow":
-            files = {"semantic_models.yml": self._metricflow(model)}
+            document, renamed = self._metricflow_document(model)
+            files = {"semantic_models.yml": yaml.safe_dump(document, sort_keys=False, default_flow_style=False)}
             gaps = self.metricflow_export_gaps(model)
+            notes = self.semantic_notes(model, eng) + renamed
+            header = []
             if gaps:
                 # Stated twice: at the head of the YAML, which travels on its
                 # own, and as its own file, as the dbt project does.
                 header = [f"# Export gaps ({len(gaps)}): keys this semantic model does not state."]
                 header += [f"# - {gap}" for gap in gaps]
-                files["semantic_models.yml"] = "\n".join(header) + "\n" + files["semantic_models.yml"]
                 files["EXPORT_GAPS.md"] = (
                     "# Export gaps\n\nKeys the MetricFlow semantic model does not state, and why.\n\n"
                     + "".join(f"- {gap}\n" for gap in gaps))
-            return files
+            if notes:
+                header.append(f"# Export notes ({len(notes)}): columns written as dimensions rather than summed, "
+                              "or renamed; see EXPORT_NOTES.md.")
+            if header:
+                files["semantic_models.yml"] = "\n".join(header) + "\n" + files["semantic_models.yml"]
+            return self._with_notes(files, model, eng, renamed)
         raise ExporterError(f"Unsupported semantic engine: {engine}")
 
-    @staticmethod
-    def metricflow_export_gaps(model: SynthesizedModel) -> list[str]:
+    @classmethod
+    def _foreign_entities(cls, model: SynthesizedModel) -> dict[tuple[str, str], tuple[str, bool]]:
+        """(table, column) -> (entity name, joined) for every one-column foreign key.
+
+        MetricFlow joins a foreign entity to the primary entity of the same
+        name, and allows a name once per semantic model. So a table's first
+        reference to a parent is named after the parent's primary entity and
+        joins; a second reference to the same parent, or a reference to the
+        table itself, would repeat a name the model already uses. It is named
+        after its own column instead and does not join, and the join is a named
+        gap (:meth:`metricflow_export_gaps`), never an invented one.
+        """
+        primary = {e.entity_name: cls._safe_semantic_name(e.primary_key[0])
+                   for e in model.entities if len(e.primary_key) == 1}
+        out: dict[tuple[str, str], tuple[str, bool]] = {}
+        used: dict[str, set[str]] = {e.entity_name: ({primary[e.entity_name]} if e.entity_name in primary else set())
+                                     for e in model.entities}
+        keys = {e.entity_name: e.primary_key for e in model.entities}
+        for rel in model.relationships:
+            if len(rel.from_columns) != 1 or not rel.resolved:
+                continue
+            column = rel.from_columns[0]
+            key = (rel.from_ref, column)
+            if key in out or rel.from_ref not in used:
+                continue
+            if keys.get(rel.from_ref) == [column]:
+                continue  # the primary entity itself; its join is the gap metricflow_export_gaps names
+            wanted = primary.get(rel.to_ref, cls._safe_semantic_name(column))
+            if wanted in used[rel.from_ref]:
+                out[key] = (cls._safe_semantic_name(column), False)
+            else:
+                out[key] = (wanted, True)
+            used[rel.from_ref].add(out[key][0])
+        return out
+
+    @classmethod
+    def metricflow_export_gaps(cls, model: SynthesizedModel) -> list[str]:
         """Every key the MetricFlow semantic model cannot state, by name.
 
         A MetricFlow entity is one expression, so a composite foreign key is
@@ -794,9 +839,18 @@ class ExporterService:
                 gaps.append(f"{entity.entity_name}.{key[0]} -> {parent}: the primary key is also a foreign key; "
                             "an entity has one type, so it is the primary entity and this join is not in the "
                             "semantic model")
+        parents = {(r.from_ref, r.from_columns[0]): r.to_ref for r in model.relationships
+                   if len(r.from_columns) == 1 and r.resolved}
+        for (table, column), (name, joined) in cls._foreign_entities(model).items():
+            if not joined:
+                parent = parents[(table, column)]
+                why = ("it refers to its own table" if parent == table
+                       else f"{table} already refers to {parent} by another column")
+                gaps.append(f"{table}.{column} -> {parent}: {why}, and an entity name is used once per semantic "
+                            f"model, so it is the entity '{name}' and this join is not in the semantic model")
         return gaps
 
-    def _lookml_view(self, entity: EntitySchema) -> str:
+    def _lookml_view(self, entity: EntitySchema, model: SynthesizedModel) -> str:
         lines = [f"view: {entity.entity_name} {{", f"  sql_table_name: {entity.entity_name} ;;", ""]
         for col in entity.columns:
             if _is_temporal_type(col.data_type):
@@ -815,7 +869,8 @@ class ExporterService:
             lines.append("")
 
         for col in entity.columns:
-            if self._is_numeric(col) and not col.is_primary_key:
+            # Keys, foreign keys and codes are not summed (dimension_reason).
+            if (col.is_metric or self._is_numeric(col)) and self.dimension_reason(col, entity, model) is None:
                 agg = (col.aggregation or "sum").lower()
                 lines.append(f"  measure: total_{col.name} {{")
                 lines.append(f"    type: {agg}")
@@ -830,7 +885,13 @@ class ExporterService:
         return "\n".join(lines)
 
     def _metricflow(self, model: SynthesizedModel) -> str:
-        """Emit a dbt semantic layer that ``dbt parse`` accepts (B1).
+        """The semantic layer as YAML (:meth:`_metricflow_document`)."""
+        document, _ = self._metricflow_document(model)
+        return yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
+
+    def _metricflow_document(self, model: SynthesizedModel) -> tuple[dict[str, object], list[str]]:
+        """Emit a dbt semantic layer that ``dbt parse`` accepts (B1), and the
+        dimensions it renamed so the export's notes can say so.
 
         Seven defects were fixed together here because none of them is visible
         on its own: ``dbt parse`` fails on the first, so nothing downstream can
@@ -871,8 +932,9 @@ class ExporterService:
             if len(entity.primary_key) == 1:
                 primary_entity_name[entity.entity_name] = self._safe_semantic_name(entity.primary_key[0])
 
-        semantic_models: list[dict[str, object]] = []
-        metrics: list[dict[str, object]] = []
+        semantic_models: list[dict[str, Any]] = []
+        # Each one-column foreign key's entity name, and whether it joins.
+        foreign = self._foreign_entities(model)
 
         for entity in model.entities:
             entities_block: list[dict[str, object]] = []
@@ -896,8 +958,11 @@ class ExporterService:
                 elif parent is not None:
                     entities_block.append(
                         {
-                            # The parent's primary entity, not the local column.
-                            "name": primary_entity_name.get(parent, safe_name),
+                            # The parent's primary entity, not the local column;
+                            # a second reference to one parent, or one to itself,
+                            # is named after its column (_foreign_entities).
+                            "name": foreign.get((entity.entity_name, col.name),
+                                                (primary_entity_name.get(parent, safe_name), True))[0],
                             "type": "foreign",
                             "expr": col.name,
                         }
@@ -916,7 +981,7 @@ class ExporterService:
                     dimensions.append(
                         {"name": safe_name, "type": "categorical", "expr": col.name}
                     )
-                elif col.is_metric or self._is_numeric(col):
+                elif (col.is_metric or self._is_numeric(col)) and self.dimension_reason(col, entity, model) is None:
                     if agg_time_dimension is None:
                         # No time axis: express it as a dimension rather than
                         # dropping the column from the semantic model entirely.
@@ -941,18 +1006,6 @@ class ExporterService:
                 count_measure = f"{entity.entity_name}_count"
                 measures.append({"name": count_measure, "agg": "count", "expr": "1"})
 
-            for measure in measures:
-                name = str(measure["name"])
-                metrics.append(
-                    {
-                        "name": name,
-                        # dbt requires a label on every metric.
-                        "label": name.replace("_", " ").strip().title(),
-                        "type": "simple",
-                        "type_params": {"measure": name},
-                    }
-                )
-
             model_doc: dict[str, object] = {
                 "name": entity.entity_name,
                 # The dbt exporter names its models stg_<entity>; referencing
@@ -972,10 +1025,164 @@ class ExporterService:
                 model_doc["measures"] = measures
             semantic_models.append(model_doc)
 
+        renamed = self._name_as_metricflow_requires(semantic_models)
+        renamed += self._rename_dimensions_named_as_entities(semantic_models)
+        renamed += self._rename_dimensions_repeated_under_one_entity(semantic_models)
+        renamed += self._rename_repeated_measures(semantic_models)
+        # One metric per measure, made from the final names; dbt requires a label on every metric.
+        metrics = [{"name": str(m["name"]), "label": str(m["name"]).replace("_", " ").strip().title(),
+                    "type": "simple", "type_params": {"measure": str(m["name"])}}
+                   for sm in semantic_models for m in sm.get("measures", [])]
         document: dict[str, object] = {"semantic_models": semantic_models}
         if metrics:
             document["metrics"] = metrics
-        return yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
+        return document, renamed
+
+    #: MetricFlow's rule for every name in a semantic manifest.
+    _METRICFLOW_NAME = re.compile(r"^[a-z](?!.*__)[a-z0-9_]*[a-z0-9]$")
+
+    @classmethod
+    def _snake(cls, name: str) -> str:
+        words = [w.lower() for w in cls._NAME_WORD.findall(name)]
+        snake = "_".join(words) or "x"
+        return snake if snake[0].isalpha() and len(snake) > 1 else f"c_{snake}"
+
+    @classmethod
+    def _name_as_metricflow_requires(cls, semantic_models: list[dict[str, Any]]) -> list[str]:
+        """Write every name MetricFlow would refuse in lower snake case; say so.
+
+        MetricFlow names are lower-case letters, digits and underscores, and an
+        imported schema's are the source's own (``AWBuildVersion``). Only a
+        name that breaks the rule changes, so a reference model's names stay as
+        they are; the same name always becomes the same new one, so a foreign
+        entity still matches its parent's primary entity. Each ``expr`` keeps
+        the column's own name, and the dbt model reference is untouched. Two
+        names that would meet are told apart by a suffix, and each is listed.
+        """
+        mapping: dict[str, str] = {}
+
+        def rename(name: object) -> str:
+            text = str(name)
+            if cls._METRICFLOW_NAME.match(text):
+                return text
+            return mapping.setdefault(text, cls._snake(text))
+
+        notes: list[str] = []
+        for sm in semantic_models:
+            sm["name"] = rename(sm["name"])
+            if "primary_entity" in sm:
+                sm["primary_entity"] = rename(sm["primary_entity"])
+            taken: dict[str, str] = {}
+            final: dict[str, str] = {}
+            for block in ("entities", "dimensions", "measures"):
+                for item in sm.get(block, []):
+                    old = str(item["name"])
+                    new = rename(old)
+                    if block != "entities":  # an entity name is shared by design; the others are the model's own
+                        base, n = new, 2
+                        while new in taken and taken[new] != item["name"]:
+                            new = f"{base}_{n}"
+                            n += 1
+                        if new != base:
+                            notes.append(f"{sm['name']}.{item['name']}: named '{new}', because '{base}' is taken "
+                                         "in this semantic model")
+                        taken[new] = old
+                    if block == "dimensions":
+                        final[old] = new
+                    item["name"] = new
+            defaults = sm.get("defaults")
+            if isinstance(defaults, dict) and defaults.get("agg_time_dimension"):
+                old_default = str(defaults["agg_time_dimension"])
+                defaults["agg_time_dimension"] = final.get(old_default, rename(old_default))
+        if mapping:
+            example = next(iter(mapping.items()))
+            notes.insert(0, f"{len(mapping)} names are written in lower snake case, as MetricFlow requires (for "
+                            f"example '{example[0]}' as '{example[1]}'); each expr keeps the column's own name")
+        return notes
+
+    @staticmethod
+    def _rename_repeated_measures(semantic_models: list[dict[str, Any]]) -> list[str]:
+        """Rename a measure whose name another semantic model already uses; say which.
+
+        Measure and metric names are unique across a manifest, and
+        ``total_<column>`` repeats wherever two tables share a column name
+        (AdventureWorks' ``StandardCost`` in ``Product`` and
+        ``ProductCostHistory``). The first keeps its name; each later one
+        becomes ``<table>_<name>``. Metrics are made from the measures after
+        every rename, so each follows its measure.
+        """
+        seen: set[str] = set()
+        renamed = []
+        for sm in semantic_models:
+            for measure in sm.get("measures", []):
+                old = str(measure["name"])
+                if old in seen:
+                    new = f"{sm['name']}_{old}"
+                    measure["name"] = new
+                    renamed.append(f"{sm['name']}.{measure['expr']}: measure named '{new}', because '{old}' is "
+                                   "a measure of another semantic model")
+                seen.add(str(measure["name"]))
+        return renamed
+
+    @staticmethod
+    def _rename_dimensions_repeated_under_one_entity(semantic_models: list[dict[str, Any]]) -> list[str]:
+        """Rename a dimension that repeats under a primary entity another
+        semantic model shares; say which.
+
+        MetricFlow addresses a dimension by its primary entity and its name,
+        so the pair must be unique across the manifest. Tables whose key is the
+        same column (AdventureWorks' ``Person``, ``Employee``, ``Store`` and
+        ``Vendor`` are all keyed by ``BusinessEntityID``) repeat column names
+        such as ``ModifiedDate`` under one entity. The first keeps its name;
+        each later one becomes ``<table>_<column>``, its ``expr`` unchanged.
+        """
+        seen: set[tuple[str, str]] = set()
+        renamed = []
+        for sm in semantic_models:
+            primary = next((str(e["name"]) for e in sm.get("entities", []) if e.get("type") == "primary"),
+                           str(sm.get("primary_entity", "")))
+            for dimension in sm.get("dimensions", []):
+                pair = (primary, str(dimension["name"]))
+                if pair in seen:
+                    old, new = dimension["name"], f"{sm['name']}_{dimension['name']}"
+                    dimension["name"] = new
+                    defaults = sm.get("defaults")
+                    if isinstance(defaults, dict) and defaults.get("agg_time_dimension") == old:
+                        defaults["agg_time_dimension"] = new
+                    renamed.append(f"{sm['name']}.{dimension['expr']}: dimension named '{new}', because '{old}' "
+                                   f"is already a dimension of the entity '{primary}' in another semantic model")
+                seen.add((primary, str(dimension["name"])))
+        return renamed
+
+    @staticmethod
+    def _rename_dimensions_named_as_entities(semantic_models: list[dict[str, Any]]) -> list[str]:
+        """Rename each dimension whose name is an entity elsewhere; say which.
+
+        MetricFlow requires one name to be one kind of element across the
+        whole manifest. A column of a composite foreign key cannot be a join
+        (an entity is one expression), so it is a dimension, while the same
+        name is a primary entity in the table it refers to: AdventureWorks'
+        ``SalesOrderDetail.ProductID`` against ``Product``. ``dbt parse``
+        refuses that once the manifest has measures. The dimension becomes
+        ``<Table>_<Column>``, its ``expr`` still the column, and no join is
+        invented (owner, 2026-09-30). ``defaults.agg_time_dimension`` follows
+        the rename, as it does for a reserved-granularity name.
+        """
+        entity_names = {str(e["name"]) for sm in semantic_models for e in sm.get("entities", [])}
+        entity_names |= {str(sm["primary_entity"]) for sm in semantic_models if "primary_entity" in sm}
+        renamed = []
+        for sm in semantic_models:
+            for dimension in sm.get("dimensions", []):
+                if dimension["name"] in entity_names:
+                    old, new = dimension["name"], f"{sm['name']}_{dimension['name']}"
+                    dimension["name"] = new
+                    defaults = sm.get("defaults")
+                    if isinstance(defaults, dict) and defaults.get("agg_time_dimension") == old:
+                        defaults["agg_time_dimension"] = new
+                    renamed.append(f"{sm['name']}.{dimension['expr']}: dimension named '{new}', because "
+                                   f"'{old}' is an entity elsewhere in the semantic model")
+        return renamed
+
 
     # MetricFlow's AggregationType. Mapped explicitly rather than lower-cased
     # through, because `avg` — the obvious spelling, and what the canvas offers
@@ -1170,11 +1377,112 @@ class ExporterService:
     # ---------------------------------------------------------------------
     @staticmethod
     def _is_numeric(col: ColumnSchema) -> bool:
-        upper = col.data_type.upper()
-        return any(
-            tok in upper
-            for tok in ("INT", "NUMBER", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL")
-        )
+        """The shared type family: money types are numeric, a one-bit BIT is not."""
+        return type_family(col.data_type) == "numeric"
+
+    # ---------------------------------------------------------------------
+    # Which numeric columns are summed (MetricFlow, Cube, LookML)
+    # ---------------------------------------------------------------------
+    #: A word anywhere in a name that makes an integer read as a code.
+    _CODE_WORDS: ClassVar[frozenset[str]] = frozenset({
+        "status", "code", "type", "flag", "kind", "category", "class", "indicator", "ind", "revision",
+        "version", "rank", "priority", "tier", "grade", "level",
+    })
+    #: A last word that makes an integer read as an identifier.
+    _ID_WORDS: ClassVar[frozenset[str]] = frozenset({
+        "id", "key", "sk", "fk", "pk", "number", "no", "num", "nbr", "seq", "sequence",
+    })
+    #: A CHECK allowing at most this many values makes a column a code.
+    _SMALL_SET = 20
+    _NAME_WORD = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+")
+    _IN_LIST = re.compile(r"\bIN\s*\(([^()]*)\)", re.IGNORECASE)
+    _BETWEEN = re.compile(r"\bBETWEEN\s*\(?\s*(-?\d+)\s*\)?\s*AND\s*\(?\s*(-?\d+)", re.IGNORECASE)
+    _LOWER_BOUND = re.compile(r">\s*(=?)\s*\(?\s*(-?\d+)\s*\)?(?!\s*[.\d])")
+    _UPPER_BOUND = re.compile(r"<\s*(=?)\s*\(?\s*(-?\d+)\s*\)?(?!\s*[.\d])")
+
+    @classmethod
+    def _small_set_check(cls, col: ColumnSchema, entity: EntitySchema) -> str | None:
+        """A one-column CHECK allowing few values (an IN list, or a narrow
+        integer range), as the model holds it; None if there is none."""
+        for check in entity.check_constraints:
+            if check.columns != [col.name]:
+                continue
+            listed = cls._IN_LIST.search(check.expression)
+            if listed and 0 < len([v for v in listed.group(1).split(",") if v.strip()]) <= cls._SMALL_SET:
+                return check.expression
+            between = cls._BETWEEN.search(check.expression)
+            if between:
+                low, high = int(between.group(1)), int(between.group(2))
+            else:
+                lower, upper = cls._LOWER_BOUND.search(check.expression), cls._UPPER_BOUND.search(check.expression)
+                if not (lower and upper):
+                    continue
+                low = int(lower.group(2)) + (0 if lower.group(1) else 1)
+                high = int(upper.group(2)) - (0 if upper.group(1) else 1)
+            if 0 <= high - low < cls._SMALL_SET:
+                return check.expression
+        return None
+
+    @classmethod
+    def dimension_reason(cls, col: ColumnSchema, entity: EntitySchema, model: SynthesizedModel) -> str | None:
+        """Why a numeric column is never a summed measure, or None if it is one.
+
+        Keys and foreign keys identify rows; summing them means nothing. An
+        integer column with permissible values, a CHECK allowing a small set,
+        or a name that reads as a code or an identifier (``Status``,
+        ``RevisionNumber``) is a code, grouped by rather than added. A column a
+        person declared a metric is a measure unless it is a key. Every choice
+        is listed in the export's notes (:meth:`semantic_notes`), so none is
+        silent.
+        """
+        if not cls._is_numeric(col):
+            return None
+        if col.is_primary_key or col.name in entity.primary_key:
+            return "a primary-key column"
+        if col.is_foreign_key or any(rel.from_ref == entity.entity_name and col.name in rel.from_columns
+                                     for rel in model.relationships):
+            return "a foreign-key column"
+        if col.is_metric or not is_integer_type(col.data_type):
+            return None
+        if col.permissible_values:
+            return "an integer with permissible values"
+        check = cls._small_set_check(col, entity)
+        if check is not None:
+            return f"an integer whose CHECK allows few values: {check}"
+        words = [w.lower() for w in cls._NAME_WORD.findall(col.name)]
+        code = next((w for w in words if w in cls._CODE_WORDS), None)
+        if code is not None:
+            return f"an integer whose name reads as a code ('{code}')"
+        if words and words[-1] in cls._ID_WORDS:
+            return f"an integer whose name reads as an identifier ('{words[-1]}')"
+        return None
+
+    def semantic_notes(self, model: SynthesizedModel, engine: str) -> list[str]:
+        """Every numeric column written as a dimension rather than summed, and why.
+
+        For MetricFlow only tables with an aggregation time column, since a
+        table without one declares no measures at all.
+        """
+        notes = []
+        for entity in model.entities:
+            if engine == "metricflow" and not entity.agg_time_column:
+                continue
+            for col in entity.columns:
+                reason = self.dimension_reason(col, entity, model)
+                if reason is not None:
+                    notes.append(f"{entity.entity_name}.{col.name} ({col.data_type}): not summed as a measure; "
+                                 f"{reason}")
+        return notes
+
+    def _with_notes(self, files: dict[str, str], model: SynthesizedModel, engine: str,
+                    extra: list[str] | None = None) -> dict[str, str]:
+        notes = self.semantic_notes(model, engine) + (extra or [])
+        if notes:
+            files["EXPORT_NOTES.md"] = (
+                "# Export notes\n\nHow columns are written, and why: numeric columns written as dimensions "
+                "rather than summed measures, and any dimension renamed.\n\n"
+                + "".join(f"- {note}\n" for note in notes))
+        return files
 
     @staticmethod
     def _tier_value(entity: EntitySchema) -> str | None:
