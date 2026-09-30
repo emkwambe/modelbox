@@ -139,9 +139,7 @@ outcomes), so it multiplies that exact failure. Enumerations want to be a first
 
 The doc's highest-value claim (§4.5, threshold simulation and back-testing) is
 not a nice-to-have. Above-the-line/below-the-line testing is an **examination
-expectation**, and third-party BSA/AML monitoring solutions used for detecting
-suspicious activity are generally treated as *models*, pulling them into
-model-risk validation. Whether a given AML monitoring system is a model for
+expectation**. Whether a given AML monitoring system is a model for
 model-risk purposes is each institution's determination under SR 26-2 (April
 2026), the current US supervisory guidance on model risk, which is guidance
 rather than an enforceable standard. The pain is quantified: rule-based transaction
