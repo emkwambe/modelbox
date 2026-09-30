@@ -17,6 +17,7 @@ import type {
   MappingLineage,
   MappingReport,
 } from '@/types/mapping';
+import type { RunSuggestionsResponse, SuggestionsResponse } from '@/types/suggestion';
 import type {
   Assignment,
   GradeResult,
@@ -612,5 +613,29 @@ export async function exportMapping(documentId: string, format: MappingExportFor
 
 export async function getLineage(documentId: string, target: ColumnPick): Promise<MappingLineage> {
   const { data } = await apiClient.get<MappingLineage>(`/mappings/${documentId}/lineage`, { params: target });
+  return data;
+}
+
+// --- PII and aggregation-time suggestions (Sprint 9 Step 4) ---
+// Guesses, pending until a person decides; the decider is the signed-in caller.
+export async function listSuggestions(modelId: string): Promise<SuggestionsResponse> {
+  const { data } = await apiClient.get<SuggestionsResponse>(`/model/${modelId}/suggestions`);
+  return data;
+}
+
+/** Runs the rules. Stores guesses as pending; never changes the model. */
+export async function runSuggestions(modelId: string): Promise<RunSuggestionsResponse> {
+  const { data } = await apiClient.post<RunSuggestionsResponse>(`/model/${modelId}/suggestions`);
+  return data;
+}
+
+/** Writes the suggested value into the model as the caller's. It is then pending review, not verified. */
+export async function acceptSuggestion(modelId: string, suggestionId: string): Promise<SuggestionsResponse> {
+  const { data } = await apiClient.post<SuggestionsResponse>(`/model/${modelId}/suggestions/${suggestionId}/accept`);
+  return data;
+}
+
+export async function rejectSuggestion(modelId: string, suggestionId: string): Promise<SuggestionsResponse> {
+  const { data } = await apiClient.post<SuggestionsResponse>(`/model/${modelId}/suggestions/${suggestionId}/reject`);
   return data;
 }

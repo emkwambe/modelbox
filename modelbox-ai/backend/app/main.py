@@ -18,6 +18,7 @@ from app.__version__ import __version__
 from app.core.config import Settings, get_settings
 from app.core.database import dispose_engine
 from app.core.logging_config import configure_logging
+from app.services import suggestion_rules
 from app.services.llm_gateway import get_llm_gateway
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Starting %s (airgapped=%s)", settings.app_name, settings.is_airgapped)
     # Eagerly construct the LLM gateway so router-config errors surface at boot.
     get_llm_gateway()
+    # The PII suggestion rules, with the client's file if one is configured: a
+    # file that does not validate stops start-up here rather than being ignored.
+    suggestion_rules.active_ruleset(settings.pii_rules_path)
     await _seed_dev_user(settings)
     try:
         yield

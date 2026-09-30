@@ -17,6 +17,7 @@
 import ColumnDictionaryFields from '@/components/canvas/ColumnDictionaryFields';
 import { useCanvasStore } from '@/store/canvasStore';
 import { color } from '@/styles/tokens';
+import { PII_TYPES } from '@/types/schema';
 
 const AGGREGATIONS = ['SUM', 'COUNT', 'COUNT_DISTINCT', 'AVG', 'MIN', 'MAX'];
 
@@ -236,13 +237,11 @@ export default function ColumnSemanticEditor() {
           }
           style={{ ...select, marginTop: 6 }}
         >
-          {['EMAIL', 'SSN', 'PHONE', 'CREDIT_CARD', 'IBAN', 'NAME', 'ADDRESS'].map(
-            (p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ),
-          )}
+          {PII_TYPES.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
         </select>
       )}
 

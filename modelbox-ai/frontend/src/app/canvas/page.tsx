@@ -31,6 +31,7 @@ import EntitySettingsEditor from '@/components/canvas/EntitySettingsEditor';
 import DictionaryPanel from '@/components/dictionary/DictionaryPanel';
 import DriftPanel from '@/components/drift/DriftPanel';
 import MappingPanel from '@/components/mapping/MappingPanel';
+import SuggestionsPanel from '@/components/suggestions/SuggestionsPanel';
 import DiffPanel from '@/components/migration/DiffPanel';
 import ExportPanel from '@/components/editor/ExportPanel';
 import { deleteModel, saveGraph, updateModel } from '@/lib/api';
@@ -57,6 +58,7 @@ export default function CanvasPage() {
   const [showDictionary, setShowDictionary] = useState(false);
   const [showDrift, setShowDrift] = useState(false);
   const [showMapping, setShowMapping] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -244,6 +246,7 @@ export default function CanvasPage() {
             type="button"
             onClick={() => {
               setShowDictionary((v) => !v);
+              setShowSuggestions(false);
               setShowDrift(false);
               setShowMapping(false);
               setShowDiff(false);
@@ -258,6 +261,7 @@ export default function CanvasPage() {
             type="button"
             onClick={() => {
               setShowDrift((v) => !v);
+              setShowSuggestions(false);
               setShowMapping(false);
               setShowDictionary(false);
               setShowDiff(false);
@@ -272,6 +276,7 @@ export default function CanvasPage() {
             type="button"
             onClick={() => {
               setShowMapping((v) => !v);
+              setShowSuggestions(false);
               setShowDrift(false);
               setShowDictionary(false);
               setShowDiff(false);
@@ -285,7 +290,23 @@ export default function CanvasPage() {
           <button
             type="button"
             onClick={() => {
+              setShowSuggestions((v) => !v);
+              setShowMapping(false);
+              setShowDrift(false);
+              setShowDictionary(false);
+              setShowDiff(false);
+              setShowExport(false);
+            }}
+            disabled={!modelId}
+            style={panelToggle(showSuggestions, Boolean(modelId))}
+          >
+            {showSuggestions ? 'Hide suggestions' : 'Suggestions'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               setShowDiff((v) => !v);
+              setShowSuggestions(false);
               setShowExport(false);
               setShowDictionary(false);
               setShowDrift(false);
@@ -310,6 +331,7 @@ export default function CanvasPage() {
             type="button"
             onClick={() => {
               setShowExport((v) => !v);
+              setShowSuggestions(false);
               setShowDiff(false);
               setShowDictionary(false);
               setShowDrift(false);
@@ -401,6 +423,11 @@ export default function CanvasPage() {
         {showMapping && (
           <div style={{ width: '45%', minWidth: 380, maxWidth: 720 }}>
             <MappingPanel onClose={() => setShowMapping(false)} />
+          </div>
+        )}
+        {showSuggestions && (
+          <div style={{ width: '45%', minWidth: 380, maxWidth: 720 }}>
+            <SuggestionsPanel onClose={() => setShowSuggestions(false)} />
           </div>
         )}
       </div>

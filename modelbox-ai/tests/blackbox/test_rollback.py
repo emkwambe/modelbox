@@ -109,6 +109,8 @@ def test_the_previous_release_runs_on_a_downgraded_database(client: httpx.Client
                 if _exists(t)]
     check(mappings == [], f"mapping tables still present after the downgrade: {mappings}")
     check(_exists("mapping_decisions"), "the downgrade dropped mapping_decisions, which it keeps")
+    # Migration 0031 (owner, H3): every suggestion is lost.
+    check(not _exists("model_suggestions"), "model_suggestions is still present after the downgrade")
     # (SpecialOfferID, ProductID) -> SpecialOfferProduct keeps its first pair only.
     pair = sql_ok(_FIRST_PAIR_AFTER, variables={"model": aw})
     check(pair == "SpecialOfferID->SpecialOfferID", f"the composite FK kept {pair!r}")

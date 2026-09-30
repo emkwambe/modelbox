@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     members,
     models,
     scim,
+    suggestions,
     trainer,
     transform,
     workspaces,
@@ -42,5 +43,6 @@ api_router.include_router(egress.router)
 api_router.include_router(export_status.router)
 api_router.include_router(ddl_import.router)
 api_router.include_router(mappings.router)
+api_router.include_router(suggestions.router)
 
 __all__ = ["api_router"]

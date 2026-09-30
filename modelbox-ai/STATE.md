@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-30 on `sprint-9/step-3-mapping`, branched from
-`main` at `4afdccb`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-30 on `sprint-9/step-4-suggestions`, branched from
+`main` at `4b46681`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,14 +9,49 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `4afdccb` | T-SQL `LIKE` character classes kept in PostgreSQL (#31), on the dbt export on imported schemas and seed data under every constraint (#30), on computed columns as PostgreSQL generated columns (#29), on type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `4b46681` | source-to-target mapping with proposals, and the collation gap (#32), on T-SQL `LIKE` character classes kept in PostgreSQL (#31), on the dbt export on imported schemas and seed data under every constraint (#30), on computed columns as PostgreSQL generated columns (#29), on type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.12.0` | `d38d6ec` | tagged 2026-09-29 22:28 -04:00; published by the gated release workflow (run 36659993511: gate, backend and frontend images all green); verified on the published images (run 36660321337, below) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC), published by run 36516574170; superseded by v1.12.0, tag and images kept |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-9/step-3-mapping` | this branch | source-to-target mapping with proposals, and the collation gap (below) |
-| `sprint-9/step-2c-like-patterns`, `sprint-9/step-2b-dbt-export`, `sprint-9/step-1b-computed-columns`, `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-9/step-4-suggestions` | this branch | PII and aggregation-time suggestions (below) |
+| `sprint-9/step-3-mapping`, `sprint-9/step-2c-like-patterns`, `sprint-9/step-2b-dbt-export`, `sprint-9/step-1b-computed-columns`, `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
-## In progress on this branch: source-to-target mapping, with proposals
+## In progress on this branch: PII and aggregation-time suggestions
+
+ModelBox suggests which columns hold PII, and which column each table's
+measures should be aggregated over. A suggestion is a guess, stored beside the
+model and never in it: provenance `heuristic`, status pending, accepted,
+rejected or superseded, never verified. No export shows one, and running the
+rules changes nothing in the model.
+
+- **PII:** 42 named rules over 20 categories, each reading one signal (a
+  column-name pattern, a source comment, or a CHECK) for the type families its
+  category holds; a phrase followed by a qualifier (`CreditCardID`) is not the
+  thing itself. Categories are anchored on NIST SP 800-122 §2.2 and GLBA NPI,
+  15 U.S.C. § 6809(4)(A). No score, and no accuracy figure anywhere (a claims
+  guard pattern bars one). `PIIType` gains 13 types. Clients add rules in a
+  YAML file named by `PII_RULES_PATH`; one that does not validate stops the
+  backend at start-up.
+- **Time column** (owner, H3): every temporal column of a table with none
+  chosen is a candidate, ranked by a confidence from written rules, with a
+  row-audit name flagged "likely an audit column" at 0.1. AdventureWorks'
+  SalesOrderHeader offers OrderDate, DueDate, ShipDate and ModifiedDate, with
+  ModifiedDate flagged.
+- **Deciding:** MEMBER, a person, never an API key. Accepting writes the value
+  through the canvas save path, so a PII value is pending with provenance
+  `person`, and only an APPROVER's verify request can verify it. A canvas
+  panel runs the rules and decides.
+
+**Migration 0031** (additive, owner-approved) adds `model_suggestions` and the
+`SUGGESTION_DECIDED` audit action. A downgrade loses every suggestion, and
+clears the PII types the earlier release cannot read (`is_pii` kept, a
+verified field back to pending, each listed). Tests: `test_suggestion_rules`,
+`test_suggestions_api` (real credentials; SalesOrderHeader declares MetricFlow
+measures only after a person confirms OrderDate), and `test_0031_…` in
+`test_migration_0015_to_head_populated`. A strict `xfail` records a defect
+found on the way: the semantic exporters do not read `MONEY` as numeric.
+
+## Source-to-target mapping, with proposals (on `main`, #32)
 
 A mapping document maps a source model's columns to a target model's. Every
 target column is one of:
@@ -50,7 +85,7 @@ mapping and keeps the decisions record, which a re-upgrade adopts. Tests:
 - `test_ledger_roles_postgres`;
 - `test_0030_…` in `test_migration_0015_to_head_populated`.
 
-The first commit on this branch names a `collation` export gap for a SQL
+The first commit of #32 names a `collation` export gap for a SQL
 Server model exported to PostgreSQL, on each table with text keys, a UNIQUE on
 text or a pattern CHECK (16 of AdventureWorks' 71 tables).
 
@@ -319,8 +354,8 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0029_computed_columns` on `main`;
-`0030_source_to_target_mapping` on this branch (`alembic heads`).
+Migration head: `0030_source_to_target_mapping` on `main`;
+`0031_suggestions` on this branch (`alembic heads`).
 
 ## Versions
 

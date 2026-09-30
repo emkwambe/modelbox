@@ -127,4 +127,10 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("DELETE", f"{_V1}/mappings/{{document_id}}/entries/{{mapping_key}}"): "MEMBER",
     ("GET", f"{_V1}/mappings/{{document_id}}/export"): "VIEWER",
     ("GET", f"{_V1}/mappings/{{document_id}}/lineage"): "VIEWER",
+    # --- PII and aggregation-time suggestions (Sprint 9 Step 4). Deciding is
+    # MEMBER and refuses an API key; verifying what was accepted stays APPROVER.
+    ("GET", f"{_V1}/model/{{model_id}}/suggestions"): "VIEWER",
+    ("POST", f"{_V1}/model/{{model_id}}/suggestions"): "MEMBER",
+    ("POST", f"{_V1}/model/{{model_id}}/suggestions/{{suggestion_id}}/accept"): "MEMBER",
+    ("POST", f"{_V1}/model/{{model_id}}/suggestions/{{suggestion_id}}/reject"): "MEMBER",
 }
