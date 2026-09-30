@@ -483,6 +483,9 @@ class SyntheticSeedResponse(BaseModel):
     generation_order: list[str] = Field(default_factory=list)
     # Map of artifact file path -> file contents.
     files: dict[str, str] = Field(default_factory=dict)
+    # Rows left out per entity because no values satisfied every declared
+    # constraint; empty when every entity has the rows asked for.
+    rows_skipped: dict[str, int] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -1372,7 +1375,8 @@ class ExportResponse(BaseModel):
 
     model_id: uuid.UUID
     format: ExportFormat
-    # Only meaningful for SQL DDL exports; null for dbt/cube.
+    # The target dialect of a SQL DDL or dbt export (dbt casts to its types);
+    # null for cube.
     dialect: str | None = None
     # Map of artifact file path -> file contents.
     files: dict[str, str] = Field(default_factory=dict)

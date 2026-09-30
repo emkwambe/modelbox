@@ -232,8 +232,9 @@ export default function ExportPanel({ onClose }: { onClose: () => void }) {
   const fileNames = Object.keys(files);
   const activeContent = activeFile ? (files[activeFile] ?? '') : '';
   const zipEligible = kind === 'artifact' && (format === 'dbt' || format === 'cube');
+  // dbt too: its staging models cast to the chosen warehouse's types.
   const dialectRelevant =
-    (kind === 'artifact' && format === 'ddl') || kind === 'seed';
+    (kind === 'artifact' && (format === 'ddl' || format === 'dbt')) || kind === 'seed';
   // Which of the target's extensions the chosen dialect can be told about,
   // as the manifest says: the panel names no dialect of its own.
   const dialectOptions =

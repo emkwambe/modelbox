@@ -654,6 +654,30 @@ def _as_boolean_literals(condition: exp.Expression, flags: set[str]) -> exp.Expr
     return condition
 
 
+def column_type(column: ColumnSchema, entity: EntitySchema, source: str, target: str,
+                extensions: frozenset[str] = frozenset()) -> str | None:
+    """The column's type as the DDL export writes it for ``target``; None if the
+    export does not create the column (a computed column that is a gap).
+
+    One translation for every artifact that states a column's type in the
+    target, so a dbt staging model casts to exactly the type of the table the
+    DDL export created (Sprint 9 Step 2b), mappings and fallbacks included.
+    """
+    if column.data_type == COMPUTED:
+        plan = plan_generated(column, entity, source, target, extensions)
+        return plan.type if isinstance(plan, GeneratedColumn) else None
+    try:
+        tree = sqlglot.parse_one(f"CREATE TABLE _t (_c {column.data_type})", read=source)
+    except sqlglot.errors.SqlglotError as exc:
+        raise DdlExportError(f"column '{entity.entity_name}.{column.name}': type does not parse as {source}") from exc
+    if not isinstance(tree, exp.Create) or not isinstance(tree.this, exp.Schema) or not tree.this.expressions:
+        raise DdlExportError(f"column '{entity.entity_name}.{column.name}': type does not parse as {source}")
+    column_def = tree.this.expressions[0]
+    _fit_type(column_def, entity.entity_name, target, [], source, extensions)
+    kind = column_def.args.get("kind")
+    return kind.sql(dialect=target) if isinstance(kind, exp.DataType) else column.data_type
+
+
 # Targets that add a foreign key to an existing table with ALTER TABLE.
 _ALTER_ADDS_FOREIGN_KEYS = frozenset({"postgres", "snowflake", "redshift", "databricks"})
 
