@@ -780,7 +780,7 @@ regenerated in fresh containers by the DDL Fixtures workflow, run 36623075855 on
 | AdventureWorks imports identically in UTF-8 and UTF-16, with and without a BOM | `test_ddl_import_fixtures.py::test_adventureworks_imports_identically_in_every_encoding` |
 | Every one of AdventureWorks' 1,943 batches is imported or listed; each SQL Server normalizer rule is what makes its case import | `test_ddl_import_sqlserver.py::test_adventureworks_is_1943_batches_each_imported_or_listed`; negative control `test_negative_control_each_rule_disabled_makes_its_case_fail` |
 | Only the Snowflake fixture is documentation-derived, and it says so | `test_ddl_fixtures.py::test_only_snowflake_is_documentation_derived`; negative control `test_negative_control_removing_the_documentation_derived_label_fails` |
-| Nothing calls Snowflake import certified while its fixture is documentation-derived | `test_ddl_fixtures.py::test_nothing_calls_snowflake_import_certified_while_its_fixture_is_documentation_derived`; negative control `test_negative_control_a_certification_claim_is_found` |
+| Every surface leaves Snowflake import uncertified while its fixture is documentation-derived | `test_ddl_fixtures.py::test_nothing_calls_snowflake_import_certified_while_its_fixture_is_documentation_derived`; negative control `test_negative_control_a_certification_claim_is_found` |
 | The Snowflake fixture fails by name on its HYBRID TABLE and is saved unreconciled | `test_ddl_import_fixtures.py::test_the_documentation_derived_snowflake_fixture_fails_by_name_and_is_unreconciled` |
 
 **Honest limits:**
