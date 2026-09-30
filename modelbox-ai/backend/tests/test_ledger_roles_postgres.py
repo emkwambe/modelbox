@@ -45,7 +45,7 @@ from tests.test_migration_0013_populated import DOCKER, _need_docker
 
 BACKEND = Path(__file__).resolve().parents[1]
 APP_ROLE = "modelbox_app"
-LEDGERS = ("audit_event", "egress_audit")
+LEDGERS = ("audit_event", "egress_audit", "mapping_decisions")  # the last since 0030
 FULL = ("SELECT", "INSERT", "UPDATE", "DELETE")
 FIRST_PASSWORD = "a1" * 32
 SECOND_PASSWORD = "b2" * 32
@@ -122,7 +122,7 @@ async def test_the_migrate_service_succeeds_and_prints_no_password(database) -> 
         version = await owner.fetchval("SELECT version_num FROM alembic_version")
     finally:
         await owner.close()
-    assert version == "0029_computed_columns"
+    assert version == "0030_source_to_target_mapping"
 
 
 async def test_the_role_is_not_privileged(database) -> None:
@@ -171,6 +171,38 @@ async def test_the_app_role_appends_but_cannot_rewrite_either_ledger(database) -
                 await app.execute(sql)
     finally:
         await app.close()
+
+
+_DECISION = (
+    "INSERT INTO mapping_decisions (workspace_id, document_id, decision, decided_by_user_id, "
+    "decided_by_email, evidence) VALUES (gen_random_uuid(), gen_random_uuid(), 'authored', "
+    "gen_random_uuid(), 'p@example.com', '{}') RETURNING decision_id"
+)
+
+
+async def test_the_mapping_decisions_ledger_is_append_only_for_everyone(database) -> None:
+    """Migration 0030's ledger: the app role appends and cannot rewrite; the
+    trigger refuses even the owner."""
+    app = await asyncpg.connect(database["app"])
+    try:
+        decision_id = await app.fetchval(_DECISION)
+        for sql in (f"UPDATE mapping_decisions SET decision = 'removed' WHERE decision_id = '{decision_id}'",
+                    f"DELETE FROM mapping_decisions WHERE decision_id = '{decision_id}'"):
+            with pytest.raises(asyncpg.exceptions.InsufficientPrivilegeError):
+                await app.execute(sql)
+    finally:
+        await app.close()
+    owner = await asyncpg.connect(database["owner"])
+    try:
+        for sql in (f"UPDATE mapping_decisions SET decision = 'removed' WHERE decision_id = '{decision_id}'",
+                    "TRUNCATE mapping_decisions"):
+            with pytest.raises(asyncpg.exceptions.PostgresError, match="append-only"):
+                await owner.execute(sql)
+        # The database's own refusal of a decision without a person.
+        with pytest.raises(asyncpg.exceptions.NotNullViolationError):
+            await owner.execute(_DECISION.replace("gen_random_uuid(), 'p@example.com'", "NULL, 'p@example.com'"))
+    finally:
+        await owner.close()
 
 
 async def test_the_app_role_cannot_switch_triggers_off(database) -> None:

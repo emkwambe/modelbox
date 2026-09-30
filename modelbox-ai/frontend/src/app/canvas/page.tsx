@@ -30,6 +30,7 @@ import ColumnSemanticEditor from '@/components/canvas/ColumnSemanticEditor';
 import EntitySettingsEditor from '@/components/canvas/EntitySettingsEditor';
 import DictionaryPanel from '@/components/dictionary/DictionaryPanel';
 import DriftPanel from '@/components/drift/DriftPanel';
+import MappingPanel from '@/components/mapping/MappingPanel';
 import DiffPanel from '@/components/migration/DiffPanel';
 import ExportPanel from '@/components/editor/ExportPanel';
 import { deleteModel, saveGraph, updateModel } from '@/lib/api';
@@ -55,6 +56,7 @@ export default function CanvasPage() {
   const [showDiff, setShowDiff] = useState(false);
   const [showDictionary, setShowDictionary] = useState(false);
   const [showDrift, setShowDrift] = useState(false);
+  const [showMapping, setShowMapping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -243,6 +245,7 @@ export default function CanvasPage() {
             onClick={() => {
               setShowDictionary((v) => !v);
               setShowDrift(false);
+              setShowMapping(false);
               setShowDiff(false);
               setShowExport(false);
             }}
@@ -255,6 +258,7 @@ export default function CanvasPage() {
             type="button"
             onClick={() => {
               setShowDrift((v) => !v);
+              setShowMapping(false);
               setShowDictionary(false);
               setShowDiff(false);
               setShowExport(false);
@@ -267,10 +271,25 @@ export default function CanvasPage() {
           <button
             type="button"
             onClick={() => {
+              setShowMapping((v) => !v);
+              setShowDrift(false);
+              setShowDictionary(false);
+              setShowDiff(false);
+              setShowExport(false);
+            }}
+            disabled={!modelId}
+            style={panelToggle(showMapping, Boolean(modelId))}
+          >
+            {showMapping ? 'Hide mapping' : 'Mapping'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               setShowDiff((v) => !v);
               setShowExport(false);
               setShowDictionary(false);
               setShowDrift(false);
+              setShowMapping(false);
             }}
             disabled={!modelId}
             style={{
@@ -294,6 +313,7 @@ export default function CanvasPage() {
               setShowDiff(false);
               setShowDictionary(false);
               setShowDrift(false);
+              setShowMapping(false);
             }}
             disabled={!modelId}
             style={{
@@ -376,6 +396,11 @@ export default function CanvasPage() {
         {showDrift && (
           <div style={{ width: '45%', minWidth: 380, maxWidth: 720 }}>
             <DriftPanel onClose={() => setShowDrift(false)} />
+          </div>
+        )}
+        {showMapping && (
+          <div style={{ width: '45%', minWidth: 380, maxWidth: 720 }}>
+            <MappingPanel onClose={() => setShowMapping(false)} />
           </div>
         )}
       </div>

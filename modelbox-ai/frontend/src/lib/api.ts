@@ -9,6 +9,15 @@ import axios from 'axios';
 
 import { useAuthStore } from '@/store/authStore';
 import type {
+  AuthorEntryBody,
+  ColumnPick,
+  MappingDocument,
+  MappingExport,
+  MappingExportFormat,
+  MappingLineage,
+  MappingReport,
+} from '@/types/mapping';
+import type {
   Assignment,
   GradeResult,
   SocraticStep,
@@ -548,4 +557,60 @@ export async function downloadExportZip(
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+// --- Source-to-target mapping (Sprint 9 Step 3) ---
+// The decider of every decision is the signed-in caller; no request names one.
+export async function listMappings(modelId: string): Promise<MappingDocument[]> {
+  const { data } = await apiClient.get<MappingDocument[]>(`/model/${modelId}/mappings`);
+  return data;
+}
+
+export async function createMapping(
+  targetModelId: string,
+  body: { source_model_id: string; title: string },
+): Promise<MappingReport> {
+  const { data } = await apiClient.post<MappingReport>(`/model/${targetModelId}/mappings`, body);
+  return data;
+}
+
+export async function getMapping(documentId: string): Promise<MappingReport> {
+  const { data } = await apiClient.get<MappingReport>(`/mappings/${documentId}`);
+  return data;
+}
+
+/** ModelBox's candidates for unmapped columns: pending until a person decides. */
+export async function proposeMappings(documentId: string): Promise<MappingReport> {
+  const { data } = await apiClient.post<MappingReport>(`/mappings/${documentId}/proposals`);
+  return data;
+}
+
+export async function acceptProposal(documentId: string, proposalId: string): Promise<MappingReport> {
+  const { data } = await apiClient.post<MappingReport>(`/mappings/${documentId}/proposals/${proposalId}/accept`);
+  return data;
+}
+
+export async function rejectProposal(documentId: string, proposalId: string): Promise<MappingReport> {
+  const { data } = await apiClient.post<MappingReport>(`/mappings/${documentId}/proposals/${proposalId}/reject`);
+  return data;
+}
+
+export async function authorEntry(documentId: string, body: AuthorEntryBody): Promise<MappingReport> {
+  const { data } = await apiClient.post<MappingReport>(`/mappings/${documentId}/entries`, body);
+  return data;
+}
+
+export async function removeEntry(documentId: string, mappingKey: string): Promise<MappingReport> {
+  const { data } = await apiClient.delete<MappingReport>(`/mappings/${documentId}/entries/${mappingKey}`);
+  return data;
+}
+
+export async function exportMapping(documentId: string, format: MappingExportFormat): Promise<MappingExport> {
+  const { data } = await apiClient.get<MappingExport>(`/mappings/${documentId}/export`, { params: { format } });
+  return data;
+}
+
+export async function getLineage(documentId: string, target: ColumnPick): Promise<MappingLineage> {
+  const { data } = await apiClient.get<MappingLineage>(`/mappings/${documentId}/lineage`, { params: target });
+  return data;
 }

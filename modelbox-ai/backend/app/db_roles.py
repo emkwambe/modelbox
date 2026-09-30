@@ -20,7 +20,14 @@ Every statement is safe to repeat.
 from __future__ import annotations
 
 APP_ROLE = "modelbox_app"
+# The ledgers migration 0022 made append-only. It loops over this tuple to
+# create their triggers, so it never grows: a later ledger is added below.
 LEDGERS = ("audit_event", "egress_audit")
+# Ledgers created by later migrations, each of which creates its own triggers
+# (0030: mapping_decisions, Sprint 9 Step 3). Their REVOKE is guarded on the
+# table existing, because 0022 runs these statements before the table does.
+LATER_LEDGERS = ("mapping_decisions",)
+ALL_LEDGERS = (*LEDGERS, *LATER_LEDGERS)
 
 
 def app_role_statements() -> list[str]:
@@ -44,6 +51,11 @@ def app_role_statements() -> list[str]:
         f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {APP_ROLE}",
         f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {APP_ROLE}",
         *(f"REVOKE UPDATE, DELETE, TRUNCATE ON {ledger} FROM {APP_ROLE}, PUBLIC" for ledger in LEDGERS),
+        *(
+            f"DO $$ BEGIN IF to_regclass('public.{ledger}') IS NOT NULL THEN "
+            f"REVOKE UPDATE, DELETE, TRUNCATE ON {ledger} FROM {APP_ROLE}, PUBLIC; END IF; END $$;"
+            for ledger in LATER_LEDGERS
+        ),
         f"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON alembic_version FROM {APP_ROLE}",
         (
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public "

@@ -179,7 +179,10 @@ async def test_adventureworks_differs_only_by_the_computed_columns_it_cannot_exp
     catalog, got, gaps, _ = await _round_trip(session, "tsql", "adventureworks")
     kinds = Counter(g.kind for g in gaps)
     assert (kinds["computed_column"], kinds["generated_column"]) == (len(refused), len(declared) - len(refused))
-    assert set(kinds) <= {"computed_column", "generated_column", "data_type"}
+    # A collation gap names text comparisons that may behave differently; it
+    # removes nothing, which the differences below confirm.
+    assert set(kinds) <= {"computed_column", "generated_column", "data_type", "collation"}
+    assert kinds["collation"] > 0
     differences = _differences(catalog, got)
     assert sum(v for (_, kind), v in differences.items() if kind == "columns") == len(refused)
     assert {kind for _, kind in differences} <= {"columns", "column_descriptions"}

@@ -367,7 +367,75 @@ async def test_0025_converts_the_seeded_gold_models_with_nothing_to_list(upgrade
 
 async def test_the_database_reached_head(upgraded) -> None:
     rows = await _fetch(upgraded["dsn"], "SELECT version_num FROM alembic_version")
-    assert rows == [{"version_num": "0029_computed_columns"}]
+    assert rows == [{"version_num": "0030_source_to_target_mapping"}]
+
+
+_MAPPING_TABLES = ("mapping_documents", "mapping_entries", "mapping_entry_sources", "mapping_proposals")
+
+
+async def _tables(dsn: str) -> set[str]:
+    rows = await _fetch(dsn, "SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+    return {r["tablename"] for r in rows}
+
+
+def test_0030_downgrade_keeps_the_decisions_and_a_re_upgrade_adopts_them(server: str) -> None:
+    """Owner, H3: a downgrade loses every mapping and keeps mapping_decisions;
+    upgrading again adopts that table, rows intact and still append-only."""
+    asyncio.run(_check_0030_round_trip(_database(server, "downgrade_0030")))
+
+
+async def _check_0030_round_trip(dsn: str) -> None:
+    _upgrade_to(BACKEND, dsn, "head")
+    workspace, model, document, user = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    await _execute(dsn, "INSERT INTO workspaces (workspace_id, name) VALUES (:w, 'W')", w=workspace)
+    await _execute(dsn, "INSERT INTO data_models (model_id, workspace_id, title) VALUES (:m, :w, 'T')",
+                   m=model, w=workspace)
+    await _execute(dsn, "INSERT INTO mapping_documents (document_id, workspace_id, target_model_id, "
+                        "source_model_title, title) VALUES (:d, :w, :m, 'S', 'Doc')", d=document, w=workspace, m=model)
+    await _execute(dsn, "INSERT INTO mapping_entries (document_id, mapping_key, target_entity, target_column, kind, "
+                        "provenance, provenance_by, provenance_at, value_digest) VALUES (:d, 'M-0001', 't', 'c', "
+                        "'constant', 'person', 'p@example.com', now(), 'x')", d=document)
+    await _execute(dsn, "INSERT INTO mapping_decisions (workspace_id, document_id, mapping_key, decision, "
+                        "decided_by_user_id, decided_by_email, evidence) VALUES (:w, :d, 'M-0001', 'authored', :u, "
+                        "'p@example.com', '{\"shown\": 1}')", w=workspace, d=document, u=user)
+    before = await _fetch(dsn, "SELECT decision_id, decision, decided_by_user_id, CAST(evidence AS TEXT) AS evidence "
+                               "FROM mapping_decisions")
+    assert len(before) == 1, "fixture sanity: one decision recorded"
+
+    result = _alembic(BACKEND, dsn, "downgrade", "0029_computed_columns")
+    assert result.returncode == 0, result.stderr[-3000:]
+    assert await _fetch(dsn, "SELECT version_num FROM alembic_version") == [
+        {"version_num": "0029_computed_columns"}]
+    tables = await _tables(dsn)
+    assert not tables & set(_MAPPING_TABLES), "the mappings are lost"
+    assert "mapping_decisions" in tables
+    assert await _fetch(dsn, "SELECT decision_id, decision, decided_by_user_id, CAST(evidence AS TEXT) AS evidence "
+                             "FROM mapping_decisions") == before
+
+    _upgrade_to(BACKEND, dsn, "head")
+    assert set(_MAPPING_TABLES) <= await _tables(dsn)
+    assert await _fetch(dsn, "SELECT count(*) AS n FROM mapping_entries") == [{"n": 0}]
+    assert await _fetch(dsn, "SELECT decision_id, decision, decided_by_user_id, CAST(evidence AS TEXT) AS evidence "
+                             "FROM mapping_decisions") == before
+    # Still append-only after adoption.
+    with pytest.raises(Exception, match="append-only"):
+        await _execute(dsn, "DELETE FROM mapping_decisions")
+
+
+def test_0030_refuses_to_adopt_a_table_it_does_not_define(server: str) -> None:
+    """Negative control: a mapping_decisions of another shape stops the upgrade
+    rather than being taken for the ledger."""
+    asyncio.run(_check_0030_refuses(_database(server, "refuse_0030")))
+
+
+async def _check_0030_refuses(dsn: str) -> None:
+    _upgrade_to(BACKEND, dsn, "0029_computed_columns")
+    await _execute(dsn, "CREATE TABLE mapping_decisions (decision_id uuid PRIMARY KEY, note text)")
+    result = _alembic(BACKEND, dsn, "upgrade", "head")
+    assert result.returncode != 0
+    assert "refusing to adopt" in result.stdout + result.stderr
+    assert await _fetch(dsn, "SELECT version_num FROM alembic_version") == [
+        {"version_num": "0029_computed_columns"}]
 
 
 async def test_0029_new_columns_are_empty_on_existing_models(upgraded) -> None:

@@ -274,6 +274,12 @@ Open **Export artifacts** on the canvas. Tabs:
     (a negated class `[^…]`, an `ESCAPE` clause, or a character `SIMILAR TO`
     treats as special) makes the CHECK an export gap that quotes it. Other
     targets name every such CHECK as a gap.
+  - Collation is not in the model. SQL Server's default collations compare
+    text case-insensitively and PostgreSQL compares it case-sensitively, so
+    each table with a text primary or foreign key, a UNIQUE constraint on
+    text, or a `LIKE` CHECK is listed as a `collation` export gap naming
+    them. For example, a UNIQUE that refuses `'abc'` beside `'ABC'` in SQL
+    Server accepts both in PostgreSQL.
 
   For **dbt**, choose the warehouse the project will run on. Each staging
   model casts its columns to the types the DDL export writes for that dialect,
@@ -415,6 +421,44 @@ the audit log (`MEMBER_ADDED`, `MEMBER_ROLE_CHANGED`, `MEMBER_REMOVED`).
 
 **API:** `GET`/`POST /api/v1/workspaces/{id}/members`,
 `PATCH`/`DELETE /api/v1/workspaces/{id}/members/{user_id}`.
+
+## Source-to-target mapping
+
+Open **Mapping** on the canvas of the model you are mapping *into*. A MEMBER
+or above picks the source model and starts a mapping. The panel lists every
+column of the target and its status:
+
+- **mapped**, from one source column, or from several with the transformation
+  stated;
+- **explicitly unmapped**: a constant, derived, or not yet mapped, each stated
+  by a person;
+- **pending review**: ModelBox has proposed candidates, and no person has
+  decided;
+- **silent**: nothing at all, which the document reports as an error;
+- **in drift**: its source or target column no longer exists. The entry is
+  kept and flagged, never dropped.
+
+The top line reads "N of M target columns mapped, K explicitly unmapped, S
+silent", followed by the pending and drift counts. The mapping is complete
+only when nothing is pending, silent or in drift.
+
+**Propose mappings** asks ModelBox for candidates. Each shows its **name
+similarity** and **type compatibility** scores and an overall **confidence**.
+A proposal counts as nothing until a person accepts or rejects it. You can
+also write an entry yourself, choosing the kind, the source columns and a rule
+in plain language. Every decision records who made it, when, and what was
+shown. Decisions need a person signed in, so an API key cannot make one.
+
+**Lineage** on a column shows its sources as they stand now, any drift, and
+every decision about it. **Export** gives CSV, Markdown, HTML or JSON, one row
+per target column, with the completeness line at the top. The columns cover
+the mapping, the target and the source, the transformation and its rule and
+logic, joins and filters, lookups, null handling, SCD type, the control and
+reconciliation fields, masking, and the classification and CDE carried from
+the dictionary.
+
+**API:** `/api/v1/model/{id}/mappings` and `/api/v1/mappings/{document_id}/…`
+(the API reference lists every route).
 
 ## Workflow 7 — CI/CD integration via API keys
 

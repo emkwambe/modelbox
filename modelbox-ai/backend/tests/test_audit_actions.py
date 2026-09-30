@@ -243,6 +243,28 @@ async def _field_status_changed(c: AsyncClient, w: dict[str, Any]) -> None:
                               headers=bearer(w["admin"])), 200)
 
 
+async def _mapping_created(c: AsyncClient, w: dict[str, Any]) -> str:
+    """A mapping from the model to itself: the smallest document there is."""
+    if "model_id" not in w:
+        await _model_created(c, w)
+    created = await _ok(await c.post(f"/api/v1/model/{w['model_id']}/mappings", headers=bearer(w["admin"]),
+                                     json={"source_model_id": w["model_id"], "title": "M"}), 201)
+    return created.json()["document"]["document_id"]
+
+
+async def _mapping_deleted(c: AsyncClient, w: dict[str, Any]) -> None:
+    document = await _mapping_created(c, w)
+    await _ok(await c.delete(f"/api/v1/mappings/{document}", headers=bearer(w["admin"])), 204)
+
+
+async def _mapping_decided(c: AsyncClient, w: dict[str, Any]) -> None:
+    """A person declares a target column explicitly unmapped."""
+    document = await _mapping_created(c, w)
+    await _ok(await c.post(f"/api/v1/mappings/{document}/entries", headers=bearer(w["admin"]),
+                           json={"target": {"entity": "customers", "column": "customer_id"},
+                                 "kind": "not_yet_mapped"}), 201)
+
+
 async def _classification_changed(c: AsyncClient, w: dict[str, Any]) -> None:
     await _ok(await c.post(f"/api/v1/workspaces/{w['ws'].workspace_id}/classification/levels",
                            json={"name": "Secret"}, headers=bearer(w["admin"])), 201)
@@ -266,6 +288,9 @@ TRIGGERS: dict[str, Trigger] = {
     "CLASSIFICATION_CHANGED": _classification_changed,
     "MEMBER_ROLE_CHANGED": _member_role_changed,
     "MEMBER_REMOVED": _member_removed,
+    "MAPPING_DOCUMENT_CREATED": _mapping_created,  # type: ignore[dict-item]
+    "MAPPING_DOCUMENT_DELETED": _mapping_deleted,
+    "MAPPING_DECIDED": _mapping_decided,
 }
 
 
