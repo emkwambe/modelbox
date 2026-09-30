@@ -555,6 +555,123 @@ statement; what was not imported and why; what the model cannot hold yet.
 
 ---
 
+## Source-to-Target Mapping
+
+A mapping document maps a source model's columns to a target model's, both in
+one workspace. Every response that returns a document gives every target
+column with its status, completeness and drift:
+
+- **Status:** `mapped`, explicitly unmapped (`constant`, `derived`,
+  `not_yet_mapped`), `pending` (only proposals), `silent` (nothing), or
+  `drift`.
+- **Completeness:** "N of M target columns mapped, K explicitly unmapped, S
+  silent", with pending proposals and accepted entries counted separately. A
+  pending proposal never counts as mapped, and the document is complete only
+  when nothing is pending, silent or in drift.
+- **Drift:** an entry whose source or target column no longer exists is
+  flagged and kept, never dropped.
+
+Reading is VIEWER. Proposing and deciding is MEMBER. **Every decision** (accept,
+reject, write, change, remove) takes the decider from the signed-in caller and
+records who decided, when, and the evidence shown, in an append-only record. A
+request with an API key is refused with `403`, because a decision needs a
+person. No request body can name a decider (`422`).
+
+### `GET /api/v1/model/{model_id}/mappings`
+
+The mapping documents whose target is this model (VIEWER+).
+
+### `POST /api/v1/model/{model_id}/mappings`
+
+Start a mapping into this model (MEMBER+). Body: `source_model_id`, `title`,
+and optionally `source_system` and `target_system`. A source model in another
+workspace answers `404`. **Responses:** `201`, `403`, `404`.
+
+### `GET /api/v1/mappings/{document_id}`
+
+The document, as above (VIEWER+).
+
+### `DELETE /api/v1/mappings/{document_id}`
+
+Delete the document, with its entries and proposals. Its decisions stay in the
+record (MEMBER+). **Responses:** `204`.
+
+### `POST /api/v1/mappings/{document_id}/proposals`
+
+Propose candidates for each target column that has no entry (MEMBER+). Each
+proposal gives its source columns, a **name similarity** and a **type
+compatibility** (each 0 to 1) and a **confidence** (0.7 × name + 0.3 × type),
+with the method and its version. Proposals under 0.6 are not made, and each
+column gets at most three. A proposal is `pending` and counts as nothing until
+a person decides it.
+
+### `POST /api/v1/mappings/{document_id}/proposals/{proposal_id}/accept`
+
+Accept a pending proposal (MEMBER+, a person). An optional body, `sources` and
+`fields`, edits it first, and is recorded as `edited`. **Responses:** `200`,
+`403` (an API key), `404`, `422` (not pending, or refused by the rules).
+
+### `POST /api/v1/mappings/{document_id}/proposals/{proposal_id}/reject`
+
+Reject a pending proposal (MEMBER+, a person).
+
+### `POST /api/v1/mappings/{document_id}/entries`
+
+Write an entry for one target column (MEMBER+, a person). Body: `target`
+(`entity`, `column`) and `kind` (`mapped`, `constant`, `derived`,
+`not_yet_mapped`). A `mapped` entry also has `sources` (one for one-to-one,
+several for many-to-one, which must state `rule_description` or `logic`). The
+optional `fields` are the STTM fields:
+
+- `transformation_type`, one of OpenLineage's `IDENTITY`, `TRANSFORMATION`,
+  `AGGREGATION`, `JOIN`, `GROUP_BY`, `FILTER`, `SORT`, `WINDOW`,
+  `CONDITIONAL`;
+- `rule_description`, `logic`, `join_filter`, `lookup`,
+  `default_null_handling`;
+- `scd_type` (0–6) and `step_kind` (`manual` or `automated`);
+- `control_rule`, and the three reconciliation fields;
+- `masking`.
+
+A person's entry is accepted by being written, recorded as `authored`, or
+`declared_unmapped` for the three unmapped kinds. **Responses:** `201`, `403`,
+`422` (with the reason).
+
+### `PUT /api/v1/mappings/{document_id}/entries/{mapping_key}`
+
+Change an entry (MEMBER+, a person): `kind`, `sources` and `fields`, as above.
+
+### `DELETE /api/v1/mappings/{document_id}/entries/{mapping_key}`
+
+Remove an entry (MEMBER+, a person). Its target column is reported silent.
+
+### `GET /api/v1/mappings/{document_id}/export`
+
+The document as `format` = `csv` (default), `markdown`, `html` or `json`
+(VIEWER+). Each has one row per target column, with the completeness line at
+the top. The columns are:
+
+- the mapping's ID, version, status, approver, approval date and last
+  decision;
+- the target's system, table, column, type, nullable and key;
+- the source's system, schema, table, column and type;
+- the transformation type, rule, logic, join and filter, lookup, and default
+  and null handling;
+- SCD type, manual or automated, the control rule, and the three
+  reconciliation fields;
+- masking, and the classification and CDE carried from the source columns'
+  dictionary fields;
+- drift, and any pending proposals with their scores.
+
+**Responses:** `200` (`{format, filename, content}`), `422` for another format.
+
+### `GET /api/v1/mappings/{document_id}/lineage`
+
+One target column's lineage (VIEWER+), with `entity` and `column` in the query:
+its entry, its source columns as they stand now, its drift flags, and every
+decision about it with its evidence.
+
+---
+
 ## ModelBox Trainer
 
 ### `GET /api/v1/trainer/assignments`
