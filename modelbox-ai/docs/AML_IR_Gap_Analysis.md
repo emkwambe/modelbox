@@ -141,8 +141,10 @@ The doc's highest-value claim (§4.5, threshold simulation and back-testing) is
 not a nice-to-have. Above-the-line/below-the-line testing is an **examination
 expectation**, and third-party BSA/AML monitoring solutions used for detecting
 suspicious activity are generally treated as *models*, pulling them into
-model-risk validation. The current US supervisory guidance on model risk is
-SR 26-2 (April 2026), which is guidance rather than an enforceable standard. The pain is quantified: rule-based transaction
+model-risk validation. Whether a given AML monitoring system is a model for
+model-risk purposes is each institution's determination under SR 26-2 (April
+2026), the current US supervisory guidance on model risk, which is guidance
+rather than an enforceable standard. The pain is quantified: rule-based transaction
 monitoring runs **85–99% false positives**, institutions spend **$54bn+ a year**
 on transaction-monitoring operations of which 60–80% is labour, and global AML
 compliance cost is put north of **$274bn**. A tool that lets a team try a
