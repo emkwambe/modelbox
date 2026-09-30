@@ -875,17 +875,17 @@ def _choices(node: exp.Expression, names: list[str]) -> tuple[str, list[object]]
     node = _unwrap(node)
     if isinstance(node, exp.Or):
         owner: str | None = None
-        exact: list[object] = []
-        patterned: list[object] = []
+        values: list[object] = []
         for branch in _branches(node):
             found = _choices(branch, names)
             if found is None or (owner is not None and found[0] != owner):
                 return None
             owner = found[0]
-            (patterned if isinstance(branch, exp.Like) else exact).extend(found[1])
-        # An equality means the same in every dialect; a LIKE pattern may not
-        # (T-SQL's [A-Z] is a character class, PostgreSQL's is literal text).
-        return (owner, exact or patterned) if owner is not None else None
+            values.extend(found[1])
+        # A LIKE branch's sample counts as much as an equality: the DDL export
+        # writes a T-SQL character class with the same meaning in PostgreSQL
+        # (SIMILAR TO), or names the CHECK as a gap.
+        return (owner, values) if owner is not None else None
     if isinstance(node, exp.EQ):
         for side, other in ((node.this, node.expression), (node.expression, node.this)):
             column = _column_name(side, names)

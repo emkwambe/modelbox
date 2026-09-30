@@ -211,12 +211,14 @@ def test_check_value_lists_under_upper_are_honoured() -> None:
     assert {r["gender"].upper() for r in rows} <= set(allowed)
 
 
-def test_equality_is_preferred_to_a_dialect_specific_like_pattern() -> None:
-    # T-SQL's [A-Za-z] is a character class; in PostgreSQL it is literal text.
+def test_a_like_character_class_and_an_equality_both_supply_values() -> None:
+    # T-SQL's [A-Za-z] is one letter. Both branches are drawn from, and every
+    # value satisfies the CHECK as SQL Server reads it.
     model = _model(_checked("bin", [_col("id", "INTEGER", pk=True), _col("shelf", "VARCHAR(10)")],
                             "shelf LIKE '[A-Za-z]' OR shelf = 'N/A'"))
-    rows = _csv(model, 5, source_dialect="tsql")["bin"]
-    assert {r["shelf"] for r in rows} == {"N/A"}
+    shelves = {r["shelf"] for r in _csv(model, 20, source_dialect="tsql")["bin"]}
+    assert "N/A" in shelves and any(re.fullmatch("[A-Za-z]", s) for s in shelves)
+    assert all(s == "N/A" or re.fullmatch("[A-Za-z]", s) for s in shelves)
 
 
 def test_is_json_check_is_honoured() -> None:
