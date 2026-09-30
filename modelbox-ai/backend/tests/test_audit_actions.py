@@ -265,6 +265,20 @@ async def _mapping_decided(c: AsyncClient, w: dict[str, Any]) -> None:
                                  "kind": "not_yet_mapped"}), 201)
 
 
+async def _suggestion_decided(c: AsyncClient, w: dict[str, Any]) -> None:
+    """An import with an e-mail column; the rules suggest it; a person rejects."""
+    ddl = b"CREATE TABLE contacts (contact_id integer PRIMARY KEY, email varchar(100));\n"
+    imported = await _ok(await c.post(
+        "/api/v1/import/ddl", params={"workspace_id": str(w["ws"].workspace_id)},
+        files={"file": ("contacts.sql", ddl, "application/sql")}, data={"dialect": "postgres"},
+        headers=bearer(w["admin"])), 201)
+    model = imported.json()["model_id"]
+    run = await _ok(await c.post(f"/api/v1/model/{model}/suggestions", headers=bearer(w["admin"])), 200)
+    email = next(s for s in run.json()["suggestions"] if s["column"] == "email")
+    await _ok(await c.post(f"/api/v1/model/{model}/suggestions/{email['suggestion_id']}/reject",
+                           headers=bearer(w["admin"])), 200)
+
+
 async def _classification_changed(c: AsyncClient, w: dict[str, Any]) -> None:
     await _ok(await c.post(f"/api/v1/workspaces/{w['ws'].workspace_id}/classification/levels",
                            json={"name": "Secret"}, headers=bearer(w["admin"])), 201)
@@ -291,6 +305,7 @@ TRIGGERS: dict[str, Trigger] = {
     "MAPPING_DOCUMENT_CREATED": _mapping_created,  # type: ignore[dict-item]
     "MAPPING_DOCUMENT_DELETED": _mapping_deleted,
     "MAPPING_DECIDED": _mapping_decided,
+    "SUGGESTION_DECIDED": _suggestion_decided,
 }
 
 

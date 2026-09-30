@@ -1034,6 +1034,8 @@ AUDIT_ACTIONS: tuple[str, ...] = (
     "MAPPING_DOCUMENT_CREATED",
     "MAPPING_DOCUMENT_DELETED",
     "MAPPING_DECIDED",
+    # A person accepting or rejecting a suggestion (Sprint 9 Step 4, migration 0031).
+    "SUGGESTION_DECIDED",
 )
 
 #: Outcomes. `DENIED` is separate from `FAILURE` on purpose: a refused
@@ -1323,6 +1325,74 @@ class MappingDecision(Base):
     entry_digest_after: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+# ---------------------------------------------------------------------------
+# Suggestions (Sprint 9 Step 4, migration 0031; owner, H3, 2026-09-30)
+# ---------------------------------------------------------------------------
+SUGGESTION_KINDS = ("pii", "agg_time_column")
+SUGGESTION_STATUSES = ("pending", "accepted", "rejected", "superseded")
+
+
+class ModelSuggestion(Base):
+    """ModelBox's guess about a column: inference, beside the model and never in it.
+
+    A suggestion is never a value the model holds, so no export can show it as
+    one. Accepting it is a person's decision, which writes the value through
+    the ordinary save path with provenance ``person``; from there the Step 4b
+    path decides whether that field is ever verified. ``provenance`` is fixed
+    to ``heuristic`` and ``status`` has no ``verified``: the table cannot hold
+    a verified suggestion. Columns are referenced by name and stable id, not by
+    foreign key, as a mapping's are, so a save that removes the column leaves
+    the suggestion to be shown as stale rather than silently deleting it.
+    """
+
+    __tablename__ = "model_suggestions"
+    __table_args__ = (
+        CheckConstraint("kind IN ('pii', 'agg_time_column')", name="ck_model_suggestions_kind"),
+        CheckConstraint("status IN ('pending', 'accepted', 'rejected', 'superseded')",
+                        name="ck_model_suggestions_status"),
+        CheckConstraint("provenance = 'heuristic'", name="ck_model_suggestions_provenance"),
+        CheckConstraint("rule_source IN ('builtin', 'client')", name="ck_model_suggestions_rule_source"),
+        CheckConstraint("confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
+                        name="ck_model_suggestions_confidence"),
+        # A PII guess carries no score; a time-column candidate is ranked by one.
+        CheckConstraint(
+            "(kind = 'pii' AND confidence IS NULL) OR (kind = 'agg_time_column' AND confidence IS NOT NULL)",
+            name="ck_model_suggestions_confidence_kind"),
+        # Decided exactly when a person is named, with a time.
+        CheckConstraint(
+            "(status IN ('accepted', 'rejected')) = (decided_by_user_id IS NOT NULL AND decided_by_email IS NOT NULL "
+            "AND decided_at IS NOT NULL)",
+            name="ck_model_suggestions_decided"),
+        Index("uq_model_suggestions_pending", "model_id", "kind", "entity_name", "column_name", "category",
+              unique=True, postgresql_where=text("status = 'pending'"), sqlite_where=text("status = 'pending'")),
+    )
+
+    suggestion_id: Mapped[uuid.UUID] = _uuid_pk()
+    model_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("data_models.model_id", ondelete="CASCADE"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    entity_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    column_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    column_stable_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    suggested: Mapped[dict] = mapped_column(JSON, nullable=False)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    anchor: Mapped[str] = mapped_column(String(160), nullable=False)
+    rule_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    rule_source: Mapped[str] = mapped_column(String(16), nullable=False)
+    ruleset_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    signals: Mapped[dict] = mapped_column(JSON, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    provenance: Mapped[str] = mapped_column(String(16), nullable=False, default="heuristic",
+                                            server_default=text("'heuristic'"))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending",
+                                        server_default=text("'pending'"))
+    decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    decided_by_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    decided_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.current_timestamp(), nullable=False)
+
+
 __all__ = [
     "ATTESTATION_STATUSES",
     "AUDIT_ACTIONS",
@@ -1337,6 +1407,8 @@ __all__ = [
     "JOB_STATUSES",
     "PARADIGMS",
     "PROVENANCE_KINDS",
+    "SUGGESTION_KINDS",
+    "SUGGESTION_STATUSES",
     "VERIFIABLE_PROVENANCE",
     "WORKSPACE_ROLES",
     "ApiKey",
@@ -1357,6 +1429,7 @@ __all__ = [
     "MappingEntrySource",
     "MappingProposal",
     "ModelEntity",
+    "ModelSuggestion",
     "SynthesisJob",
     "TrainerAssignment",
     "TrainerSubmission",

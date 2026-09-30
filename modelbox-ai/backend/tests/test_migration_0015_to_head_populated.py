@@ -367,7 +367,88 @@ async def test_0025_converts_the_seeded_gold_models_with_nothing_to_list(upgrade
 
 async def test_the_database_reached_head(upgraded) -> None:
     rows = await _fetch(upgraded["dsn"], "SELECT version_num FROM alembic_version")
-    assert rows == [{"version_num": "0030_source_to_target_mapping"}]
+    assert rows == [{"version_num": "0031_suggestions"}]
+
+
+async def test_0031_suggests_nothing_by_itself(upgraded) -> None:
+    """0031 creates the table and writes no row: suggestions come from a person
+    running the rules, never from an upgrade."""
+    rows = await _fetch(upgraded["dsn"], "SELECT count(*) AS n FROM model_suggestions")
+    assert rows == [{"n": 0}]
+
+
+def test_0031_downgrade_clears_only_the_newer_pii_types_and_lists_each(server: str) -> None:
+    """Owner, H3: the release before reads seven PII types. A column holding a
+    newer one keeps is_pii, loses the type, returns a verified pii field to
+    pending, and is listed; an older type is untouched. The suggestions go, and
+    the audit vocabulary stays wide. Up again: an empty table, whose CHECKs
+    refuse a verified or non-heuristic suggestion (the controls)."""
+    asyncio.run(_check_0031_downgrade(_database(server, "downgrade_0031")))
+
+
+async def _check_0031_downgrade(dsn: str) -> None:
+    _upgrade_to(BACKEND, dsn, "head")
+    workspace = uuid.uuid4()
+    await _execute(dsn, "INSERT INTO workspaces (workspace_id, name) VALUES (:w, 'W')", w=workspace)
+    model = await _seed_pii(dsn, workspace)
+    await _execute(dsn, "UPDATE entity_columns SET is_pii = TRUE, pii_type = 'DATE_OF_BIRTH' "
+                        "WHERE column_name = 'nickname'")
+    nickname = (await _fetch(dsn, "SELECT column_id, entity_id FROM entity_columns WHERE column_name = 'nickname'"))[0]
+    email = (await _fetch(dsn, "SELECT column_id, entity_id FROM entity_columns WHERE column_name = 'email'"))[0]
+    # A verified pii field on each: the newer type's must lapse, the older type's
+    # must not (the control that the reset reaches only the columns it clears).
+    for column in (nickname, email):
+        await _execute(dsn, "INSERT INTO field_attestations (model_id, entity_id, column_id, field_key, status, "
+                            "provenance, provenance_by, provenance_at, verified_by, verified_at) VALUES (:m, :e, :c, "
+                            "'pii', 'verified', 'person', 'p@example.com', now(), 'a@example.com', now())",
+                       m=model, e=column["entity_id"], c=column["column_id"])
+    changed_before = await _fetch(dsn, "SELECT count(*) AS n FROM audit_event WHERE action = 'FIELD_STATUS_CHANGED'")
+    await _execute(dsn, "INSERT INTO model_suggestions (model_id, kind, entity_name, column_name, suggested, "
+                        "category, anchor, rule_name, rule_source, ruleset_digest, signals) VALUES (:m, 'pii', "
+                        "'person', 'email', '{}', 'EMAIL', 'a', 'pii.email.name', 'builtin', 'd', '{}')", m=model)
+
+    result = _alembic(BACKEND, dsn, "downgrade", "0030_source_to_target_mapping")
+    assert result.returncode == 0, result.stderr[-3000:]
+    assert await _fetch(dsn, "SELECT version_num FROM alembic_version") == [
+        {"version_num": "0030_source_to_target_mapping"}]
+    columns = await _fetch(dsn, "SELECT column_name, is_pii, pii_type FROM entity_columns ORDER BY column_name")
+    assert columns == [
+        {"column_name": "age", "is_pii": False, "pii_type": None},
+        {"column_name": "email", "is_pii": True, "pii_type": "EMAIL"},        # an older type: untouched
+        {"column_name": "nickname", "is_pii": True, "pii_type": None},        # cleared, still PII
+        {"column_name": "phone", "is_pii": False, "pii_type": "PHONE"},
+    ]
+    field = await _fetch(dsn, "SELECT status, verified_by, verified_at FROM field_attestations "
+                              "WHERE column_id = :c AND field_key = 'pii'", c=nickname["column_id"])
+    assert field == [{"status": "pending", "verified_by": None, "verified_at": None}]
+    kept = await _fetch(dsn, "SELECT status, verified_by FROM field_attestations "
+                             "WHERE column_id = :c AND field_key = 'pii'", c=email["column_id"])
+    assert kept == [{"status": "verified", "verified_by": "a@example.com"}]
+    events = await _fetch(dsn, "SELECT CAST(detail AS TEXT) AS detail FROM audit_event "
+                               "WHERE action = 'FIELD_STATUS_CHANGED'")
+    assert len(events) == changed_before[0]["n"] + 1, "one status change, one audit event"
+    assert any('"column": "nickname"' in e["detail"] and '"to": "pending"' in e["detail"] for e in events)
+    findings = await _fetch(dsn, "SELECT revision, kind, entity_name, detail FROM model_conversion_findings "
+                                 "WHERE model_id = :m", m=model)
+    assert len(findings) == 1
+    assert (findings[0]["revision"], findings[0]["kind"], findings[0]["entity_name"]) == (
+        "0031_suggestions", "pii_type_cleared", "person")
+    assert "nickname" in findings[0]["detail"] and "DATE_OF_BIRTH" in findings[0]["detail"]
+    assert "model_suggestions" not in await _tables(dsn)
+    # The audit vocabulary stays wide: audit rows are never deleted.
+    await _execute(dsn, "INSERT INTO audit_event (audit_id, action, outcome, scope, workspace_id) "
+                        "VALUES (:a, 'SUGGESTION_DECIDED', 'SUCCESS', 'workspace', :w)", a=uuid.uuid4(), w=workspace)
+
+    _upgrade_to(BACKEND, dsn, "head")
+    assert await _fetch(dsn, "SELECT count(*) AS n FROM model_suggestions") == [{"n": 0}]
+    insert = ("INSERT INTO model_suggestions (model_id, kind, entity_name, column_name, suggested, category, anchor, "
+              "rule_name, rule_source, ruleset_digest, signals, provenance, status) VALUES (:m, 'pii', 'person', "
+              "'email', '{}', 'EMAIL', 'a', 'r', 'builtin', 'd', '{}', :p, :s)")
+    with pytest.raises(sa.exc.IntegrityError, match="ck_model_suggestions_status"):
+        await _execute(dsn, insert, m=model, p="heuristic", s="verified")
+    with pytest.raises(sa.exc.IntegrityError, match="ck_model_suggestions_provenance"):
+        await _execute(dsn, insert, m=model, p="person", s="pending")
+    await _execute(dsn, insert, m=model, p="heuristic", s="pending")  # control: the valid row is accepted
 
 
 _MAPPING_TABLES = ("mapping_documents", "mapping_entries", "mapping_entry_sources", "mapping_proposals")

@@ -106,6 +106,14 @@ class Settings(BaseSettings):
         default="/app/config/model_router.yaml",
         description="Path to the task-based model router YAML.",
     )
+    pii_rules_path: str | None = Field(
+        default=None,
+        description=(
+            "Optional YAML file of client PII suggestion rules, added to the built-in ones "
+            "(app.services.suggestion_rules). Validated at start-up: a file that does not "
+            "validate stops the backend. Unset: the built-in rules only."
+        ),
+    )
     airgapped: bool = Field(
         default=False,
         description="Zero-egress mode (FR-6.2). Forces local-only LLM routing.",

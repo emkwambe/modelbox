@@ -547,7 +547,15 @@ class DictionaryExportResponse(BaseModel):
 
 
 class PIIType(str, enum.Enum):
-    """Privacy classification flags (FR-6.1)."""
+    """Privacy classification flags (FR-6.1).
+
+    The first seven are the original set. The rest were added in Sprint 9
+    Step 4 (migration 0031), one per category of NIST SP 800-122 §2.2's
+    examples of PII and GLBA's nonpublic personal information
+    (15 U.S.C. § 6809(4)) that the seven did not name; each category's anchor
+    is in ``app.services.suggestion_rules.CATEGORIES``. A downgrade below 0031
+    clears a type the older release cannot read and keeps ``is_pii``.
+    """
 
     EMAIL = "EMAIL"
     SSN = "SSN"
@@ -556,6 +564,19 @@ class PIIType(str, enum.Enum):
     IBAN = "IBAN"
     NAME = "NAME"
     ADDRESS = "ADDRESS"
+    NATIONAL_ID = "NATIONAL_ID"
+    PASSPORT_NUMBER = "PASSPORT_NUMBER"
+    DRIVERS_LICENSE = "DRIVERS_LICENSE"
+    TAXPAYER_ID = "TAXPAYER_ID"
+    PATIENT_ID = "PATIENT_ID"
+    FINANCIAL_ACCOUNT = "FINANCIAL_ACCOUNT"
+    IP_ADDRESS = "IP_ADDRESS"
+    MAC_ADDRESS = "MAC_ADDRESS"
+    BIOMETRIC = "BIOMETRIC"
+    VEHICLE_ID = "VEHICLE_ID"
+    DATE_OF_BIRTH = "DATE_OF_BIRTH"
+    PLACE_OF_BIRTH = "PLACE_OF_BIRTH"
+    FINANCIAL_INFORMATION = "FINANCIAL_INFORMATION"
 
 
 # ---------------------------------------------------------------------------
