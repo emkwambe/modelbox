@@ -91,8 +91,15 @@ def _export(dialect: str, stem: str, extensions: frozenset[str] = frozenset()) -
 
 
 async def _one(engine: AsyncEngine, sql: str) -> object:
+    """The single value a query returns."""
     async with engine.begin() as conn:
         return (await conn.exec_driver_sql(sql)).scalar()
+
+
+async def _run(engine: AsyncEngine, sql: str) -> None:
+    """A statement that returns no rows."""
+    async with engine.begin() as conn:
+        await conn.exec_driver_sql(sql)
 
 
 async def _refused(engine: AsyncEngine, sql: str) -> str:
@@ -106,7 +113,7 @@ async def _refused(engine: AsyncEngine, sql: str) -> str:
 
 
 _COLUMN = """
-SELECT format_type(a.atttypid, a.atttypmod) AS type, a.attidentity AS identity,
+SELECT format_type(a.atttypid, a.atttypmod) AS type, a.attidentity::text AS identity,
        pg_get_expr(d.adbin, d.adrelid) AS default
 FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
 LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
@@ -196,7 +203,7 @@ async def test_hierarchyid_as_ltree_on_postgresql(target: AsyncEngine) -> None:
     assert await _apply(target, export.statements) == []
     assert (await _column(target, "Batch", "Node"))["type"] == "ltree"
     # ltree's own operators work on it: the depth of a path is nlevel().
-    await _one(target, """INSERT INTO "Batch" ("Node") VALUES ('1.3.7')""")
+    await _run(target, """INSERT INTO "Batch" ("Node") VALUES ('1.3.7')""")
     assert await _one(target, 'SELECT nlevel("Node") FROM "Batch"') == 3
 
 
@@ -271,5 +278,5 @@ async def test_geography_as_postgis_geography(postgis: AsyncEngine) -> None:
     assert export.statements[0] == "CREATE EXTENSION IF NOT EXISTS postgis"
     assert await _apply(postgis, export.statements) == []
     assert (await _column(postgis, "Batch", "Location"))["type"] == "geography"
-    await _one(postgis, """INSERT INTO "Batch" ("Location") VALUES (ST_GeogFromText('SRID=4326;POINT(-122.33 47.61)'))""")
+    await _run(postgis, """INSERT INTO "Batch" ("Location") VALUES (ST_GeogFromText('SRID=4326;POINT(-122.33 47.61)'))""")
     assert await _one(postgis, 'SELECT ST_AsText("Location") FROM "Batch"') == "POINT(-122.33 47.61)"
