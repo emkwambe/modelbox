@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `release/v1.12.0`, branched from `main` at
-`c676e7c`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-30 on `sprint-9/step-0-state`, branched from `main` at
+`d38d6ec` (v1.12.0). This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,13 +9,14 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `c676e7c` | claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), on the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
-| `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36516574170: gate, backend and frontend images all green) |
+| `main` | `d38d6ec` | the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `v1.12.0` | `d38d6ec` | tagged 2026-09-29 22:28 -04:00; published by the gated release workflow (run 36659993511: gate, backend and frontend images all green); verified on the published images (run 36660321337, below) |
+| `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC), published by run 36516574170; superseded by v1.12.0, tag and images kept |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `release/v1.12.0` | this branch | the release preparation for v1.12.0 (below) |
-| `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-9/step-0-state` | this branch | this snapshot only; no code, test or migration changes |
+| `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
-## Offline DDL import (on `main`)
+## Offline DDL import (v1.12.0)
 
 An exported DDL file (Oracle, PostgreSQL, or Snowflake as documentation-derived)
 is uploaded at `/import` and becomes a model, with nothing connected to. Every
@@ -28,29 +29,19 @@ import with zero gaps against their catalog manifests (Pagila as 15 tables and
 55 partitions); the Snowflake fixture fails by name on its HYBRID TABLE and is
 saved unreconciled.
 
-## In progress on this branch: v1.12.0
+## Claims, rollback and records (v1.12.0)
 
-Every version stamp reads 1.12.0 (`scripts/check_versions.py`: all stamps
-agree), the release notes are final (`docs/RELEASE_NOTES_v1.12.0.md`), and the
-CHANGELOG's unreleased section is the v1.12.0 entry. After this merges and
-`main`'s CI is green, the owner tags `v1.12.0`; the gated release workflow
-publishes the images, and Verify Release runs the black-box suite against them.
-
-## Claims, rollback and records for v1.12.0 (on `main`)
-
-The Proof Log gains PL-018 to PL-025, one per claim of the sprint (DDL import
+The Proof Log gains PL-018 to PL-025, one per claim of the release (DDL import
 per dialect, reconciliation, DDL applied to PostgreSQL, what "verified" means,
 the drift report, the migration diff's data-loss labelling, member management,
 the engagement journey), each citing tests read as passed on `main` at
 `4ea57f7` (run 36644605175); PL-016's "no API or UI to manage members" is
 struck. A claims-guard test keeps barred wording off every public surface.
-The Black-box Acceptance job now downgrades this release's database to
-v1.11.1's migration head and runs v1.11.1's published images on it
-(`test_rollback.py`). The v1.12.0 release notes were drafted there and are
-finalized on this branch; the CHANGELOG, the register and
-`OUTSTANDING_ISSUES.md` were brought up to date.
+The Black-box Acceptance job downgrades the database to v1.11.1's migration
+head and runs v1.11.1's published images on it (`test_rollback.py`); what a
+downgrade loses is stated in `docs/RELEASE_NOTES_v1.12.0.md`.
 
-## The engagement journey (on `main`)
+## The engagement journey (v1.12.0)
 
 The canvas gains two panels. **Dictionary** lists every field holding a value
 with its status and the verified count; an APPROVER, ADMIN or OWNER verifies
@@ -64,7 +55,7 @@ out on open, an unsaved change that Save keeps), and the column editor grew
 past the top of the canvas once it held the dictionary fields, leaving its
 close button out of reach (both editors now scroll within the canvas).
 
-`e2e/` is a Playwright spec, run in CI by the new Engagement Journey job
+`e2e/` is a Playwright spec, run in CI by the Engagement Journey job
 against the appliance in configuration B: import the genuine Oracle HR export
 (zero gaps), edit a column's business name and a table's owner and see them
 survive a reload, verify a field and see the counts change, edit it back to
@@ -75,7 +66,7 @@ Snowflake fixture and asserts the unreconciled warning comes first and that
 its fields cannot be verified. The black-box suite adds B10 (HR and
 AdventureWorks import over HTTP with zero gaps) and C4 (HR imports air-gapped).
 
-## Two silent-loss fixes, and workspace members (on `main`)
+## Two silent-loss fixes, and workspace members (v1.12.0)
 
 The migration diff pairs columns by internal id only between versions of the
 same model, and by name between separately saved models; an uncertain rename
@@ -92,7 +83,7 @@ at once. MEMBER_ROLE_CHANGED and MEMBER_REMOVED are back in the audit
 vocabulary (migration 0027). The black-box suite adds its VIEWER through the
 API.
 
-## The drift report (on `main`)
+## The drift report (v1.12.0)
 
 A drift report compares a saved model (the documented design) with a fresh,
 unsaved import of a DDL export of the deployed schema, through the schema-diff
@@ -108,7 +99,7 @@ them again (`backend/tests/fixtures/ddl_drift/`); the report finds exactly the
 drifts each script's hand-written manifest expects. The first drifted Oracle
 export found an importer gap (a key declared inside CREATE TABLE), now fixed.
 
-## Dictionary fields and per-field verification (on `main`)
+## Dictionary fields and per-field verification (v1.12.0)
 
 Migration 0026 adds, additively, the dictionary fields a person supplies
 (on columns: business name, permissible values, unit, critical data element,
@@ -126,7 +117,7 @@ The dictionary shows each field's status and "N of M fields verified, K
 pending review". The canvas edits the new fields; `/settings/classification`
 edits the scale.
 
-## DDL applied to PostgreSQL, and the dictionary (on `main`)
+## DDL applied to PostgreSQL, and the dictionary (v1.12.0)
 
 Each certified fixture's exported PostgreSQL DDL (HR, CO, Pagila,
 AdventureWorks) is applied to the appliance's own PostgreSQL 16.15 in CI
@@ -145,7 +136,7 @@ CSV, with every column field the model holds in a fixed order, relationships wit
 at the top. HR's and AdventureWorks' dictionaries match their catalog
 manifests table by table (`test_dictionary_evidence`).
 
-## Keys, constraints and the saved-model journey (on `main`)
+## Keys, constraints and the saved-model journey (v1.12.0)
 
 Keys and constraints have one representation: each entity's primary key (in
 key order), UNIQUE and CHECK constraints, and each relationship's column
@@ -163,7 +154,7 @@ save, reopen, export PostgreSQL DDL, re-import) matches the catalog manifests
 of HR, CO and Pagila exactly, and AdventureWorks except for its ten computed
 columns, each a named gap.
 
-## SQL Server import (on `main`)
+## SQL Server import (v1.12.0)
 
 SQL Server joins the import. A script is split at `GO`; `SET` and `USE` are
 listed, procedures are listed, and a batch a skip rule matches cannot carry a
@@ -180,7 +171,7 @@ column in every dialect keeps its declared type text in `source_data_type`
 zero gaps against its catalog manifest (71 tables, 486 columns, 90 foreign keys,
 89 checks, 556 descriptions) in UTF-8 and UTF-16, each with and without a BOM.
 
-## DDL fixtures (on `main`)
+## DDL fixtures (v1.12.0)
 
 `backend/tests/fixtures/ddl/` holds the importer's evidence base. Oracle
 (`DBMS_METADATA`, HR and CO, populated), SQL Server (SMO, AdventureWorks2022)
@@ -193,29 +184,40 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0027_member_audit_actions`, on `main` and this branch (this branch adds none).
+Migration head: `0027_member_audit_actions` (`alembic heads`), on `main` and
+this branch (this branch adds none).
 
 ## Versions
 
-- Latest tag on the remote: **`v1.11.1`**, at `e8d9ac1`. `v1.12.0` is tagged by
-  the owner after this branch merges.
-- Version stamp in the code: **1.12.0** on this branch, 1.11.1 on `main`
-  (`scripts/check_versions.py`: all stamps agree).
+- Latest tag on the remote: **`v1.12.0`**, at `d38d6ec`.
+- Version stamp in the code: **1.12.0** on `main` and this branch
+  (`scripts/check_versions.py`: all version stamps agree).
 - Published images: `ghcr.io/emkwambe/modelbox-backend` and
-  `ghcr.io/emkwambe/modelbox-frontend`, `1.11.1` (also `1.11` and `latest`).
-  `1.11.0` remains published and is superseded.
+  `ghcr.io/emkwambe/modelbox-frontend`, `1.12.0` (also `1.12` and `latest`).
+  `1.11.1` and `1.11.0` remain published and are superseded.
 
 ## Status
 
 Not for deployment on a shared network before v1.11.0 (README, Status).
-v1.11.1 is the release to use until v1.12.0 is published.
+v1.12.0 is the release to use.
 
 ## Repository contents
 
 Sprint prompts, sprint plans and research documents moved out of this
 repository on 2026-09-28. Git history is unchanged.
 
-## What v1.11.1 ships
+## What v1.12.0 ships
+
+The sections above: offline DDL import for Oracle, SQL Server and PostgreSQL
+(Snowflake documentation-derived and uncertified), each import reconciled;
+one representation for keys and constraints, with saved models that reopen as
+saved; DDL export applied to a real PostgreSQL, gaps named; a data dictionary
+with per-field verification and a classification scale; a drift report;
+workspace members and roles; and the engagement journey run in CI. Upgrading
+runs migrations 0023–0027 through the migrate service. Notes:
+`docs/RELEASE_NOTES_v1.12.0.md`. Index: `CHANGELOG.md`.
+
+## What v1.11.x shipped
 
 Secure by default, proven against the running appliance: secrets required at
 start-up, the first account from `create-owner`, no self-registration in
@@ -233,7 +235,7 @@ redacts every credential from its reports. The Security FAQ, the Proof Log and
 the acceptance register state what those tests prove.
 
 Notes: `docs/RELEASE_NOTES_v1.11.1.md`, `docs/RELEASE_NOTES_v1.11.0.md`
-(superseded). Index: `CHANGELOG.md`.
+(superseded).
 
 ## Published-image verification
 
@@ -241,8 +243,16 @@ Notes: `docs/RELEASE_NOTES_v1.11.1.md`, `docs/RELEASE_NOTES_v1.11.0.md`
 images a release published, pulled on a runner that never built them, after
 every successful release and on demand.
 
-For v1.11.1 it ran on `main` at `627686d` (run 36518642808, success). The
-compose file matched the tag's. It pulled the backend and frontend images by the
-digests release run 36516574170 pushed and built none. Configuration A passed
-(1 test), B passed (13), the upgrade passed (1), the insecure profile had 8
-passed and 5 expected failures, and C passed (4).
+For v1.12.0 it ran on the release's completion (run 36660321337, on `main` at
+`d38d6ec`, success). The compose file matched the tag's. It pulled the images
+by the digests release run 36659993511 pushed and built none:
+`modelbox-frontend@sha256:2a862f9f297ebdb4a643fbadc6b3cbadf1ba85863bf782e8b29d0d50f7ba9eaf`
+and
+`modelbox-backend@sha256:4bc5c3e28e34871c6e4b72942bddc40b948c052fd0ee222bce76a6ea92c96689`.
+Configuration A passed (1 test), B passed (15), the upgrade passed (1), the
+insecure profile had 10 passed and 5 expected failures, and C passed (5). The
+rollback and journey checks are not part of this workflow; they ran on the
+release commit in CI run 36659466821.
+
+For v1.11.1 it ran on `main` at `627686d` (run 36518642808, success): A 1, B 13,
+upgrade 1, insecure profile 8 passed and 5 expected failures, C 4.
