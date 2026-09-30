@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-30 on `sprint-9/step-4-suggestions`, branched from
-`main` at `4b46681`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-30 on `sprint-9/step-5a-claims-and-records`, branched
+from `main` at `56667b4`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,14 +9,30 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `4b46681` | source-to-target mapping with proposals, and the collation gap (#32), on T-SQL `LIKE` character classes kept in PostgreSQL (#31), on the dbt export on imported schemas and seed data under every constraint (#30), on computed columns as PostgreSQL generated columns (#29), on type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `56667b4` | PII and aggregation-time suggestions (#33), on source-to-target mapping with proposals, and the collation gap (#32), on T-SQL `LIKE` character classes kept in PostgreSQL (#31), on the dbt export on imported schemas and seed data under every constraint (#30), on computed columns as PostgreSQL generated columns (#29), on type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.12.0` | `d38d6ec` | tagged 2026-09-29 22:28 -04:00; published by the gated release workflow (run 36659993511: gate, backend and frontend images all green); verified on the published images (run 36660321337, below) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC), published by run 36516574170; superseded by v1.12.0, tag and images kept |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-9/step-4-suggestions` | this branch | PII and aggregation-time suggestions (below) |
-| `sprint-9/step-3-mapping`, `sprint-9/step-2c-like-patterns`, `sprint-9/step-2b-dbt-export`, `sprint-9/step-1b-computed-columns`, `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-9/step-5a-claims-and-records` | this branch | claims, the rollback to v1.12.0 and the records for v1.13.0 (below) |
+| `sprint-9/step-4-suggestions`, `sprint-9/step-3-mapping`, `sprint-9/step-2c-like-patterns`, `sprint-9/step-2b-dbt-export`, `sprint-9/step-1b-computed-columns`, `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
-## In progress on this branch: PII and aggregation-time suggestions
+## In progress on this branch: claims, rollback and records for v1.13.0
+
+- **Proof Log:** PL-026 (types, identities and sequences to PostgreSQL),
+  PL-027 (computed columns), PL-028 (`LIKE` character classes), PL-029
+  (source-to-target mapping) and PL-030 (suggestions); PL-007 and PL-014 cite
+  `main`'s run for their imported-schema evidence. Every cited test was read as
+  PASSED in CI run 36760239384 on `main` at `56667b4`.
+- **Rollback to v1.12.0**, tested by the Black-box Acceptance job
+  (`tests/blackbox/test_rollback.py`): the database is given what 0028–0031
+  add, downgraded to `0027_member_audit_actions`, and run by v1.12.0's
+  published images, which serve `/health` and read the models. What is lost
+  and kept is asserted by SQL and stated in the notes.
+- **Records:** `docs/RELEASE_NOTES_v1.13.0-draft.md`, the CHANGELOG's
+  "Unreleased (for v1.13.0)", the register's G8 row, and OUTSTANDING_ISSUES.
+  No version stamp changes here.
+
+## PII and aggregation-time suggestions (on `main`, #33)
 
 ModelBox suggests which columns hold PII, and which column each table's
 measures should be aggregated over. A suggestion is a guess, stored beside the
@@ -207,9 +223,10 @@ the drift report, the migration diff's data-loss labelling, member management,
 the engagement journey), each citing tests read as passed on `main` at
 `4ea57f7` (run 36644605175); PL-016's "no API or UI to manage members" is
 struck. A claims-guard test keeps barred wording off every public surface.
-The Black-box Acceptance job downgrades the database to v1.11.1's migration
-head and runs v1.11.1's published images on it (`test_rollback.py`); what a
-downgrade loses is stated in `docs/RELEASE_NOTES_v1.12.0.md`.
+For v1.12.0, the Black-box Acceptance job downgraded the database to v1.11.1's
+migration head and ran v1.11.1's published images on it (`test_rollback.py`);
+what that downgrade loses is stated in `docs/RELEASE_NOTES_v1.12.0.md`. On this
+branch the same test rolls back to v1.12.0 instead (above).
 
 ## The engagement journey (v1.12.0)
 
@@ -354,8 +371,7 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0030_source_to_target_mapping` on `main`;
-`0031_suggestions` on this branch (`alembic heads`).
+Migration head: `0031_suggestions` on `main` and this branch (`alembic heads`).
 
 ## Versions
 

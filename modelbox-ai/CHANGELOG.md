@@ -3,6 +3,28 @@
 One entry per version. Each release's full notes, breaking changes and upgrade
 steps are in `docs/RELEASE_NOTES_v<version>.md`; this file is the index.
 
+## Unreleased (for v1.13.0)
+
+Draft notes: [`docs/RELEASE_NOTES_v1.13.0-draft.md`](docs/RELEASE_NOTES_v1.13.0-draft.md).
+Sprint 9, pull requests #27 to #33 and the claims-and-records change; migrations 0028
+to 0031, run by the migrate service on start, with no required configuration change.
+
+- **Exports to PostgreSQL:** SQL Server and Oracle types, identities and sequences carry
+  over; computed columns become generated columns where their expression does; a T-SQL
+  `LIKE` character class keeps its meaning as `SIMILAR TO`; collation is named as a gap.
+  What cannot carry over is a named gap. Each is applied to a real PostgreSQL in CI.
+- **dbt:** projects from imported schemas build on PostgreSQL. Staging models cast to the
+  chosen warehouse's types, so an export that names no dialect is cast to Snowflake types.
+- **Seed data:** rows satisfy every primary key, UNIQUE, foreign key and CHECK the model
+  declares; a row none can satisfy is left out and counted.
+- **Source-to-target mapping:** every target column is accounted for, with proposals a
+  person decides, an append-only decisions record, exports in four formats, lineage, and
+  a canvas panel.
+- **Suggestions:** PII categories and aggregation time columns suggested by named rules,
+  stored beside the model, decided by a person; client rules with `PII_RULES_PATH`.
+- **Rollback:** a tested downgrade to v1.12.0, with what it loses and keeps listed in the
+  notes.
+
 ## v1.12.0 — 2026-09-29
 
 Full notes: [`docs/RELEASE_NOTES_v1.12.0.md`](docs/RELEASE_NOTES_v1.12.0.md).

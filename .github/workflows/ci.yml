@@ -605,10 +605,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: docker compose -p modelbox-ai down -v --remove-orphans
 
-      - name: "Rollback: downgrade to v1.11.1 and run its published images"
-        # This release's appliance is given composite keys, attestations and a
-        # role change, downgraded to v1.11.1's migration head, and then run by
-        # the v1.11.1 images pulled from GHCR (tests/blackbox/test_rollback.py).
+      - name: "Rollback: downgrade to v1.12.0 and run its published images"
+        # This release's appliance is given identity and computed-column
+        # metadata, sequences, a mapping and accepted suggestions, downgraded
+        # to v1.12.0's migration head, and then run by the v1.12.0 images
+        # pulled from GHCR (tests/blackbox/test_rollback.py).
         if: ${{ !cancelled() }}
         env:
           BLACKBOX_PROFILE: hardened

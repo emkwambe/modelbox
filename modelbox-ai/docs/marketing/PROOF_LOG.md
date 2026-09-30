@@ -257,7 +257,8 @@ have distinguished those two cases; dbt distinguished them immediately.
 
 **Imported schemas, since Sprint 9:**
 `test_dbt_on_postgres.py::test_dbt_build_succeeds`, 4/4 imported certified
-schemas (Oracle HR, Oracle CO, Pagila, AdventureWorks). Each project is exported
+schemas (Oracle HR, Oracle CO, Pagila, AdventureWorks), in the Artifact
+Fidelity Harness job, CI run 36760239384 on `main` at `56667b4`. Each project is exported
 for PostgreSQL and built with `dbt build` in PostgreSQL 16.15, the version the
 appliance ships, against the product's own seed data. Every model is run and
 every exported test passes. Until then the evidence above covered only the
@@ -654,7 +655,8 @@ certified schemas the rows are loaded into PostgreSQL 16.15 with every primary
 key, UNIQUE, foreign key and CHECK constraint in force.
 `test_dbt_on_postgres.py::test_every_seed_row_is_accepted` requires every INSERT
 to be accepted, with every table holding the rows asked for. The row counts are
-read back by SQL.
+read back by SQL. This test and those named below run in the Artifact Fidelity
+Harness job (CI run 36760239384 on `main` at `56667b4`).
 
 That run also shows the generated tests can fail.
 `::test_dbt_tests_fail_on_a_duplicate_grain_key` and
@@ -1066,6 +1068,198 @@ retries.
 **Verified:** 2026-09-29 · **Sprint:** 8 · **Version:** unreleased
 **Expires:** if the Engagement Journey check fails or stops being required.
 **Usable in:** engagement proposal, technical review.
+
+---
+
+## PL-026 — SQL Server and Oracle types, identities and sequences are exported to PostgreSQL as PostgreSQL runs them
+
+**Claim:** "A PostgreSQL export of a SQL Server or Oracle model writes `money`,
+`smallmoney` and `bit` as exact PostgreSQL types, keeps identity columns with
+their seed and increment, and creates a PostgreSQL model's sequences with their
+defaults. `hierarchyid` and `geography` are written as `ltree` and PostGIS
+`geography` only when the export is told the target has the extension;
+otherwise, and wherever a mapping is not exact, the column is a named gap. Each
+mapping is applied to a real PostgreSQL in CI."
+
+**Evidence** (Backend Pytest (Postgres) job, CI run 36760239384 on `main` at
+`56667b4`):
+
+| Property | Test |
+| :-- | :-- |
+| The job has its PostgreSQL and PostGIS servers; the PostGIS image is pinned by digest | `test_type_mappings_on_postgres.py::test_the_postgres_job_has_its_servers`, `test_the_postgis_image_is_pinned_by_digest`; negative control `test_negative_control_a_tag_alone_is_not_a_pin` |
+| SQL Server types and identities are accepted, and read back from the catalog | `test_type_mappings_on_postgres.py::test_sql_server_types_and_identity_on_postgresql`; negative control `test_negative_control_without_the_bit_mapping_postgresql_refuses_the_check` |
+| Oracle identities, a PostgreSQL sequence default, `ltree` and PostGIS `geography` | `test_type_mappings_on_postgres.py::test_oracle_identity_columns_on_postgresql`, `test_a_postgresql_sequence_default_on_postgresql`, `test_hierarchyid_as_ltree_on_postgresql`, `test_geography_as_postgis_geography` |
+| Plain mappings are exact and not gaps; without the options, `hierarchyid` and `geography` are named gaps | `test_type_mappings.py::test_money_smallmoney_and_bit_are_exact_and_not_gaps`, `test_without_the_options_hierarchyid_and_geography_are_named_gaps`; negative control `test_negative_control_without_the_mapping_the_column_is_a_named_gap` |
+| Every identity and sequence the importer read is emitted or named | `test_type_mappings.py::test_every_identity_and_sequence_is_emitted_or_named`; negative controls `test_negative_control_an_importer_that_loses_identity_fails_the_count`, `test_negative_control_an_importer_that_skips_sequences_fails_the_count` |
+| A column an Oracle trigger fills from a sequence is a named gap | `test_type_mappings.py::test_a_column_an_oracle_trigger_fills_is_a_named_gap` |
+
+**Honest limits:**
+
+* **PostgreSQL is the only target executed.** Other targets are parsed (PL-001).
+* **An Oracle identity on `NUMBER(*,0)`** is exported as a sequence default,
+  because PostgreSQL allows identity only on integer types; the file says so.
+* **An extension is never assumed.** Without the option, `hierarchyid` and
+  `geography` columns are named gaps, not typed.
+
+**Verified:** 2026-09-30 · **Sprint:** 9 · **Version:** unreleased
+**Expires:** if PostgreSQL refuses a mapped column, if a mapping stops being
+exact without becoming a named gap, or if the PostGIS pin changes without a
+re-run.
+**Usable in:** export UI, technical review, migration engagements.
+
+---
+
+## PL-027 — SQL Server computed columns become PostgreSQL generated columns where the expression carries over, and are named where it does not
+
+**Claim:** "A SQL Server computed column is exported to PostgreSQL as a
+generated column when every part of its expression is on a stated list:
+column references, literals, arithmetic, `ISNULL` written as `COALESCE`, and
+`CONVERT` written as `CAST`, with `+` on strings written as `||`. Anything else
+is a named gap quoting the expression. Each generated column says whether the
+source stored it. On a real PostgreSQL, each one computes what the source
+computes."
+
+**Evidence** (CI run 36760239384 on `main` at `56667b4`; the PostgreSQL tests in
+the Backend Pytest (Postgres) job):
+
+| Property | Test |
+| :-- | :-- |
+| AdventureWorks: seven generated columns and three named gaps, counted from the file | `test_generated_columns.py::test_adventureworks_is_seven_emitted_and_three_gaps`, `test_each_computed_column_is_emitted_or_a_gap_quoting_the_file` |
+| Each is labelled by where the source stores it | `test_generated_columns.py::test_every_generated_column_is_labelled_by_where_the_source_stores_it` |
+| A string `+` is written as `||`, a numeric one is not | `test_generated_columns.py::test_string_plus_is_written_as_concatenation_and_numeric_plus_is_not`; negative control `test_negative_control_without_the_rewrite_a_string_plus_remains`, and `test_sqlglot_itself_keeps_the_string_plus` |
+| PostgreSQL accepts every AdventureWorks generated column, and computes the source's values | `test_generated_columns_on_postgres.py::test_every_adventureworks_generated_column_is_accepted`, `test_postgresql_computes_what_the_source_computes`; negative control `test_negative_control_without_the_rewrite_postgresql_refuses_sales_order_number` |
+
+**Honest limits:**
+
+* **A computed column that SQL Server computes on read is stored in
+  PostgreSQL.** The label says "virtual in source, stored in target".
+* **Three AdventureWorks computed columns are named gaps**: two call a
+  `hierarchyid` method and one a user function the model does not hold.
+
+**Verified:** 2026-09-30 · **Sprint:** 9 · **Version:** unreleased
+**Expires:** if PostgreSQL refuses a generated column, computes a different
+value, or if the emitted and named counts stop being derived from the file.
+**Usable in:** export UI, technical review, migration engagements.
+
+---
+
+## PL-028 — A T-SQL `LIKE` character class keeps its meaning in a PostgreSQL CHECK
+
+**Claim:** "A SQL Server CHECK whose `LIKE` pattern uses a character class
+(`[A-Za-z]`, `[0-9]`, ranges and sets, with `%` and `_`) is written for
+PostgreSQL as `SIMILAR TO`, which reads the brackets the same way. A pattern
+outside that subset is a named gap quoting it. On a real PostgreSQL, the
+exported CHECK accepts and refuses what SQL Server's does."
+
+**Evidence** (CI run 36760239384 on `main` at `56667b4`; the PostgreSQL tests in
+the Artifact Fidelity Harness job):
+
+| Property | Test |
+| :-- | :-- |
+| A character class is written as `SIMILAR TO`; `NOT LIKE` keeps its negation; a `LIKE` with no class stays `LIKE` | `test_ddl_export.py::test_a_tsql_character_class_is_written_as_similar_to_for_postgres`, `test_not_like_keeps_its_negation`, `test_a_like_without_a_character_class_stays_like` |
+| A pattern outside the subset is a named gap; a target without `SIMILAR TO` names it too | `test_ddl_export.py::test_a_pattern_outside_the_translated_subset_is_a_named_gap`, `test_a_character_class_is_a_gap_for_targets_without_similar_to` |
+| AdventureWorks: the one such CHECK is translated, and no other CHECK changes | `test_ddl_export.py::test_adventureworks_shelf_check_is_translated_and_no_other_is_affected` |
+| On PostgreSQL 16.15: one letter or `'N/A'` is accepted, two letters or a digit refused | `test_dbt_on_postgres.py::test_the_shelf_check_means_what_sql_server_means`; control `test_control_without_the_translation_a_valid_letter_is_refused` |
+
+**Honest limits:**
+
+* **Collation is not captured.** SQL Server's default collations compare text
+  case-insensitively and PostgreSQL's does not, so an export of a SQL Server
+  model names a `collation` gap on each table with text keys, a UNIQUE on text
+  or a pattern CHECK
+  (`test_ddl_export.py::test_sql_server_text_comparisons_are_a_named_collation_gap_in_postgres`).
+  The translated CHECK above means the same only under the same comparison.
+
+**Verified:** 2026-09-30 · **Sprint:** 9 · **Version:** unreleased
+**Expires:** if PostgreSQL's result for any shelf value differs from SQL
+Server's, or if a pattern outside the subset is exported without a gap.
+**Usable in:** export UI, technical review, migration engagements.
+
+---
+
+## PL-029 — A source-to-target mapping accounts for every target column, and every decision in it is a person's
+
+**Claim:** "A mapping document lists every column of the target model as
+mapped, explicitly unmapped, pending, silent or in drift, and states 'N of M
+target columns mapped, K explicitly unmapped, S silent'. It is complete only
+when nothing is pending, silent or in drift. ModelBox proposes candidates with
+their scores; a proposal counts as nothing until a person decides. Every
+decision records who made it, when, and what was shown, and is kept in an
+append-only record. A column that disappears is flagged, never dropped."
+
+**Evidence** (CI run 36760239384 on `main` at `56667b4`; API tests sign in with
+real credentials and read stored rows back by SQL):
+
+| Property | Test |
+| :-- | :-- |
+| Oracle HR mapped to a target derived from it, every target column accounted for | `test_mapping_api.py::test_hr_to_a_derived_target_accounts_for_every_target_column` |
+| A pending proposal is never counted as mapped | `test_mapping_api.py::test_control_a_pending_proposal_is_never_counted_as_mapped` |
+| Deleting one accepted mapping is reported as missing | `test_mapping_api.py::test_control_deleting_one_accepted_mapping_is_reported_as_missing` |
+| Removing a mapped source column raises the drift flag; a gone target is kept and flagged | `test_mapping_api.py::test_control_removing_a_mapped_source_column_raises_the_drift_flag`, `test_mapping.py::test_an_entry_whose_target_column_is_gone_is_kept_and_flagged` |
+| A decision needs a person: no credentials, an API key and a body naming a decider are refused | `test_mapping_api.py::test_control_a_proposal_cannot_be_accepted_without_a_person` |
+| An accepted proposal records the person and the evidence shown | `test_mapping_api.py::test_accepting_a_proposal_records_the_person_and_the_evidence_shown` |
+| The decisions record is append-only for every role, and outlives the document | `test_ledger_roles_postgres.py::test_the_mapping_decisions_ledger_is_append_only_for_everyone`, `test_mapping_api.py::test_deleting_the_document_keeps_its_decisions` |
+| Exports in CSV, Markdown, HTML and JSON carry the completeness line and every target column; a lineage per column | `test_mapping_api.py::test_the_exports_are_served_in_every_format`, `test_mapping.py::test_every_export_carries_the_completeness_line_and_every_target_column`, `test_mapping_api.py::test_the_lineage_of_a_target_column_names_its_sources_and_decisions` |
+| A downgrade keeps the decisions record, and upgrading again adopts it | `test_migration_0015_to_head_populated.py::test_0030_downgrade_keeps_the_decisions_and_a_re_upgrade_adopts_them` |
+
+**Honest limits:**
+
+* **Transformations are stated, not run.** A mapping's logic is recorded as
+  written; no test executes it against data.
+* **Proposals come from names and types only.** Their scores rank candidates;
+  they are not a measure of how often a proposal is right.
+* **Columns are picked from lists.** The panel does not yet pick columns on
+  the canvas.
+
+**Verified:** 2026-09-30 · **Sprint:** 9 · **Version:** unreleased
+**Expires:** if a target column can be left out of the document without being
+reported, if a proposal counts as mapped, or if a decision can be made without
+a person.
+**Usable in:** engagement proposal, mapping page, technical review, in the
+words "attribute-level lineage from source to target".
+
+---
+
+## PL-030 — PII and time-column suggestions are guesses a person decides, and never become "verified" by themselves
+
+**Claim:** "ModelBox suggests which columns hold PII, from named rules that read
+column names, types, source comments and CHECK constraints, each anchored on
+NIST SP 800-122 §2.2 or GLBA's definition of nonpublic personal information. It
+also ranks every date or time column as a candidate for a table's aggregation
+time column, flagging row-audit columns. A suggestion is stored beside the
+model and never changes it. A person accepts or rejects it; an accepted PII
+value is pending review, and only an approver can verify it. A table's
+semantic-layer measures appear only once a person has chosen its time column."
+
+**Evidence** (CI run 36760239384 on `main` at `56667b4`; API tests sign in with
+real credentials and read stored rows back by SQL):
+
+| Property | Test |
+| :-- | :-- |
+| Each of the 42 rules suggests its category from its signal, and is silent without it | `test_suggestion_rules.py::test_each_rule_suggests_its_category_from_its_signal`; negative control `test_negative_control_each_rule_without_its_signal_is_silent`; `test_every_rule_has_an_example` |
+| A phrase qualified into something else is not suggested | `test_suggestion_rules.py::test_a_phrase_followed_by_a_qualifier_is_not_the_thing_itself`; negative control `test_negative_control_without_the_qualifier_words_they_are_suggested` |
+| Every category is anchored on the text that lists it | `test_suggestion_rules.py::test_every_category_is_anchored_on_the_text_that_lists_it` |
+| AdventureWorks' SalesOrderHeader offers OrderDate, DueDate, ShipDate and ModifiedDate, ranked, with ModifiedDate flagged; an audit-only table offers its column flagged | `test_suggestion_rules.py::test_sales_order_header_offers_every_temporal_column_with_modified_date_flagged`, `test_an_audit_only_table_offers_its_column_flagged_low`; negative control `test_negative_control_without_the_audit_flag_the_check_fails` |
+| Running the rules changes no model and no export | `test_suggestions_api.py::test_running_the_rules_stores_pending_guesses_and_changes_nothing` |
+| A suggestion never reaches "verified" without an approver; no credentials, a viewer, an API key, or a body naming a status or decider is refused | `test_suggestions_api.py::test_a_suggestion_never_reaches_verified_without_an_approver` |
+| The database refuses a verified or non-heuristic suggestion | `test_suggestions_api.py::test_negative_control_the_database_refuses_a_verified_or_non_heuristic_suggestion`; on PostgreSQL, `test_migration_0015_to_head_populated.py::test_0031_downgrade_clears_only_the_newer_pii_types_and_lists_each` |
+| AdventureWorks gets MetricFlow measures only after a person confirms its time column | `test_suggestions_api.py::test_adventureworks_gets_metricflow_measures_only_after_a_person_confirms_the_time_column` |
+| A bad client rules file stops the backend | `test_suggestion_rules.py::test_the_backend_does_not_start_on_a_bad_rules_file`; control `test_control_the_backend_starts_on_a_good_rules_file` |
+
+**Honest limits:**
+
+* **No accuracy figure is claimed for the PII rules**, and none is measured. A
+  suggestion is a guess for a person to decide.
+* **A time column's confidence is a ranking from written rules**, not a
+  probability.
+* **Concurrent decisions are not tested.** A test shows that a decision reads
+  the suggestion as the database holds it; decisions on one model take a lock,
+  but no test runs two requests at once.
+
+**Verified:** 2026-09-30 · **Sprint:** 9 · **Version:** unreleased
+**Expires:** if a suggestion can change a model without a person, if one can
+become verified, or if an accuracy figure appears on a public surface.
+**Usable in:** dictionary page, engagement proposal, regulated-buyer review.
 
 ---
 
