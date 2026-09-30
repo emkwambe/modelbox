@@ -16,7 +16,7 @@ Not for deployment on a shared network before v1.11.0.
 | :---- | :---- |
 | **Frontend** | Next.js 14 (App Router), React 18, TypeScript, `@xyflow/react`, Zustand, Monaco, Tailwind |
 | **Backend** | Python 3.11+, FastAPI, Pydantic v2, SQLGlot, NetworkX, Instructor, LiteLLM |
-| **Verified against** | `dbt parse`, `protoc`, `fastavro`, `sqlfluff`, DuckDB execution — see `backend/tests/test_artifact_fidelity.py` |
+| **Verified against** | `dbt parse`, `dbt build` (DuckDB, and PostgreSQL 16.15 for imported schemas), `protoc`, `fastavro`, `sqlfluff`, DuckDB execution — see `backend/tests/test_artifact_fidelity.py` and `backend/tests/test_dbt_on_postgres.py` |
 | **Data** | PostgreSQL 16 (SQLAlchemy 2.0 async + asyncpg), Redis 7 |
 | **LLM** | OpenAI · Anthropic · Gemini · Mistral (EU) · Ollama · vLLM — via the engine's in-process gateway (the LiteLLM library) |
 

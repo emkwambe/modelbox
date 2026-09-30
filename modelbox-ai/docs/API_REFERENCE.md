@@ -258,6 +258,11 @@ that the model does not state completely, is returned in `gaps` (each with a
 file; nothing is left out without a gap. A model imported from a DDL file is
 exported from the dialect it was imported from.
 
+For `format=dbt`, `dialect` is the warehouse the project will run on: each
+staging model casts its columns to the types the DDL export writes for that
+dialect, and every name that is not lower snake case is quoted, in the SQL and
+in `schema.yml`. A computed column the DDL export cannot create is left out.
+
 **Responses:** `200` Successful Response, `422` Validation Error
 
 ### `GET /api/v1/model/{model_id}/export/contract`
@@ -302,6 +307,12 @@ Generate referentially-intact synthetic seed data (FR-2.4)
 | `model_id` | path | string | yes |
 
 **Request body:** `SyntheticSeedRequest`
+
+Rows satisfy every primary key, UNIQUE, foreign key and CHECK constraint the
+model declares, and each column is generated for its type in `dialect`. A
+generated (computed) column is not written. A row that no values can make
+satisfy its constraints is left out, and `rows_skipped` gives the count per
+entity; it is empty when every entity has `row_count_per_entity` rows.
 
 **Responses:** `200` Successful Response, `422` Validation Error
 

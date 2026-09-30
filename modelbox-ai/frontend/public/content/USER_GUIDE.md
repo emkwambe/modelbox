@@ -267,6 +267,23 @@ Open **Export artifacts** on the canvas. Tabs:
   - A schema-qualified user-defined type the model does not define is
     written as `TEXT`, without the default's cast to it, and listed as an
     export gap.
+
+  For **dbt**, choose the warehouse the project will run on. Each staging
+  model casts its columns to the types the DDL export writes for that dialect,
+  not the types the source declared: an Oracle `NUMBER(4,0)` becomes
+  PostgreSQL's `DECIMAL(4, 0)`. Every name that is not lower snake case is
+  quoted, in the SQL and in `schema.yml`. A computed column the DDL export
+  cannot create is left out. The project is built with `dbt build` in DuckDB
+  for the reference models, and in PostgreSQL 16.15 for the four imported
+  certified schemas. For other warehouses it is parsed by dbt, not run.
+- **Seed data** — synthetic rows as SQL `INSERT`s or CSV, parents before
+  children. The rows satisfy every primary key, UNIQUE, foreign key and CHECK
+  constraint the model declares, and each column is generated for its type in
+  the chosen dialect. A foreign key repeats a real parent row. Where a
+  foreign key that may be NULL closes a cycle, or a table references itself,
+  it is NULL until a parent row exists. A row whose constraints no values can
+  satisfy is left out, and the response says how many (`rows_skipped`). The
+  data is synthetic, for loading and testing, not for analysis.
 - **Contracts** — **OpenDataContract** YAML, **Apache Avro**, **Protobuf**.
 - **Semantic** — Cube.js, **LookML**, **dbt MetricFlow**. A MetricFlow entity
   is one column and has one type, so a table with a composite primary key

@@ -255,12 +255,25 @@ That is also the clearest demonstration of why this suite verifies against real
 toolchains rather than assertions. No assertion we could have written would
 have distinguished those two cases; dbt distinguished them immediately.
 
-**Honest limit:** `dbt parse` proves the project resolves — models, sources,
-tests, dependencies. It does not execute against a warehouse, so it does not
-prove the SQL returns what you expect. `dbt build` on generated seed data is
-Sprint 4 (register B13).
+**Imported schemas, since Sprint 9:**
+`test_dbt_on_postgres.py::test_dbt_build_succeeds`, 4/4 imported certified
+schemas (Oracle HR, Oracle CO, Pagila, AdventureWorks). Each project is exported
+for PostgreSQL and built with `dbt build` in PostgreSQL 16.15, the version the
+appliance ships, against the product's own seed data. Every model is run and
+every exported test passes. Until then the evidence above covered only the
+reference models and the synthetic fixture. A project exported from an imported
+schema cast its columns to the source's own types (Oracle's `NUMBER(4,0)`) and
+left mixed-case names unquoted, so it did not build on PostgreSQL. The staging
+models now cast to the types the DDL export writes for the chosen dialect, and
+quote every name that needs it.
 
-**Verified:** 2026-08-11 · **Sprint:** 3 · **Version:** unreleased
+**Honest limit:** `dbt parse` proves the project resolves — models, sources,
+tests, dependencies. Execution is proven in two warehouses: DuckDB for the
+reference models (PL-014) and PostgreSQL for the imported schemas. For any other
+warehouse the project is parsed, not run. Choose the warehouse the project will
+run on when you export it, because the casts follow that choice.
+
+**Verified:** 2026-08-11, imported schemas 2026-09-30 · **Sprint:** 3, 9 · **Version:** unreleased
 **Expires:** on any change to `generate_dbt_project`, or if the harness ever
 writes a file into the project that the exporter did not emit.
 **Usable in:** landing page, export UI, "why we test against tools not strings".
@@ -635,12 +648,37 @@ proving that unexercised rules are unbroken.
 That is the difference between "the seed satisfies the contract" and "the seed
 satisfies the parts of the contract we happened to test."
 
-**Honest limit:** satisfaction is asserted for the constraint families the IR
-can express. It is synthetic data — statistically meaningless, and useful for
-loading and testing rather than for analysis. `dbt build` runs the generated
-tests, not a consumer's own.
+**Imported schemas, since Sprint 9:** the evidence above is the reference
+models, loaded into DuckDB, which enforces none of the keys. On the four imported
+certified schemas the rows are loaded into PostgreSQL 16.15 with every primary
+key, UNIQUE, foreign key and CHECK constraint in force.
+`test_dbt_on_postgres.py::test_every_seed_row_is_accepted` requires every INSERT
+to be accepted, with every table holding the rows asked for. The row counts are
+read back by SQL.
 
-**Verified:** 2026-09-01 · **Sprint:** 4 (fix), 6 (claimed) · **Version:** 1.10.0
+That run also shows the generated tests can fail.
+`::test_dbt_tests_fail_on_a_duplicate_grain_key` and
+`::test_dbt_tests_fail_on_an_orphan_foreign_key` break the loaded copy and
+require the guarding test to fail, and every other failure must be on the table
+that was changed. There are three controls:
+
+- `::test_control_the_constraints_refuse_a_duplicate_key`: the database refuses
+  a duplicate.
+- `::test_control_the_seed_unquoted_is_refused`: the same rows with names
+  unquoted are refused.
+- `::test_control_the_project_with_source_types_does_not_build`: the project
+  cast to the source's types does not build.
+
+**Honest limit:** satisfaction is asserted for the constraint families the IR
+can express. A CHECK is read from its syntax tree, and every row is evaluated
+against it before it is kept. A CHECK the generator cannot evaluate is left to
+the database, so it is proven only where a database has checked the rows: the
+imported schemas above. A row whose constraints no values can satisfy is left
+out and reported, never emitted to be refused. It is synthetic data —
+statistically meaningless, and useful for loading and testing rather than for
+analysis. `dbt build` runs the generated tests, not a consumer's own.
+
+**Verified:** 2026-09-01, imported schemas 2026-09-30 · **Sprint:** 4 (fix), 6 (claimed), 9 · **Version:** 1.10.0
 **Expires:** if a constraint family is added to the IR without a fixture case,
 which `test_seed_fixtures_exercise_every_declared_rule` turns red.
 **Usable in:** landing page, seed/demo-data positioning, evaluation guide.
