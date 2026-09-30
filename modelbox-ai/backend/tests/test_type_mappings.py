@@ -1,6 +1,6 @@
 """Type, identity and sequence mappings to PostgreSQL (Sprint 9 Step 1a).
 
-The decisions are SYNTHESIS P1-A's, and the owner's (2026-09-30):
+What the export does, and why (owner decisions, 2026-09-30):
 
 * ``money`` → ``NUMERIC(19, 4)``, ``smallmoney`` → ``NUMERIC(10, 4)``, and
   ``bit`` → ``BOOLEAN``, with 0 and 1 in its defaults and CHECKs written FALSE

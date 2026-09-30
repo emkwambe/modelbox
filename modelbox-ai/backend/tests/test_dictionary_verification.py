@@ -224,7 +224,7 @@ async def test_a_field_with_no_row_at_all_keeps_unverified(session, world) -> No
 
 
 async def test_an_ai_draft_is_never_verified(session, world, monkeypatch: pytest.MonkeyPatch) -> None:
-    """R2-1.3: an AI draft is provenance of a kind that cannot support
+    """Condition 3: an AI draft is provenance of a kind that cannot support
     verified, even on a reconciled import with a sound definition. The import
     is written as the synthesis engine writes (source "ai")."""
     from app.api.v1.endpoints import ddl_import

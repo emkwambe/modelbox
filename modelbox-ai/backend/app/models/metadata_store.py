@@ -490,7 +490,7 @@ def _default_classification_scale(_mapper: object, connection: Connection, works
 ATTESTATION_STATUSES = ("recorded", "pending", "verified")
 #: Where a field's value came from. ``ai_draft`` is recorded provenance of a
 #: kind that can never support "verified": an AI draft is a first draft a
-#: modeller reviews (R2-1.3).
+#: modeller reviews, and "verified" must never describe an unreviewed draft.
 PROVENANCE_KINDS = ("ddl", "source_comment", "person", "ai_draft")
 VERIFIABLE_PROVENANCE = ("ddl", "source_comment", "person")
 

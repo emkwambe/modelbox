@@ -82,9 +82,10 @@ def _model() -> SynthesizedModel:
     )
 
 
-# R2_DICTIONARY_STTM_FIELDS.md, R2-2, in its order (Sprint 8 Steps 4a and 4b;
-# owner decisions of 2026-09-29), then each field's status.
-R2_ORDER = ["name", "position", "data_type", "declared_type", "nullable", "default", "primary_key",
+# The dictionary's field order, structural fields first, then the fields a
+# person supplies (Sprint 8 Steps 4a and 4b; owner decisions of 2026-09-29),
+# then each field's status.
+FIELD_ORDER = ["name", "position", "data_type", "declared_type", "nullable", "default", "primary_key",
             "unique", "foreign_key", "check", "description", "business_name", "permissible_values", "unit",
             "classification", "pii", "critical_data_element", "authoritative_source", "validation_rules"]
 TABLE_ORDER = ["name", "business_name", "description", "grain", "entity_type", "business_owner", "it_steward",
@@ -125,9 +126,9 @@ def _with_everything() -> SynthesizedModel:
     })
 
 
-def test_the_fields_are_in_r2_order() -> None:
+def test_the_fields_are_in_their_order() -> None:
     doc = json.loads(_export("json", _with_everything())["data_dictionary.json"])
-    assert list(doc["entities"][0]["columns"][0]) == [*R2_ORDER, "status"]
+    assert list(doc["entities"][0]["columns"][0]) == [*FIELD_ORDER, "status"]
     assert list(doc["entities"][0]) == [*TABLE_ORDER, "status", "columns"]
     header = next(line for line in _export("markdown")["data_dictionary.md"].splitlines()
                   if line.startswith("| Column"))
@@ -255,7 +256,7 @@ def test_dictionary_unknown_format_raises() -> None:
 
 
 def test_the_attested_fields_are_every_field_but_the_identity() -> None:
-    assert [f.key for f in data_dictionary.ATTESTED_COLUMN_FIELDS] == R2_ORDER[2:]
+    assert [f.key for f in data_dictionary.ATTESTED_COLUMN_FIELDS] == FIELD_ORDER[2:]
     assert [f.key for f in data_dictionary.ATTESTED_TABLE_FIELDS] == TABLE_ORDER[1:]
 
 

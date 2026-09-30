@@ -124,7 +124,7 @@ either comprehension pass by iterating nothing.
 
 ### 2026-09-01 — `6154e88` The sprint brief, twenty-two commits late
 
-`docs/SPRINT_6_PROMPT.md` (since moved out of this repository). Measured rather than quoted; F4 split into
+The sprint brief (kept outside this repository). Measured rather than quoted; F4 split into
 CI-gateable integers and a recorded benchmark; Tasks 6 and 7 added for the
 product's main function, which twenty-two frontend commits had not touched.
 

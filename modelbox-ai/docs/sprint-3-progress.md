@@ -1,7 +1,7 @@
 # Sprint 3 — progress and handoff state
 
 **Branch:** `sprint/3-exporter-truth`, cut from `main` at `v1.7.0`.
-**Spec:** `docs/SPRINT_3_PROMPT.md` (since moved out of this repository). **Register:** §B. **Rulings:** Blueprint §3.
+**Spec:** the sprint brief (kept outside this repository). **Register:** §B. **Rulings:** Blueprint §3.
 
 Resumable from the branch alone. Every decision below is already ruled.
 

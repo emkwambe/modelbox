@@ -1,11 +1,12 @@
 """Strip the physical clauses of SQL Server export DDL before it is parsed.
 
-SSMS and SMO write clauses sqlglot cannot parse (research R1): ``ROWGUIDCOL``
+SSMS and SMO write clauses sqlglot cannot parse (probed before Sprint 8 on
+AdventureWorks and SSMS-style exports): ``ROWGUIDCOL``
 fails a CREATE TABLE outright, and ``ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]``
 turns it into an opaque ``Command``. None is part of a logical model, so each
 is removed by a named rule, and the report counts how often each fired.
 
-R1's prototype stripped ``WITH ( … )`` greedily and lost a primary key with
+A first prototype stripped ``WITH ( … )`` greedily and lost a primary key with
 it. Here the index-option rule removes only a balanced ``WITH ( … )`` whose
 contents are option assignments (``PAD_INDEX = OFF, …``), so the constraint it
 follows is left intact; a named regression test holds that.

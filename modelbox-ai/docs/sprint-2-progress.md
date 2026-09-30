@@ -2,7 +2,7 @@
 
 **Branch:** `sprint/2-ir-foundation`, cut from `main` at `a707719` (v1.6.0 + the
 two A9 documentation commits).
-**Spec:** `docs/SPRINT_2_PROMPT.md` (since moved out of this repository). **Register:** §C. **Rulings:** Blueprint §3.
+**Spec:** the sprint brief (kept outside this repository). **Register:** §C. **Rulings:** Blueprint §3.
 
 This file exists so the sprint can be resumed from the branch alone. Nothing
 below needs re-deriving — every decision here has already been ruled.

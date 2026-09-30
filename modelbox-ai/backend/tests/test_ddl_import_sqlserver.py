@@ -194,7 +194,7 @@ def test_every_rule_fires_on_adventureworks_or_has_a_synthetic_case() -> None:
     assert set(sqlserver_normalizer.RULE_NAMES) == set(fired) | set(SYNTHETIC)
 
 
-# Research R1: a prototype that stripped WITH ( … ) greedily took the primary
+# Found before Sprint 8: a prototype that stripped WITH ( … ) greedily took the primary
 # key with it. This is the statement shape SSMS writes for every key.
 def _aw_table(name: str) -> str:
     return next(s.text for s in splitter.split(AW, "tsql") if s.text.startswith(f"CREATE TABLE {name}("))
@@ -210,7 +210,7 @@ def test_regression_a_clustered_primary_key_with_options_on_primary_survives_nor
 
 
 def test_negative_control_a_greedy_with_strip_loses_the_primary_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    greedy = sqlserver_normalizer.Rule("index_options", "R1's prototype",
+    greedy = sqlserver_normalizer.Rule("index_options", "the greedy prototype",
                                        lambda t: re.subn(r"\bWITH\s*\(.*\)", " ", t, flags=re.DOTALL))
     monkeypatch.setattr(sqlserver_normalizer, "RULES",
                         tuple(greedy if r.name == "index_options" else r for r in sqlserver_normalizer.RULES))
