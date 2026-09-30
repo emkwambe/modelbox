@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-29 on `sprint-8/step-8a-claims-and-records`, branched
-from `main` at `4ea57f7`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-29 on `release/v1.12.0`, branched from `main` at
+`c676e7c`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,11 +9,11 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `4ea57f7` | the engagement journey, the Verify control and the drift panel (#24), on two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `c676e7c` | claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), on the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC); published by the gated release workflow (run 36516574170: gate, backend and frontend images all green) |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-8/step-8a-claims-and-records` | this branch | claims, the rollback check and the records for v1.12.0 (below) |
-| `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `release/v1.12.0` | this branch | the release preparation for v1.12.0 (below) |
+| `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
 ## Offline DDL import (on `main`)
 
@@ -28,7 +28,15 @@ import with zero gaps against their catalog manifests (Pagila as 15 tables and
 55 partitions); the Snowflake fixture fails by name on its HYBRID TABLE and is
 saved unreconciled.
 
-## In progress on this branch: claims, rollback and records for v1.12.0
+## In progress on this branch: v1.12.0
+
+Every version stamp reads 1.12.0 (`scripts/check_versions.py`: all stamps
+agree), the release notes are final (`docs/RELEASE_NOTES_v1.12.0.md`), and the
+CHANGELOG's unreleased section is the v1.12.0 entry. After this merges and
+`main`'s CI is green, the owner tags `v1.12.0`; the gated release workflow
+publishes the images, and Verify Release runs the black-box suite against them.
+
+## Claims, rollback and records for v1.12.0 (on `main`)
 
 The Proof Log gains PL-018 to PL-025, one per claim of the sprint (DDL import
 per dialect, reconciliation, DDL applied to PostgreSQL, what "verified" means,
@@ -38,10 +46,9 @@ the engagement journey), each citing tests read as passed on `main` at
 struck. A claims-guard test keeps barred wording off every public surface.
 The Black-box Acceptance job now downgrades this release's database to
 v1.11.1's migration head and runs v1.11.1's published images on it
-(`test_rollback.py`). The v1.12.0 release notes are drafted
-(`docs/RELEASE_NOTES_v1.12.0-draft.md`); the CHANGELOG, the register and
-`OUTSTANDING_ISSUES.md` are brought up to date. The version stamps stay
-1.11.1 until the release-preparation change.
+(`test_rollback.py`). The v1.12.0 release notes were drafted there and are
+finalized on this branch; the CHANGELOG, the register and
+`OUTSTANDING_ISSUES.md` were brought up to date.
 
 ## The engagement journey (on `main`)
 
@@ -190,9 +197,10 @@ Migration head: `0027_member_audit_actions`, on `main` and this branch (this bra
 
 ## Versions
 
-- Latest tag on the remote: **`v1.11.1`**, at `e8d9ac1`.
-- Version stamp in the code: **1.11.1** (`scripts/check_versions.py`: all
-  stamps agree).
+- Latest tag on the remote: **`v1.11.1`**, at `e8d9ac1`. `v1.12.0` is tagged by
+  the owner after this branch merges.
+- Version stamp in the code: **1.12.0** on this branch, 1.11.1 on `main`
+  (`scripts/check_versions.py`: all stamps agree).
 - Published images: `ghcr.io/emkwambe/modelbox-backend` and
   `ghcr.io/emkwambe/modelbox-frontend`, `1.11.1` (also `1.11` and `latest`).
   `1.11.0` remains published and is superseded.
@@ -200,7 +208,7 @@ Migration head: `0027_member_audit_actions`, on `main` and this branch (this bra
 ## Status
 
 Not for deployment on a shared network before v1.11.0 (README, Status).
-v1.11.1 is the release to use.
+v1.11.1 is the release to use until v1.12.0 is published.
 
 ## Repository contents
 

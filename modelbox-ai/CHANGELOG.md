@@ -3,12 +3,12 @@
 One entry per version. Each release's full notes, breaking changes and upgrade
 steps are in `docs/RELEASE_NOTES_v<version>.md`; this file is the index.
 
-## Unreleased (for v1.12.0)
+## v1.12.0 — 2026-09-29
 
-Recorded as changes land; the release notes are written from this list. Draft
-notes: [`docs/RELEASE_NOTES_v1.12.0-draft.md`](docs/RELEASE_NOTES_v1.12.0-draft.md).
-Sprint 8, pull requests #14 to #24; migrations 0023 to 0027, run by the migrate
-service on start.
+Full notes: [`docs/RELEASE_NOTES_v1.12.0.md`](docs/RELEASE_NOTES_v1.12.0.md).
+Sprint 8, pull requests #14 to #25 and the release preparation; migrations 0023
+to 0027, run by the migrate service on start, with no configuration change.
+Supersedes v1.11.1.
 
 - **DDL import:** an exported DDL file becomes a model at `/import`, read on the appliance.
   Oracle and SQL Server are certified on genuine exports and PostgreSQL on a genuine
