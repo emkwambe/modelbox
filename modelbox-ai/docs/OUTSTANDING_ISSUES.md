@@ -1,7 +1,9 @@
 # Outstanding issues
 
-**As of 2026-09-29, `main` at `4ea57f7` (Sprint 8 merged through pull request
-#24), release v1.11.1; v1.12.0 in preparation.** Companion to
+**As of 2026-09-30, `main` at `d38d6ec` (Sprint 8 merged through pull request
+#26), release v1.12.0**, tagged at `d38d6ec`, published by the gated release
+run 36659993511 and verified on the published images by Verify Release run
+36660321337. Companion to
 `BUILD_EVIDENCE_REVIEW.md`, which argues the evidence; this one is the list.
 The previous edition was written on 2026-09-03 on `sprint/6-product-experience`;
 entries that have not been re-measured since say so rather than being carried
