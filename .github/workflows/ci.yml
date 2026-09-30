@@ -433,6 +433,10 @@ jobs:
     # `down -v`, so every configuration starts from empty volumes.
     runs-on: ubuntu-24.04
     timeout-minutes: 75
+    # packages: read pulls the previous release's images for the rollback check.
+    permissions:
+      contents: read
+      packages: read
     defaults:
       run:
         working-directory: modelbox-ai
@@ -495,6 +499,23 @@ jobs:
           python -m pytest tests/blackbox -m config_b -v --no-header -rA
 
       - name: Stop the insecure profile
+        if: ${{ !cancelled() }}
+        run: docker compose -p modelbox-ai down -v --remove-orphans
+
+      - name: "Rollback: downgrade to v1.11.1 and run its published images"
+        # This release's appliance is given composite keys, attestations and a
+        # role change, downgraded to v1.11.1's migration head, and then run by
+        # the v1.11.1 images pulled from GHCR (tests/blackbox/test_rollback.py).
+        if: ${{ !cancelled() }}
+        env:
+          BLACKBOX_PROFILE: hardened
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          $COMPOSE up -d
+          python -m pytest tests/blackbox -m rollback -v --no-header -rA
+
+      - name: Stop the rolled-back appliance
         if: ${{ !cancelled() }}
         run: docker compose -p modelbox-ai down -v --remove-orphans
 

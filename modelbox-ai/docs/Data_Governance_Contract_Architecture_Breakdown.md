@@ -94,7 +94,7 @@ Modern data stacks have created a **governance debt explosion**:
 | **CCPA/CPRA (California)** | Consumer data rights, opt-out | Data inventory, access logging, deletion workflows |
 | **HIPAA (Healthcare)** | Minimum necessary standard, audit trails | Column-level security, PHI tagging, access control |
 | **SOC 2 Type II** | Data integrity, access controls | Change management, approval workflows, evidence collection |
-| **BCBS 239 (Banking)** | Risk data aggregation accuracy | Single source of truth, lineage, reconciliation |
+| **BCBS 239 (Banking)** | Risk data aggregation accuracy | Definitions, owners, sources and validation rules of the kind BCBS 239 expects; reconciliation |
 | **DAMA-DMBOK** | Industry standard framework | Role definitions, stewardship models, metadata management |
 | **AI Act (EU)** | Transparency, data quality for AI | Provenance tracking, bias detection, training data governance |
 
@@ -989,8 +989,8 @@ pii_classification:
 | **HIPAA** | Audit controls | Immutable access logs, query history, data lineage |
 | **SOC 2** | Change management | PR approval gates, test requirements, rollback procedures |
 | **SOC 2** | Logical access | RBAC, MFA, quarterly access reviews |
-| **BCBS 239** | Single source of truth | Enterprise data model, canonical definitions, reconciliation |
-| **BCBS 239** | Data lineage | End-to-end traceability, impact analysis, data dictionary |
+| **BCBS 239** | Concepts defined consistently (¶37 asks for a dictionary of the concepts used) | Canonical definitions, owners, sources and validation rules of the kind BCBS 239 expects |
+| **BCBS 239** | Accurate risk data aggregation | Reconciliation, and attribute-level lineage from source to target as supporting evidence |
 | **AI Act** | Training data quality | Provenance tracking, bias detection, fairness metrics |
 
 ---

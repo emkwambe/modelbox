@@ -5,9 +5,34 @@ steps are in `docs/RELEASE_NOTES_v<version>.md`; this file is the index.
 
 ## Unreleased (for v1.12.0)
 
-Recorded as changes land; the release notes are written from this list.
+Recorded as changes land; the release notes are written from this list. Draft
+notes: [`docs/RELEASE_NOTES_v1.12.0-draft.md`](docs/RELEASE_NOTES_v1.12.0-draft.md).
+Sprint 8, pull requests #14 to #24; migrations 0023 to 0027, run by the migrate
+service on start.
 
+- **DDL import:** an exported DDL file becomes a model at `/import`, read on the appliance.
+  Oracle and SQL Server are certified on genuine exports and PostgreSQL on a genuine
+  `pg_dump`; Snowflake is documentation-derived and not certified. Every import is
+  reconciled against the file by an independent counter, and saved reconciled or
+  unreconciled with its report.
+- **Keys and constraints:** composite primary and foreign keys and multi-column UNIQUE and
+  CHECK constraints are held in the model and stated in DDL export, with what a dialect
+  cannot express named as an export gap; exported PostgreSQL DDL is applied to a real
+  PostgreSQL in CI. Saved models open at `/canvas/<id>` and are listed at `/models`.
+- **Repair:** models stored with an enumeration's name instead of its value, which could
+  not be reopened in v1.11.x, are repaired by migration 0025 and listed.
+- **Data dictionary:** Markdown, HTML, JSON and CSV; person-supplied fields, a
+  classification scale per workspace, and a status per field. A field is verified only
+  under stated conditions, and lapses to pending when its value changes. Dictionary
+  review with a Verify control on the canvas.
+- **Drift report:** a saved model against a DDL export of the deployed schema, classified
+  by nineteen published rules, in the API and on the canvas.
 - **Migration diff:** the migration diff no longer pairs columns across separately saved models by internal id.
+  Every statement that drops data says so, in the SQL and in the diff panel.
+- **Semantic export:** MetricFlow composite keys, and keys it cannot join, are named export gaps.
+- **Members:** workspace owners and admins add members, change roles and remove members,
+  through the API and `/settings/members`.
+- **Rollback:** a tested downgrade to v1.11.1, with what it loses listed in the notes.
 
 ## v1.11.1
 

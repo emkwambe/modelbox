@@ -713,17 +713,20 @@ code that decides who the caller is.
 
 **Honest limits:**
 
-* **There is no API or UI to add workspace members or set their roles yet**
+* ~~**There is no API or UI to add workspace members or set their roles yet**
   (scheduled for Sprint 8). SCIM provisions people without a role; the
-  black-box suite writes its VIEWER membership directly in the database.
+  black-box suite writes its VIEWER membership directly in the database.~~
+  **Lifted 2026-09-29 — see PL-024.** Struck rather than deleted: members and
+  roles are now managed through the API and the members page, and the
+  black-box suite adds its VIEWER through that API.
 * **One organisation per appliance.** Workspaces are teams within it; separate
   organisations need separate appliances (`SECURITY_FAQ.md` §5).
 
 **Verified:** 2026-09-28 · **Sprint:** 7 · **Version:** unreleased
 **Expires:** if a route lacks a declared role, if B5 or B6 fails, or if a key
 acts outside its workspace.
-**Usable in:** security FAQ, regulated-buyer review. **Not** usable as a claim
-that roles can be managed in the product.
+**Usable in:** security FAQ, regulated-buyer review. That roles can be
+managed in the product is PL-024's claim.
 
 ---
 
@@ -756,6 +759,275 @@ JSONL for a SIEM. If an audit write fails, it is logged as an error and
 **Expires:** if the unpatched sink test or B7 fails, or if `/health` stops
 reporting audit write failures.
 **Usable in:** security FAQ, regulated-buyer review, SIEM integration notes.
+
+---
+
+## PL-018 — DDL import is tested per dialect on genuine exports, and Snowflake is labelled
+
+**Claim:** "ModelBox imports an exported DDL file offline. Oracle and SQL Server
+import is certified on genuine exports from those databases' own tools, and
+PostgreSQL import on a genuine `pg_dump`. Snowflake import is tested only
+against a fixture written from Snowflake's documentation, and is not certified."
+
+**Evidence** (CI run 36644605175 on `main` at `4ea57f7`; the fixtures are
+regenerated in fresh containers by the DDL Fixtures workflow, run 36623075855 on
+`main`):
+
+| Property | Test |
+| :-- | :-- |
+| Oracle HR and CO (`DBMS_METADATA`), SQL Server AdventureWorks (SMO) and PostgreSQL Pagila (`pg_dump`) import with no failures and no gaps | `test_ddl_import_fixtures.py::test_the_import_reconciles_with_no_failures_and_no_gaps` |
+| What was imported matches each database's own catalog, counted from its catalog views | `test_ddl_import_fixtures.py::test_what_was_imported_agrees_with_the_catalog` |
+| AdventureWorks imports identically in UTF-8 and UTF-16, with and without a BOM | `test_ddl_import_fixtures.py::test_adventureworks_imports_identically_in_every_encoding` |
+| Every one of AdventureWorks' 1,943 batches is imported or listed; each SQL Server normalizer rule is what makes its case import | `test_ddl_import_sqlserver.py::test_adventureworks_is_1943_batches_each_imported_or_listed`; negative control `test_negative_control_each_rule_disabled_makes_its_case_fail` |
+| Only the Snowflake fixture is documentation-derived, and it says so | `test_ddl_fixtures.py::test_only_snowflake_is_documentation_derived`; negative control `test_negative_control_removing_the_documentation_derived_label_fails` |
+| Every surface leaves Snowflake import uncertified while its fixture is documentation-derived | `test_ddl_fixtures.py::test_nothing_calls_snowflake_import_certified_while_its_fixture_is_documentation_derived`; negative control `test_negative_control_a_certification_claim_is_found` |
+| The Snowflake fixture fails by name on its HYBRID TABLE and is saved unreconciled | `test_ddl_import_fixtures.py::test_the_documentation_derived_snowflake_fixture_fails_by_name_and_is_unreconciled` |
+
+**Honest limits:**
+
+* **The genuine exports are of public sample schemas** (HR, CO, AdventureWorks,
+  Pagila), each from the database version its provenance header names. A
+  client's schema can use syntax none of them do; the import then names the
+  statement it could not read rather than dropping it (PL-019).
+* **Tables, columns, keys, constraints, defaults and descriptions are
+  imported.** Indexes, sequences, views, procedures and similar objects are
+  listed in the report, not imported.
+* **Snowflake is not certified**, and cannot be until a genuine `GET_DDL`
+  export replaces the documentation-derived fixture.
+
+**Verified:** 2026-09-29 · **Sprint:** 8 · **Version:** unreleased
+**Expires:** if any fixture stops reconciling, if the DDL Fixtures workflow stops
+reproducing the committed exports, or if the Snowflake fixture is replaced (the
+claim is then re-scoped, not extended).
+**Usable in:** import page, engagement proposal, technical review. **Not**
+usable as a claim about Snowflake certification.
+
+---
+
+## PL-019 — Every import is reconciled against the file, by a counter that shares no code with the parser
+
+**Claim:** "Every DDL import is checked against counts taken from the file
+itself by an independent counter. A model is saved *reconciled* only when every
+count matches; otherwise it is saved *unreconciled*, and the report names each
+gap by statement and line. The report downloads as Markdown or JSON."
+
+**Evidence** (CI run 36644605175 on `main` at `4ea57f7`):
+
+| Property | Test |
+| :-- | :-- |
+| The independent counter agrees with each database's catalog | `test_ddl_import_fixtures.py::test_the_independent_counter_agrees_with_the_catalog` |
+| A statement the importer drops is a gap, named by its statement | `test_ddl_import_core.py::test_negative_control_a_statement_the_importer_drops_is_a_gap_by_statement` |
+| An import with a gap is saved unreconciled; a clean one reconciled | `test_ddl_import_api.py::test_an_import_with_gaps_is_saved_unreconciled`, `test_a_member_imports_oracle_hr_and_it_is_stored_reconciled` |
+| The report downloads as Markdown and JSON | `test_ddl_import_api.py::test_the_report_downloads_as_markdown_and_json_for_a_viewer` |
+| On the running appliance, over HTTP: HR and AdventureWorks show zero gaps in the response, the stored report and the database row read with SQL | black-box `test_config_b.py::test_b10_a_genuine_export_imports_with_zero_gaps` |
+| Air-gapped, with no route out: HR reconciles, and nothing is recorded in the egress ledger | black-box `test_config_c.py::test_c4_a_ddl_import_needs_no_route_out` |
+
+**Honest limits:**
+
+* **Reconciliation compares counts**: tables, columns, primary keys, foreign
+  keys, UNIQUE and CHECK constraints, and descriptions. Matching counts do not
+  prove that every imported value is right; the fixture tests above compare
+  values against the catalog, a client's import is compared by count.
+
+**Verified:** 2026-09-29 · **Sprint:** 8 · **Version:** unreleased
+**Expires:** if a dropped statement stops being a gap, or if B10 or C4 fails.
+**Usable in:** import page, engagement proposal, regulated-buyer review.
+
+---
+
+## PL-020 — Exported PostgreSQL DDL is applied to a real PostgreSQL, and what it cannot state is named
+
+**Claim:** "The PostgreSQL DDL ModelBox exports for an imported schema is run
+on a real PostgreSQL 16 in CI, and the resulting catalog is compared with the
+source's. Anything the export cannot state is listed as a named gap at the top
+of the file, and the shortfall in the catalog equals those gaps."
+
+**Evidence** (Backend Pytest (Postgres) job, CI run 36644605175 on `main` at
+`4ea57f7`):
+
+| Property | Test |
+| :-- | :-- |
+| The job has its PostgreSQL server; the check cannot skip there | `test_ddl_on_postgres.py::test_the_postgres_job_has_its_server` |
+| HR, CO, Pagila and AdventureWorks: PostgreSQL accepts the export, and its catalog matches the manifest less the named gaps | `test_ddl_on_postgres.py::test_postgresql_accepts_the_export_and_its_catalog_matches_the_manifest` |
+| An invalid export makes the check fail | `test_ddl_on_postgres.py::test_negative_control_an_invalid_export_makes_the_check_fail` |
+
+**Honest limits:**
+
+* **Execution is PostgreSQL only.** Other certified dialects are checked by
+  grammar (PL-001), not run.
+* **Named gaps are real losses**, for example AdventureWorks' computed
+  columns, and sequence defaults and user-defined types the model does not
+  hold. They are stated in the file; they are not supplied.
+
+**Verified:** 2026-09-29 · **Sprint:** 8 · **Version:** unreleased
+**Expires:** if PostgreSQL refuses an exported file, if the shortfall differs
+from the named gaps, or if the PostgreSQL image pin changes without a re-run.
+**Usable in:** export UI, technical review.
+
+---
+
+## PL-021 — "Verified" in a data dictionary means three stated conditions, checked by the server
+
+**Claim:** "A dictionary field is marked verified only when an approver asks,
+the model is a reconciled import, the field's definition passes the
+machine-checkable rules of ISO/IEC 11179-4, and its provenance is recorded and
+is not an AI draft. A verified value that changes returns to pending review.
+No one can set 'verified' directly."
+
+**Evidence** (CI run 36644605175 on `main` at `4ea57f7`):
+
+| Property | Test |
+| :-- | :-- |
+| All three conditions verify a field | `test_dictionary_verification.py::test_a_reconciled_import_with_a_sound_definition_and_provenance_verifies` |
+| Each condition alone refuses, and each refusal is its own condition | `test_an_unreconciled_import_keeps_a_field_unverified`, `test_a_definition_failing_the_11179_rules_keeps_a_field_unverified`, `test_a_value_without_provenance_keeps_a_field_unverified`, `test_an_ai_draft_is_never_verified`; negative control `test_negative_control_each_refusal_is_its_condition` |
+| An edited verified value returns to pending | `test_dictionary_verification.py::test_editing_a_verified_value_makes_it_pending` |
+| A request that states a status is refused | `test_dictionary_verification.py::test_setting_verified_directly_is_refused` |
+| The database refuses a verified row without a reviewer, time and provenance | `test_the_database_refuses_a_verified_row_without_a_reviewer`; negative control `test_negative_control_without_the_provenance_condition_the_database_refuses` |
+| The dictionary says verified only where the attestation does | `test_dictionary_verification.py::test_the_dictionary_shows_verified_only_where_the_attestation_says_so` |
+| In a browser, on the running appliance: verify a field, see the counts change, edit it back to pending; an unreconciled import's fields are refused | Engagement Journey (PL-025) |
+
+**Honest limits:**
+
+* **Only the machine-checkable rules of ISO/IEC 11179-4 are applied.** The rest
+  of the standard is judgement; passing these rules does not claim it, and
+  "verified" does not claim a definition is correct for the business.
+* **Values saved before this release are "recorded"**, with no provenance, and
+  cannot be verified until someone supplies them again.
+
+**Verified:** 2026-09-29 · **Sprint:** 8 · **Version:** unreleased
+**Expires:** if any condition can be bypassed, or if an edited value stays
+verified.
+**Usable in:** dictionary export, engagement proposal, regulated-buyer review,
+in the words "definitions, owners, sources and validation rules of the kind
+BCBS 239 expects". **Not** usable as a compliance claim.
+
+---
+
+## PL-022 — The drift report finds exactly the drift a real database was given, classified by written rules
+
+**Claim:** "The drift report compares a saved model with a DDL export of the
+deployed schema. On real Oracle, SQL Server and PostgreSQL databases altered by
+committed scripts, it reports exactly the drifts each script makes, and
+classifies each as breaking, non-breaking or informational by nineteen rules
+published in the user guide. A drift touching a verified dictionary field is
+flagged, and an unreconciled import is warned about first."
+
+**Evidence** (CI run 36644605175 on `main` at `4ea57f7`; the drifted exports are
+produced by the DDL Fixtures workflow, run 36623075855 on `main`):
+
+| Property | Test |
+| :-- | :-- |
+| HR (Oracle), AdventureWorks (SQL Server), Pagila (PostgreSQL): exactly the expected drifts, each classified as its hand-written manifest says | `test_drift_fixtures.py::test_the_report_finds_exactly_the_expected_drifts`; negative controls `test_negative_control_a_suppressed_drift_category_fails`, `test_negative_control_a_broken_classification_rule_fails` |
+| A baseline against itself has no drift | `test_drift_fixtures.py::test_a_baseline_against_itself_has_no_drift` |
+| The drifted exports are genuine tool output | `test_drift_fixtures.py::test_the_drift_fixtures_are_genuine_tool_output` |
+| Every rule has a case and every drift kind a rule; the user guide lists each rule with its text and class | `test_drift_rules.py::test_each_rule_classifies_its_case`, `test_every_rule_has_a_case_and_every_kind_a_rule`, `test_the_user_guide_lists_every_rule_with_its_text_and_class`; negative control `test_negative_control_a_broken_rule_changes_its_class` |
+| Columns pair by name, never by internal identity | `test_drift_report.py::test_column_identity_is_never_used_to_pair` |
+| The verified-field flag, and the unreconciled warning first in every format | `test_drift_report.py::test_a_drift_on_a_verified_field_is_flagged`, `test_an_unreconciled_import_says_so_at_the_top_of_every_format`; negative control `test_negative_control_an_unverified_field_is_not_flagged` |
+| In a browser: the drifted HR export's rows match the manifest by kind, place and class, and only the drift on a verified field is flagged | Engagement Journey (PL-025) |
+
+**Honest limits:**
+
+* **Renames are not detected.** A renamed column is a removal and an addition;
+  a "possible rename" hint is only a hint.
+* **It compares what DDL states**: tables, columns, types, nullability,
+  defaults, keys, constraints and descriptions. Data, indexes and grants are
+  not compared.
+
+**Verified:** 2026-09-29 · **Sprint:** 8 · **Version:** unreleased
+**Expires:** if a fixture's report differs from its manifest, or if a rule
+changes class without its manifest and the user guide changing with it.
+**Usable in:** engagement proposal, drift report page, technical review.
+
+---
+
+## PL-023 — A migration says, in the DDL and on screen, which statements drop data
+
+**Claim:** "Every statement in a generated migration that drops data says so in
+the SQL and in the diff panel. A column is renamed only between versions of the
+same model; between separately saved models, columns pair by name, so an
+uncertain rename is shown as a removal and an addition, with the removal's data
+loss stated."
+
+**Evidence** (CI run 36644605175 on `main` at `4ea57f7`):
+
+| Property | Test |
+| :-- | :-- |
+| Separately saved models pair by name, so an added column is an addition | `test_diff_engine.py::test_separately_saved_models_pair_by_name_so_an_added_column_is_an_addition`; negative control `test_negative_control_id_pairing_across_models_brings_the_false_rename_back` |
+| The endpoint never renames across separately saved models | `test_diff_engine.py::test_the_diff_endpoint_never_renames_across_separately_saved_models` |
+| An uncertain rename is a drop and an add, and the migration says so | `test_diff_engine.py::test_an_uncertain_rename_is_a_drop_and_an_add_and_the_migration_says_so` |
+| A dropped table says its data goes too | `test_diff_engine.py::test_a_dropped_table_says_its_data_goes_too` |
+| The diff panel names each column whose data is dropped | `DiffPanel.test.tsx` "says the migration drops data, naming each column"; negative control "no alert when nothing is dropped" |
+
+**Honest limits:**
+
+* **The migration is generated, not run.** Whether to apply a statement that
+  drops data is the reader's decision; the product states the loss, it does not
+  prevent it.
+
+**Verified:** 2026-09-29 · **Sprint:** 8 · **Version:** unreleased
+**Expires:** if a dropping statement lacks its data-loss line, or if the diff
+renames across separately saved models.
+**Usable in:** migration page, technical review.
+
+---
+
+## PL-024 — Workspace members and roles are managed in the product, within guards the server enforces
+
+**Claim:** "A workspace OWNER or ADMIN adds existing users, changes their roles
+and removes them, through the API and the members page. No one grants a role
+above their own, an ADMIN cannot make an OWNER, a workspace always keeps an
+OWNER, and a removed member's API keys stop at once."
+
+**Evidence** (CI run 36644605175 on `main` at `4ea57f7`; authorisation tests sign
+in with real credentials):
+
+| Property | Test |
+| :-- | :-- |
+| An owner adds an existing user; an email with no user is refused by name | `test_members.py::test_an_owner_adds_an_existing_user`, `test_an_email_with_no_user_is_refused_by_name` |
+| An admin changes a role and removes a member; a member cannot manage members | `test_members.py::test_an_admin_changes_a_role_and_removes_a_member`, `test_a_member_cannot_manage_members` |
+| An admin cannot make an owner | `test_members.py::test_an_admin_cannot_make_an_owner`; negative control `test_negative_control_without_the_rule_an_admin_makes_an_owner` |
+| The last owner can never be demoted or removed | `test_members.py::test_the_last_owner_can_never_be_demoted_or_removed`; negative control `test_negative_control_without_the_guard_the_last_owner_goes` |
+| A removed member's keys stop at once | `test_members.py::test_a_removed_members_keys_stop_at_once`; negative control `test_negative_control_a_membership_read_once_would_keep_the_key` |
+| The members page: its controls follow the viewer's role | `src/app/settings/members/page.test.tsx` (7 tests) |
+| On the running appliance, the black-box suite adds its VIEWER through the members API | black-box `conftest.py` `world`, used by B5 and B6 (PL-016) |
+
+**Honest limits:**
+
+* **The members API adds existing users only.** Users come from OIDC, SCIM or
+  `create-owner`.
+* **One organisation per appliance**, as in PL-016.
+
+**Verified:** 2026-09-29 · **Sprint:** 8 · **Version:** unreleased
+**Expires:** if any guard above can be bypassed, or if a removed member's key
+still acts.
+**Usable in:** security FAQ, regulated-buyer review, admin guide.
+
+---
+
+## PL-025 — One consultant engagement runs end to end in a real browser on every change
+
+**Claim:** "On every change, CI starts the appliance as installed, and a
+browser walks one engagement: sign in, import the genuine Oracle HR export
+(zero gaps), edit and save dictionary fields that survive a reload, verify a
+field and see it lapse on edit, compare a drifted export, and export
+PostgreSQL DDL. The same run shows a documentation-derived Snowflake import
+warned about first and refused verification."
+
+**Evidence:** `e2e/tests/journey.spec.ts`, run by the required **Engagement
+Journey** check against the appliance in configuration B, with the owner made
+by `create-owner`; on `main` at `4ea57f7`, CI run 36644605175: `2 passed`, no
+retries.
+
+**Honest limits:**
+
+* **One browser (Chromium), one engagement.** It exercises the path a
+  consultant takes, not every screen.
+* **It runs in CI**, against images built from the commit; published images are
+  checked by the Verify Release workflow.
+
+**Verified:** 2026-09-29 · **Sprint:** 8 · **Version:** unreleased
+**Expires:** if the Engagement Journey check fails or stops being required.
+**Usable in:** engagement proposal, technical review.
 
 ---
 

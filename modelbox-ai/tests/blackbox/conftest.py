@@ -85,6 +85,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "config_a: configuration A (.env.example only); needs no running stack",
         "config_b: configuration B, and the insecure profile",
         "upgrade: an upgraded database; manages its own stack",
+        "rollback: a database downgraded to the previous release, run by its published images",
         "config_c: configuration C (AIRGAPPED, egress-deny network)",
     ):
         config.addinivalue_line("markers", marker)
