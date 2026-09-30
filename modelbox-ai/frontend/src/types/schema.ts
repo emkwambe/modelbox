@@ -37,14 +37,35 @@ export type SourceType =
   | 'jira_story'
   | 'raw_ddl';
 
-export type PIIType =
-  | 'EMAIL'
-  | 'SSN'
-  | 'PHONE'
-  | 'CREDIT_CARD'
-  | 'IBAN'
-  | 'NAME'
-  | 'ADDRESS';
+/**
+ * Mirrors `PIIType` in app/schemas/data_model.py. The first seven are the
+ * original set; the rest came with Sprint 9 Step 4, one per category of NIST
+ * SP 800-122 §2.2 and GLBA nonpublic personal information the seven did not name.
+ */
+export const PII_TYPES = [
+  'EMAIL',
+  'SSN',
+  'PHONE',
+  'CREDIT_CARD',
+  'IBAN',
+  'NAME',
+  'ADDRESS',
+  'NATIONAL_ID',
+  'PASSPORT_NUMBER',
+  'DRIVERS_LICENSE',
+  'TAXPAYER_ID',
+  'PATIENT_ID',
+  'FINANCIAL_ACCOUNT',
+  'IP_ADDRESS',
+  'MAC_ADDRESS',
+  'BIOMETRIC',
+  'VEHICLE_ID',
+  'DATE_OF_BIRTH',
+  'PLACE_OF_BIRTH',
+  'FINANCIAL_INFORMATION',
+] as const;
+
+export type PIIType = (typeof PII_TYPES)[number];
 
 export type ExportFormat = 'ddl' | 'dbt' | 'cube';
 
