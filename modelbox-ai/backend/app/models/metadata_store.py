@@ -1030,6 +1030,10 @@ AUDIT_ACTIONS: tuple[str, ...] = (
     # the members API as their emitter (migration 0027).
     "MEMBER_ROLE_CHANGED",
     "MEMBER_REMOVED",
+    # Source-to-target mapping (Sprint 9 Step 3, migration 0030).
+    "MAPPING_DOCUMENT_CREATED",
+    "MAPPING_DOCUMENT_DELETED",
+    "MAPPING_DECIDED",
 )
 
 #: Outcomes. `DENIED` is separate from `FAILURE` on purpose: a refused
@@ -1112,6 +1116,213 @@ class AuditEvent(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# Source-to-target mapping (Sprint 9 Step 3, migration 0030; owner, H3)
+#
+# Columns are referenced by name with their stable_id beside it, never by a
+# foreign key to entity_columns: saving a model deletes the row of a column it
+# no longer has, and a key would cascade the mapping away. Drift is computed on
+# read (app.services.mapping), so a mapping whose column is gone is flagged and
+# kept. Proposals (inference) and entries (human decisions) are separate
+# tables, so a proposal can never be counted as a mapping.
+# ---------------------------------------------------------------------------
+class MappingDocument(Base):
+    """One mapping from a source model to a target model of the same workspace."""
+
+    __tablename__ = "mapping_documents"
+    __table_args__ = (
+        CheckConstraint("status IN ('draft', 'approved')", name="ck_mapping_documents_status"),
+        # Approval stays unused in Sprint 9 (owner, H3): it arrives with the
+        # decision ledger. The columns exist, and an approved row is complete.
+        CheckConstraint(
+            "status <> 'approved' OR (approved_by_user_id IS NOT NULL AND approved_by_email IS NOT NULL "
+            "AND approved_at IS NOT NULL)",
+            name="ck_mapping_documents_approved",
+        ),
+    )
+
+    document_id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.workspace_id", ondelete="CASCADE"), nullable=False, index=True)
+    target_model_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("data_models.model_id", ondelete="CASCADE"), nullable=False, index=True)
+    source_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("data_models.model_id", ondelete="SET NULL"), nullable=True, index=True)
+    source_model_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_system: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_system: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft", server_default=text("'draft'"))
+    approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    approved_by_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    approved_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # High-water mark for entry keys (M-0001...): never reused, like next_stable_id.
+    next_mapping_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1"))
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    created_by_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.current_timestamp(), nullable=False)
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp(),
+        nullable=False)
+
+    entries: Mapped[list[MappingEntry]] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True, order_by="MappingEntry.mapping_key")
+    proposals: Mapped[list[MappingProposal]] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True, order_by="MappingProposal.created_at")
+
+
+class MappingEntry(Base):
+    """An accepted human decision about one target column: R2's STTM row.
+
+    Nothing here is ever an unreviewed proposal. Target type, nullability and
+    key, and the source columns' classification and CDE, are read live from
+    the models, not stored; each decision's evidence keeps a snapshot.
+    """
+
+    __tablename__ = "mapping_entries"
+    __table_args__ = (
+        UniqueConstraint("document_id", "mapping_key", name="uq_mapping_entry_key"),
+        UniqueConstraint("document_id", "target_entity", "target_column", name="uq_mapping_entry_target"),
+        CheckConstraint("kind IN ('mapped', 'constant', 'derived', 'not_yet_mapped')",
+                        name="ck_mapping_entries_kind"),
+        CheckConstraint(
+            "transformation_type IS NULL OR transformation_type IN ('IDENTITY', 'TRANSFORMATION', "
+            "'AGGREGATION', 'JOIN', 'GROUP_BY', 'FILTER', 'SORT', 'WINDOW', 'CONDITIONAL')",
+            name="ck_mapping_entries_transformation_type"),
+        CheckConstraint("scd_type IS NULL OR (scd_type >= 0 AND scd_type <= 6)", name="ck_mapping_entries_scd_type"),
+        CheckConstraint("step_kind IS NULL OR step_kind IN ('manual', 'automated')",
+                        name="ck_mapping_entries_step_kind"),
+        CheckConstraint("provenance IN ('person', 'proposal_accepted')", name="ck_mapping_entries_provenance"),
+    )
+
+    entry_id: Mapped[uuid.UUID] = _uuid_pk()
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("mapping_documents.document_id", ondelete="CASCADE"), nullable=False, index=True)
+    mapping_key: Mapped[str] = mapped_column(String(16), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+    target_entity: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_column: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_stable_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    transformation_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    rule_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    logic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    join_filter: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lookup: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_null_handling: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scd_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    step_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    control_rule: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reconciliation_control_total: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reconciliation_compared_with: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reconciliation_differences: Mapped[str | None] = mapped_column(Text, nullable=True)
+    masking: Mapped[bool | None] = mapped_column(nullable=True)
+    # Who supplied the entry, per entry (owner, H3): each decision in the
+    # ledger holds the content before and after.
+    provenance: Mapped[str] = mapped_column(String(24), nullable=False)
+    provenance_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    provenance_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    proposal_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    value_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.current_timestamp(), nullable=False)
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp(),
+        nullable=False)
+
+    sources: Mapped[list[MappingEntrySource]] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True, order_by="MappingEntrySource.position")
+
+
+class MappingEntrySource(Base):
+    """One source column of an entry, in order: one for one-to-one, several for many-to-one."""
+
+    __tablename__ = "mapping_entry_sources"
+
+    source_row_id: Mapped[uuid.UUID] = _uuid_pk()
+    entry_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("mapping_entries.entry_id", ondelete="CASCADE"), nullable=False, index=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_entity: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_column: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_stable_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_schema: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class MappingProposal(Base):
+    """A candidate mapping from ModelBox's proposer: inference, counted as nothing."""
+
+    __tablename__ = "mapping_proposals"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'accepted', 'edited', 'rejected', 'superseded')",
+                        name="ck_mapping_proposals_status"),
+        CheckConstraint(
+            "name_similarity >= 0 AND name_similarity <= 1 AND type_compatibility >= 0 "
+            "AND type_compatibility <= 1 AND confidence >= 0 AND confidence <= 1",
+            name="ck_mapping_proposals_scores"),
+    )
+
+    proposal_id: Mapped[uuid.UUID] = _uuid_pk()
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("mapping_documents.document_id", ondelete="CASCADE"), nullable=False, index=True)
+    target_entity: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_column: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_stable_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sources: Mapped[list] = mapped_column(JSON, nullable=False)
+    name_similarity: Mapped[float] = mapped_column(Float, nullable=False)
+    type_compatibility: Mapped[float] = mapped_column(Float, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    method: Mapped[str] = mapped_column(String(32), nullable=False)
+    method_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending",
+                                        server_default=text("'pending'"))
+    resolved_decision_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.current_timestamp(), nullable=False)
+
+
+class MappingDecision(Base):
+    """Every human decision about a mapping entry or proposal: append-only.
+
+    One of ``app.db_roles.ALL_LEDGERS``: the application role may only SELECT and
+    INSERT, and migration 0030's triggers refuse UPDATE, DELETE and TRUNCATE
+    for every role. It references what it is about by id without a foreign
+    key, as ``audit_event`` does, so the record outlives the entry, the
+    document, and a downgrade (owner, H3). Its fields are those of the future
+    decision ledger's Decision: the elements it governs, the evidence shown,
+    the decision, the decider and the time, and the resulting change.
+    """
+
+    __tablename__ = "mapping_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('accepted', 'edited', 'rejected', 'authored', 'declared_unmapped', 'changed', "
+            "'removed', 'document_approved')",
+            name="ck_mapping_decisions_decision"),
+        Index("ix_mapping_decisions_document", "document_id"),
+    )
+
+    decision_id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    entry_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    proposal_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    mapping_key: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    decision: Mapped[str] = mapped_column(String(24), nullable=False)
+    # NOT NULL: the database refuses a decision without a person. The API
+    # takes the decider from the authenticated caller, never from a body.
+    decided_by_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    decided_by_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    decided_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.current_timestamp(), nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSON, nullable=False)
+    entry_digest_before: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entry_digest_after: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 __all__ = [
     "ATTESTATION_STATUSES",
     "AUDIT_ACTIONS",
@@ -1140,6 +1351,11 @@ __all__ = [
     "EntityRelationship",
     "FederatedIdentity",
     "FieldAttestation",
+    "MappingDecision",
+    "MappingDocument",
+    "MappingEntry",
+    "MappingEntrySource",
+    "MappingProposal",
     "ModelEntity",
     "SynthesisJob",
     "TrainerAssignment",

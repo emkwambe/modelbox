@@ -104,6 +104,11 @@ def test_the_previous_release_runs_on_a_downgraded_database(client: httpx.Client
     # --- What the downgrade gives up, read by SQL -------------------------------
     remaining = [t for t in _THIS_RELEASE_TABLES if _exists(t)]
     check(remaining == [], f"tables still present after the downgrade: {remaining}")
+    # Migration 0030 (owner, H3): every mapping is lost, the decisions record is kept.
+    mappings = [t for t in ("mapping_documents", "mapping_entries", "mapping_entry_sources", "mapping_proposals")
+                if _exists(t)]
+    check(mappings == [], f"mapping tables still present after the downgrade: {mappings}")
+    check(_exists("mapping_decisions"), "the downgrade dropped mapping_decisions, which it keeps")
     # (SpecialOfferID, ProductID) -> SpecialOfferProduct keeps its first pair only.
     pair = sql_ok(_FIRST_PAIR_AFTER, variables={"model": aw})
     check(pair == "SpecialOfferID->SpecialOfferID", f"the composite FK kept {pair!r}")

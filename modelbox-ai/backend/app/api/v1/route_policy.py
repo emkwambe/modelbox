@@ -113,4 +113,18 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", f"{_V1}/import/dialects"): AUTHENTICATED,
     ("POST", f"{_V1}/import/ddl"): "MEMBER",
     ("GET", f"{_V1}/model/{{model_id}}/import-report"): "VIEWER",
+    # --- source-to-target mapping (Sprint 9 Step 3). Deciding is MEMBER, and
+    # the decision routes also refuse an API key: a decision needs a person.
+    ("GET", f"{_V1}/model/{{model_id}}/mappings"): "VIEWER",
+    ("POST", f"{_V1}/model/{{model_id}}/mappings"): "MEMBER",
+    ("GET", f"{_V1}/mappings/{{document_id}}"): "VIEWER",
+    ("DELETE", f"{_V1}/mappings/{{document_id}}"): "MEMBER",
+    ("POST", f"{_V1}/mappings/{{document_id}}/proposals"): "MEMBER",
+    ("POST", f"{_V1}/mappings/{{document_id}}/proposals/{{proposal_id}}/accept"): "MEMBER",
+    ("POST", f"{_V1}/mappings/{{document_id}}/proposals/{{proposal_id}}/reject"): "MEMBER",
+    ("POST", f"{_V1}/mappings/{{document_id}}/entries"): "MEMBER",
+    ("PUT", f"{_V1}/mappings/{{document_id}}/entries/{{mapping_key}}"): "MEMBER",
+    ("DELETE", f"{_V1}/mappings/{{document_id}}/entries/{{mapping_key}}"): "MEMBER",
+    ("GET", f"{_V1}/mappings/{{document_id}}/export"): "VIEWER",
+    ("GET", f"{_V1}/mappings/{{document_id}}/lineage"): "VIEWER",
 }

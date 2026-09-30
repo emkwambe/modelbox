@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     egress,
     export_status,
     jobs,
+    mappings,
     members,
     models,
     scim,
@@ -40,5 +41,6 @@ api_router.include_router(scim.router)
 api_router.include_router(egress.router)
 api_router.include_router(export_status.router)
 api_router.include_router(ddl_import.router)
+api_router.include_router(mappings.router)
 
 __all__ = ["api_router"]
