@@ -1,7 +1,7 @@
 # ModelBox AI — state
 
-*Regenerated 2026-09-30 on `sprint-9/step-1b-computed-columns`, branched from
-`main` at `bb8929b`. This file is rewritten at every stop, merge, deploy and
+*Regenerated 2026-09-30 on `sprint-9/step-2b-dbt-export`, branched from
+`main` at `243a473`. This file is rewritten at every stop, merge, deploy and
 tag; a figure here is the output of a command run for it, not a copy from
 another document.*
 
@@ -9,14 +9,43 @@ another document.*
 
 | Ref | Commit | Notes |
 | :-- | :-- | :-- |
-| `main` | `bb8929b` | type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
+| `main` | `243a473` | computed columns as PostgreSQL generated columns (#29), on type, identity and sequence mappings to PostgreSQL (#28), on STATE.md and OUTSTANDING_ISSUES.md for the released v1.12.0 (#27), on the v1.12.0 release preparation (#26), on claims, a tested rollback to v1.11.1 and the records for v1.12.0 (#25), the engagement journey, the Verify control and the drift panel (#24), two silent-loss fixes and workspace members (#23), the drift report (#22), dictionary fields, a classification scale and per-field verification (#21), exported DDL applied to PostgreSQL and the data dictionary rebuilt (#20), keys, constraints and the saved-model journey (#19), SQL Server import and original type text (#18), the offline DDL import for Oracle, PostgreSQL and Snowflake (#17), the PostgreSQL and Snowflake fixtures (#16), the Oracle and SQL Server fixtures (#15) and records and CI hygiene (#14) |
 | `v1.12.0` | `d38d6ec` | tagged 2026-09-29 22:28 -04:00; published by the gated release workflow (run 36659993511: gate, backend and frontend images all green); verified on the published images (run 36660321337, below) |
 | `v1.11.1` | `e8d9ac1` | tagged 2026-09-29 (UTC), published by run 36516574170; superseded by v1.12.0, tag and images kept |
 | `v1.11.0` | `d5822f1` | tagged 2026-09-29 (UTC), published by run 36511971512; superseded by v1.11.1, tag and images kept |
-| `sprint-9/step-1b-computed-columns` | this branch | computed columns as PostgreSQL generated columns (below) |
-| `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
+| `sprint-9/step-2b-dbt-export` | this branch | the dbt export on imported schemas, and seed data under every constraint (below) |
+| `sprint-9/step-1b-computed-columns`, `sprint-9/step-1a-type-mappings`, `sprint-9/step-0-state`, `release/v1.12.0`, `sprint-8/step-8a-claims-and-records`, `sprint-8/step-7-engagement-journey`, `sprint-8/step-6-members-and-fixes`, `sprint-8/step-5-drift-report`, `sprint-8/step-4b-dictionary-verification`, `sprint-8/step-4a-dictionary-export`, `sprint-8/step-3-journey`, `sprint-8/step-2b-sqlserver`, `sprint-8/step-2a-import-core`, `sprint-8/step-1-5-pg-snowflake-fixtures`, `sprint-8/step-1-export-fixtures`, `sprint-8/engagement-toolkit`, `sprint-7/secure-by-default`, `sprint-7/records`, `release/v1.11.0`, `fix/v1.11.1`, `sprint-7/close` | kept | the records cite their commits and runs |
 
-## In progress on this branch: computed columns as generated columns
+## In progress on this branch: dbt on imported schemas, and seed data
+
+A dbt project exported from an imported schema did not build on
+PostgreSQL. Its staging models cast to the source's own types (Oracle's
+`NUMBER(4,0)`) and left mixed-case names unquoted. The execution evidence
+behind the dbt claims covered only the reference models, in DuckDB. Now, with
+a dialect, each staging model casts to the type the DDL export writes for it,
+and every name that is not lower snake case is quoted in the SQL and in
+`schema.yml`. The export panel shows the dialect picker for dbt.
+
+The seed generator's rows satisfy every primary key, UNIQUE, foreign key and
+CHECK constraint the model declares. Each column is generated for its target
+type, and computed columns are not written. A row no values can satisfy is
+left out and counted in the response's `rows_skipped`.
+
+`test_dbt_on_postgres` runs in the Artifact Fidelity Harness job against the
+appliance's PostgreSQL 16.15, for Oracle HR, Oracle CO, Pagila and
+AdventureWorks. The product's seed rows load with none refused and every
+table full. `dbt build` passes, and a duplicate grain key and an orphan
+foreign key each fail the test that guards them. There are three controls: a
+duplicate refused by the database, the seed unquoted refused, and the project
+cast to the source's types failing to build. On `a3dad48`, run 36711138855:
+29 passed, 1 skipped (Pagila's unquoted control: every name there is lower
+case). PL-007 and PL-014 state the new evidence and its limit.
+
+A pre-existing export defect found on the way: a T-SQL `LIKE` character class
+is exported to PostgreSQL unchanged, where it matches only literal text
+(OUTSTANDING_ISSUES).
+
+## Computed columns as generated columns (on `main`, #29)
 
 A SQL Server computed column is exported to PostgreSQL as
 `GENERATED ALWAYS AS (...) STORED` where every part of its expression is on
@@ -33,8 +62,8 @@ Pytest (Postgres) job applies the export and checks the computed values
 against values computed from the same inputs
 (`test_generated_columns_on_postgres`).
 
-Also on this branch: comments and docs that cited documents kept outside
-this repository now state their reasons themselves.
+Also in #29: comments and docs that cited documents kept outside this
+repository now state their reasons themselves.
 
 ## Type, identity and sequence mappings (on `main`, #28)
 
@@ -240,8 +269,8 @@ documentation-derived in its header and manifest, with a test that fails if
 the label goes or if anything calls Snowflake import certified while it
 stands.
 
-Migration head: `0028_identity_and_sequences` on `main`;
-`0029_computed_columns` on this branch (`alembic heads`).
+Migration head: `0029_computed_columns` on `main` and on this branch, which
+adds no migration (`alembic heads`).
 
 ## Versions
 
