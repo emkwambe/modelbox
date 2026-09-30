@@ -96,9 +96,15 @@ def _connect(database: str | None = None) -> Any:
 
 
 def _fresh_database(name: str) -> None:
-    with _connect() as admin, admin.cursor() as cursor:
-        cursor.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-        cursor.execute(f'CREATE DATABASE "{name}"')
+    # Not `with connection:`, which opens a transaction block even under
+    # autocommit, and DROP DATABASE refuses to run in one.
+    admin = _connect()
+    try:
+        with admin.cursor() as cursor:
+            cursor.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+            cursor.execute(f'CREATE DATABASE "{name}"')
+    finally:
+        admin.close()
 
 
 def _apply(database: str, statements: list[str]) -> list[dict[str, str]]:
@@ -131,7 +137,9 @@ def _query(database: str, sql: str, params: tuple[object, ...] = ()) -> list[tup
 
 
 def _inserts(sql: str) -> list[str]:
-    return [s for s in re.split(r";\s*\n", sql) if s.lstrip().startswith("INSERT")]
+    # The first statement follows the file's header comments, so a statement
+    # is any chunk that contains an INSERT, comments and all.
+    return [s for s in re.split(r";\s*\n", sql) if re.search(r"^INSERT INTO ", s, re.MULTILINE)]
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +174,7 @@ def _dbt(project: Path, *command: str) -> DbtRun:
     return DbtRun(done.returncode == 0, (done.stdout + done.stderr)[-4000:], status)
 
 
-def _write_project(root: Path, files: dict[str, str], database: str) -> Path:
+def _write_project(root: Path, files: dict[str, str], database: str, schema: str = "analytics") -> Path:
     for path, content in files.items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(content, encoding="utf-8")
@@ -177,7 +185,7 @@ def _write_project(root: Path, files: dict[str, str], database: str) -> Path:
     parts = urlsplit(URL)
     (root / "profiles.yml").write_text(yaml.safe_dump({"step2b": {"target": "ci", "outputs": {"ci": {
         "type": "postgres", "host": parts.hostname, "port": parts.port or 5432, "user": parts.username,
-        "password": parts.password, "dbname": database, "schema": "analytics", "threads": 4}}}}),
+        "password": parts.password, "dbname": database, "schema": schema, "threads": 4}}}}),
         encoding="utf-8")
     return root
 
@@ -374,8 +382,9 @@ def test_dbt_tests_fail_on_an_orphan_foreign_key(case: Case) -> None:
     else:
         raise AssertionError(f"fixture sanity: {case.stem} has a numeric foreign key with a relationships test")
     table, column = guard["table"], guard["column"]
-    parent_model = re.search(r"ref\('([^']+)'\)", str(guard["kwargs"].get("to", ""))).group(1)  # type: ignore[union-attr]
-    parent = next(e.entity_name for e in case.model.entities if f"stg_{e.entity_name}" == parent_model)
+    referenced = re.search(r"ref\('([^']+)'\)", str(guard["kwargs"].get("to", "")))
+    assert referenced, f"fixture sanity: {guard['id']} names its parent model: {guard['kwargs']}"
+    parent = next(e.entity_name for e in case.model.entities if f"stg_{e.entity_name}" == referenced.group(1))
     field = str(guard["kwargs"].get("field", "")).strip('"')
     orphan = _query(case.database, f'SELECT min(v) FROM generate_series(1, 1000000) v '
                     f'WHERE v NOT IN (SELECT "{field}" FROM public."{parent}" WHERE "{field}" IS NOT NULL)')[0][0]
@@ -400,7 +409,9 @@ def test_control_the_project_with_source_types_does_not_build(
     files = ExporterService(source_dialect=case.dialect).generate_dbt_project(case.model)
     assert "NUMBER" in "".join(v for k, v in files.items() if k.endswith(".sql")), \
         "fixture sanity: the source types appear in the staging models"
-    project = _write_project(tmp_path_factory.mktemp("dbt-hr-source-types"), files, case.database)
+    # Its own target schema, so a failed run cannot touch the views built above.
+    project = _write_project(tmp_path_factory.mktemp("dbt-hr-source-types"), files, case.database,
+                             schema="analytics_source_types")
     run = _dbt(project, "run")
     assert not run.success
     assert any(v == "error" for v in run.status.values()), run.output
